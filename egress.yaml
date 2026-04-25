@@ -1,0 +1,33 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Vaidix — LiveKit Egress Config (server-side recording)
+# ════════════════════════════════════════════════════════════════════════════
+# Records rooms to MP4 files in /output (mapped to E:/vaidix-data/recordings/raw)
+# Post-processing pipeline (BullMQ) picks up finished files for transcoding
+
+api_key: devkey
+api_secret: secret_change_me_in_week_0_day_5_32chars_min
+ws_url: ws://livekit:7880
+
+redis:
+  address: redis:6379
+
+# Local file output — BullMQ worker uploads to MinIO after recording finishes
+file_output:
+  local: true
+
+# Chrome inside container for rendering room layout
+chrome_key_file_path: ""
+
+# Log level
+log_level: info
+
+# Health check endpoint (used by docker healthcheck if enabled)
+health_port: 7889
+
+# Resource limits — prevent container OOM
+cpu_cost:
+  room_composite_cpu_cost: 3.5
+  audio_room_composite_cpu_cost: 0.5
+  track_composite_cpu_cost: 2.0
+  track_cpu_cost: 1.0
+  web_cpu_cost: 3.0

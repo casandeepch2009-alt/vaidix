@@ -1,0 +1,45 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Vaidix — LiveKit Server Config (dev)
+# ════════════════════════════════════════════════════════════════════════════
+# API key/secret must match .env.local LIVEKIT_API_KEY / LIVEKIT_API_SECRET
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  use_external_ip: false
+  # On production: set to true and configure STUN/TURN properly
+
+redis:
+  address: redis:6379
+
+keys:
+  # Keep in sync with .env.local — change both before going to production
+  devkey: secret_change_me_in_week_0_day_5_32chars_min
+
+logging:
+  level: info
+  pion_level: warn
+  json: false
+
+turn:
+  enabled: false  # dev mode — handled by external coturn container
+
+# Room defaults
+room:
+  auto_create: true
+  enable_remote_unmute: true
+  max_participants: 100
+  empty_timeout: 300       # seconds — auto-close empty rooms
+  departure_timeout: 20    # seconds after last person leaves
+
+# Webhooks — LiveKit signs payloads with api_key; Next.js verifies via WebhookReceiver
+# In dev, Docker-hosted LiveKit reaches host Next.js via host.docker.internal
+webhook:
+  api_key: devkey
+  urls:
+    - http://host.docker.internal:3000/api/classroom/webhooks/livekit

@@ -1,0 +1,105 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Vaidix — Local Development Docker Compose
+# ════════════════════════════════════════════════════════════════════════════
+# Starts: LiveKit SFU, LiveKit Egress (recording), Redis, coturn (NAT), MinIO
+# Run:   docker compose -f docker-compose.dev.yml up -d
+# Stop:  docker compose -f docker-compose.dev.yml down
+# Logs:  docker compose -f docker-compose.dev.yml logs -f [service-name]
+#
+# Data persisted to E:/vaidix-data/* (see .env.local VAIDIX_DATA_ROOT)
+# On Linux production: change E:/vaidix-data to /var/lib/vaidix-data
+# ════════════════════════════════════════════════════════════════════════════
+
+services:
+  # ─── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: vaidix-livekit
+    command: --config /etc/livekit.yaml
+    restart: unless-stopped
+    ports:
+      - "7880:7880"        # WebSocket signalling
+      - "7881:7881"        # TCP media fallback
+      - "7882:7882/udp"    # RTC UDP
+      - "50000-50100:50000-50100/udp"  # media port range
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+      - E:/vaidix-data/livekit-data:/data
+    depends_on:
+      - redis
+    networks:
+      - vaidix-net
+
+  # ─── LiveKit Egress (server-side recording → MP4) ────────────────────────
+  livekit-egress:
+    image: livekit/egress:v1.9
+    container_name: vaidix-livekit-egress
+    restart: unless-stopped
+    environment:
+      EGRESS_CONFIG_FILE: /etc/egress.yaml
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      - E:/vaidix-data/recordings/raw:/output
+    depends_on:
+      - livekit
+      - redis
+    networks:
+      - vaidix-net
+    cap_add:
+      - SYS_ADMIN           # required by Chrome headless inside container
+    security_opt:
+      - seccomp:unconfined
+
+  # ─── Redis (BullMQ queue + rate limiting + session cache) ────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: vaidix-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    volumes:
+      - E:/vaidix-data/redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - vaidix-net
+
+  # ─── coturn (STUN/TURN for WebRTC NAT traversal) ─────────────────────────
+  coturn:
+    image: coturn/coturn:latest
+    container_name: vaidix-coturn
+    restart: unless-stopped
+    network_mode: host    # required for WebRTC ICE candidate gathering
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+
+  # ─── MinIO (S3-compatible local object storage) ──────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: vaidix-minio
+    restart: unless-stopped
+    ports:
+      - "9000:9000"    # S3 API
+      - "9001:9001"    # Web console (http://localhost:9001)
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    volumes:
+      - E:/vaidix-data/minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      - vaidix-net
+
+networks:
+  vaidix-net:
+    driver: bridge
+    name: vaidix-net
