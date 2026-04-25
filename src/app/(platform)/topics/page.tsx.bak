@@ -1,0 +1,201 @@
+'use client'
+
+import { useMemo, useState } from 'react'
+import Link from 'next/link'
+import {
+  LayoutGrid,
+  Search,
+  ArrowRight,
+  Eye,
+  Flame,
+  Droplet,
+  Aperture,
+  Circle,
+  Baby,
+  Brain,
+  Scissors,
+  Ribbon,
+  Sparkles,
+  CircleDot,
+  Stethoscope,
+  EyeOff,
+  Dna,
+  AlertTriangle,
+  type LucideIcon,
+} from 'lucide-react'
+import { Card, CardContent } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Badge } from '@/components/ui/badge'
+import { TOPICS } from '@/lib/constants'
+import { PageTransition, StaggerItem, motion } from '@/lib/motion'
+import { cn } from '@/lib/utils'
+import casesData from '@/mock-data/cases.json'
+import pearlsData from '@/mock-data/pearls.json'
+import atlasData from '@/mock-data/signs-atlas.json'
+
+const ICON_MAP: Record<string, LucideIcon> = {
+  Eye, Flame, Droplet, Aperture, Circle, Baby, Brain, Scissors,
+  Ribbon, Sparkles, CircleDot, Stethoscope, EyeOff, Dna, AlertTriangle,
+}
+
+interface Counted {
+  cases: number
+  pearls: number
+  atlas: number
+}
+
+export default function TopicsIndexPage() {
+  const [query, setQuery] = useState('')
+
+  // Count resources per topic
+  const counts: Record<string, Counted> = useMemo(() => {
+    const out: Record<string, Counted> = {}
+    TOPICS.forEach((t) => (out[t.id] = { cases: 0, pearls: 0, atlas: 0 }))
+    ;(casesData as any[]).forEach((c) => {
+      const tid = c.topic ?? 'comprehensive'
+      if (out[tid]) out[tid].cases++
+    })
+    ;(pearlsData as any[]).forEach((p) => {
+      const tid = p.topic ?? 'uvea'
+      if (out[tid]) out[tid].pearls++
+    })
+    ;(atlasData as any[]).forEach((s) => {
+      const tid = s.topic ?? 'comprehensive'
+      if (out[tid]) out[tid].atlas++
+    })
+    return out
+  }, [])
+
+  // Filter
+  const visibleTopics = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    if (!q) return TOPICS
+    return TOPICS.filter(
+      (t) =>
+        t.label.toLowerCase().includes(q) ||
+        t.shortLabel.toLowerCase().includes(q) ||
+        t.description.toLowerCase().includes(q)
+    )
+  }, [query])
+
+  const totalCases = (casesData as any[]).length
+  const totalPearls = (pearlsData as any[]).length
+  const totalAtlas = (atlasData as any[]).length
+
+  return (
+    <PageTransition className="space-y-6">
+      {/* Header */}
+      <StaggerItem>
+        <div className="flex items-center gap-3">
+          <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10">
+            <LayoutGrid className="size-5 text-primary" />
+          </div>
+          <div className="flex-1">
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Topics</h1>
+            <p className="text-sm text-muted-foreground">
+              Choose a subspecialty to study cases, pearls, signs and simulators together
+            </p>
+          </div>
+          <div className="hidden sm:flex items-center gap-4 text-xs text-muted-foreground">
+            <div className="text-center"><p className="text-lg font-bold tabular-nums text-foreground">{totalCases}</p><p>cases</p></div>
+            <div className="text-center"><p className="text-lg font-bold tabular-nums text-foreground">{totalPearls}</p><p>pearls</p></div>
+            <div className="text-center"><p className="text-lg font-bold tabular-nums text-foreground">{totalAtlas}</p><p>signs</p></div>
+          </div>
+        </div>
+      </StaggerItem>
+
+      {/* Search */}
+      <StaggerItem>
+        <div className="relative max-w-md">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            placeholder="Search topics..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="pl-8"
+          />
+        </div>
+      </StaggerItem>
+
+      {/* Topic grid */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4">
+        {visibleTopics.map((topic, i) => {
+          const Icon = ICON_MAP[topic.icon] ?? Eye
+          const c = counts[topic.id]
+          const totalResources = c.cases + c.pearls + c.atlas
+          const isEmpty = totalResources === 0
+
+          return (
+            <Link key={topic.id} href={`/topics/${topic.id}`} className="group block">
+              <motion.div
+                initial={{ opacity: 0, y: 16 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: i * 0.03, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+                whileHover={{ y: -3 }}
+              >
+                <Card
+                  className={cn(
+                    'relative h-full overflow-hidden border-2 transition-all duration-200 hover:shadow-lg',
+                    topic.border,
+                    isEmpty && 'opacity-60'
+                  )}
+                >
+                  {/* Gradient accent in top-right */}
+                  <div className={cn('pointer-events-none absolute -right-8 -top-8 size-24 rounded-full opacity-20 blur-2xl', topic.bg)} />
+
+                  <CardContent className="relative flex h-full flex-col gap-3 pt-1">
+                    {/* Icon + emoji */}
+                    <div className="flex items-start justify-between">
+                      <div className={cn('flex size-11 items-center justify-center rounded-xl', topic.bg)}>
+                        <Icon className={cn('size-5', topic.color)} />
+                      </div>
+                      <ArrowRight className={cn('size-4 opacity-0 transition-all group-hover:opacity-100 group-hover:translate-x-0.5', topic.color)} />
+                    </div>
+
+                    {/* Title */}
+                    <div>
+                      <h3 className="text-sm font-bold leading-snug text-foreground">
+                        {topic.label}
+                      </h3>
+                      <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-muted-foreground">
+                        {topic.description}
+                      </p>
+                    </div>
+
+                    {/* Resource counts */}
+                    <div className="mt-auto flex items-center gap-2 pt-1">
+                      {c.cases > 0 && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {c.cases} case{c.cases !== 1 && 's'}
+                        </Badge>
+                      )}
+                      {c.pearls > 0 && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {c.pearls} pearl{c.pearls !== 1 && 's'}
+                        </Badge>
+                      )}
+                      {c.atlas > 0 && (
+                        <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+                          {c.atlas} sign{c.atlas !== 1 && 's'}
+                        </Badge>
+                      )}
+                      {isEmpty && (
+                        <span className="text-[10px] italic text-muted-foreground">Coming soon</span>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              </motion.div>
+            </Link>
+          )
+        })}
+      </div>
+
+      {visibleTopics.length === 0 && (
+        <div className="rounded-xl border border-dashed py-12 text-center">
+          <p className="text-sm text-muted-foreground">No topics match &ldquo;{query}&rdquo;</p>
+        </div>
+      )}
+    </PageTransition>
+  )
+}
