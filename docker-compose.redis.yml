@@ -29,7 +29,7 @@ services:
       - --appendonly
       - "yes"
       - --maxmemory
-      - "4gb"
+      - "1gb"
       - --maxmemory-policy
       - "allkeys-lru"
       - --requirepass
@@ -46,8 +46,8 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1"
-          memory: 4G
+          cpus: "0.5"
+          memory: 2G
 
 networks:
   vaidix-net:

@@ -90,7 +90,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "0.5"
+          cpus: "0.25"
           memory: 256M
 
   # ─── Next.js app (web + API) ─────────────────────────────────────────────
@@ -117,7 +117,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
+          cpus: "1.5"
           memory: 2G
 
   # ─── Background workers (BullMQ consumers) ───────────────────────────────
@@ -133,7 +133,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "2"
+          cpus: "1.5"
           memory: 2G
 
   # ─── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────
@@ -154,7 +154,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
+          cpus: "1.5"
           memory: 4G
 
   # ─── LiveKit Egress (server-side recording) ──────────────────────────────
@@ -178,7 +178,7 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "4"
+          cpus: "1.5"
           memory: 4G
 
   # ─── coturn (STUN/TURN) ──────────────────────────────────────────────────
