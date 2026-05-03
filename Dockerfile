@@ -1,17 +1,27 @@
 # HARDENING-PLAN.md item #1 — Vaidix Next.js production image.
 # Multi-stage build → small final image, non-root runtime user.
+#
+# Base: node:20-bookworm-slim (glibc).  Chosen over alpine because the
+# musl libc + Prisma engine combination causes "Bus error (core dumped)"
+# under memory pressure (seen on Docker Desktop / WSL2 builds). Slim is
+# ~80 MB larger but builds reliably.
 
 # ─── Stage 1: deps ──────────────────────────────────────────────────────────
-FROM node:20-alpine AS deps
-RUN apk add --no-cache libc6-compat openssl
+FROM node:20-bookworm-slim AS deps
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
-RUN npm ci --omit=dev=false && npx prisma generate
+RUN npm ci --prefer-offline --no-audit --no-fund \
+ && npx prisma generate
 
 # ─── Stage 2: build ─────────────────────────────────────────────────────────
-FROM node:20-alpine AS build
-RUN apk add --no-cache libc6-compat openssl
+FROM node:20-bookworm-slim AS build
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -41,8 +51,11 @@ ENV VAIDIX_DATA_ROOT=/var/lib/vaidix-data
 RUN npx prisma generate && npm run build
 
 # ─── Stage 3: runtime ───────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
-RUN apk add --no-cache libc6-compat openssl ffmpeg curl tini
+FROM node:20-bookworm-slim AS runtime
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      openssl ca-certificates ffmpeg curl tini \
+ && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
@@ -50,7 +63,8 @@ ENV PORT=3000
 
 # Non-root runtime user.
 RUN addgroup --system --gid 1001 vaidix \
- && adduser  --system --uid 1001 --ingroup vaidix vaidix
+ && adduser  --system --uid 1001 --ingroup vaidix \
+              --no-create-home --shell /usr/sbin/nologin vaidix
 
 # Copy built artefacts. Use Next standalone output if available, else full.
 COPY --from=build --chown=vaidix:vaidix /app/.next ./.next
@@ -65,5 +79,5 @@ USER vaidix
 EXPOSE 3000
 
 # tini reaps zombie ffmpeg children spawned by transcode/transcribe workers.
-ENTRYPOINT ["/sbin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--"]
 CMD ["npm", "start"]
