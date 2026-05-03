@@ -7,7 +7,7 @@
 //     egress_ended — drives the recording state machine and enqueues transcode.
 // Updates session + recording records without trusting any client state.
 
-import { webhookReceiver } from '@/lib/livekit';
+import { webhookReceiver, startSessionEgress } from '@/lib/livekit';
 import { db } from '@/lib/db';
 import { getQueue, QUEUES } from '@/lib/queue';
 import { SessionStatus, RecordingStatus } from '@prisma/client';
@@ -22,15 +22,38 @@ function roomToSessionId(roomName: string | undefined): string | null {
 }
 
 // LiveKit Egress event payload shape (subset used here).
+// IMPORTANT: `status` is the numeric `EgressStatus` enum from @livekit/protocol
+// at runtime (not a string!). The protobuf JSON decoder maps the string name
+// (e.g. "EGRESS_ABORTED") to the numeric enum value (5). Earlier versions of
+// this handler compared `status` to string literals and silently no-op'd —
+// recordings stayed in the RECORDING state forever after a failed egress.
+// Use `egressStatusName()` to normalize to the canonical string name.
 interface EgressEventPayload {
   egressInfo?: {
     egressId?: string;
     roomName?: string;
-    status?: string; // EGRESS_STARTING | EGRESS_ACTIVE | EGRESS_ENDING | EGRESS_COMPLETE | EGRESS_FAILED | EGRESS_ABORTED
+    status?: number | string;
     file?: { filename?: string; location?: string };
     fileResults?: Array<{ filename?: string; location?: string; size?: string | number; duration?: string | number }>;
     error?: string;
   };
+}
+
+// EgressStatus enum from livekit/protocol (proto3 numeric values).
+const EGRESS_STATUS_NAMES: Record<number, string> = {
+  0: 'EGRESS_STARTING',
+  1: 'EGRESS_ACTIVE',
+  2: 'EGRESS_ENDING',
+  3: 'EGRESS_COMPLETE',
+  4: 'EGRESS_FAILED',
+  5: 'EGRESS_ABORTED',
+  6: 'EGRESS_LIMIT_REACHED',
+};
+
+function egressStatusName(status: number | string | undefined): string {
+  if (typeof status === 'string') return status;
+  if (typeof status === 'number') return EGRESS_STATUS_NAMES[status] ?? '';
+  return '';
 }
 
 function pickEgressFile(info: NonNullable<EgressEventPayload['egressInfo']>): { key: string | null; sizeBytes: bigint | null; durationSec: number | null } {
@@ -47,6 +70,88 @@ function pickEgressFile(info: NonNullable<EgressEventPayload['egressInfo']>): { 
     ? null
     : Math.round(Number(durationRaw) / (typeof durationRaw === 'string' && durationRaw.length > 7 ? 1_000_000_000 : 1));
   return { key, sizeBytes, durationSec };
+}
+
+/**
+ * Start recording for `sessionId` iff:
+ *   1. The session has `recordingEnabled = true`
+ *   2. We have not already triggered an egress for it (idempotency)
+ *
+ * Does NOT throw. All failure modes are audited and the function returns
+ * normally — webhook delivery must succeed even if recording cannot start.
+ */
+async function maybeStartRecording(sessionId: string): Promise<void> {
+  const session = await db.teachingSession.findUnique({
+    where: { id: sessionId },
+    select: { id: true, recordingEnabled: true, deletedAt: true },
+  });
+  if (!session || session.deletedAt) return;
+  if (!session.recordingEnabled) return;
+
+  // Idempotency: skip only when an egress is *currently in flight*. Earlier
+  // versions skipped on any pre-existing Recording row, which meant a session
+  // that had failed once (e.g. EGRESS_ABORTED — no media) could never be
+  // re-recorded on a re-join. Now we only short-circuit when the prior egress
+  // is in an active state; failure / cancellation states are explicitly
+  // retryable so a host can re-enter the room and try again.
+  const ACTIVE_STATES = new Set<RecordingStatus>([
+    RecordingStatus.RECORDING,
+    RecordingStatus.RECORDING_PARTIAL,
+    RecordingStatus.TRANSCODING,
+    RecordingStatus.TRANSCRIBING,
+    RecordingStatus.AI_PROCESSING,
+    RecordingStatus.READY,
+  ]);
+  const existing = await db.recording.findUnique({
+    where: { sessionId },
+    select: { id: true, egressJobId: true, status: true },
+  });
+  if (existing && existing.egressJobId && ACTIVE_STATES.has(existing.status)) return;
+
+  try {
+    const { egressId, filepath } = await startSessionEgress(sessionId);
+    // Pre-seed the Recording row so it's discoverable even before the
+    // egress_started webhook reaches us. On retry (previous attempt was
+    // RECORDING_FAILED / CANCELLED) we reset all failure metadata so the UI
+    // doesn't keep showing the stale "No media captured" banner.
+    await db.recording.upsert({
+      where: { sessionId },
+      create: {
+        sessionId,
+        status: RecordingStatus.RECORDING,
+        pipelineStage: RecordingStatus.RECORDING,
+        egressJobId: egressId,
+      },
+      update: {
+        status: RecordingStatus.RECORDING,
+        pipelineStage: RecordingStatus.RECORDING,
+        egressJobId: egressId,
+        failureReason: null,
+        rawS3Key: null,
+        hlsPath: null,
+        durationSec: null,
+        retryCount: { increment: 1 },
+      },
+    });
+    await audit({
+      eventType: AUDIT_EVENTS.RECORDING_EGRESS_STARTED,
+      entityType: 'TeachingSession',
+      entityId: sessionId,
+      summary: 'Recording egress requested',
+      details: { sessionId, egressId, filepath },
+    });
+  } catch (err) {
+    // Don't fail the webhook: live class continues without recording.
+    console.error('[livekit-webhook] failed to start egress for session', sessionId, err);
+    await audit({
+      eventType: AUDIT_EVENTS.RECORDING_EGRESS_FAILED,
+      entityType: 'TeachingSession',
+      entityId: sessionId,
+      summary: 'Failed to start recording egress',
+      details: { sessionId, error: (err as Error).message },
+      success: false,
+    });
+  }
 }
 
 export async function POST(req: Request) {
@@ -67,7 +172,7 @@ export async function POST(req: Request) {
     const sessionId = roomToSessionId(egressInfo.roomName);
     if (!sessionId) return new Response('OK (egress no-op)', { status: 200 });
 
-    const status = egressInfo.status ?? '';
+    const status = egressStatusName(egressInfo.status);
     try {
       // Egress started — ensure a Recording row exists.
       if (event.event === 'egress_started' || status === 'EGRESS_ACTIVE') {
@@ -184,6 +289,14 @@ export async function POST(req: Request) {
             liveKitRoomSid: event.room?.sid ?? null,
           },
         });
+
+        // ─── Kick off recording if the session opted in. ───────────────────
+        // Idempotent: room_started can fire on reconnects/migrations, but a
+        // Recording row with a non-null egressJobId means we've already asked
+        // LiveKit to record — don't double-start. A failure to start egress
+        // is logged + audited but never bubbles up: the live session must
+        // continue even if recording is unavailable.
+        await maybeStartRecording(sessionId);
         break;
       }
       case 'room_finished': {
@@ -204,10 +317,32 @@ export async function POST(req: Request) {
       case 'participant_joined': {
         const userId = event.participant?.identity;
         if (!userId) break;
-        await db.sessionParticipant.updateMany({
-          where: { sessionId, userId, leftAt: null },
-          data: {
+        // Egress recorder bot joins as a participant too — its identity is the
+        // egressId (EG_*). Don't track it as a real attendee.
+        if (userId.startsWith('EG_')) break;
+        // Resolve the participant's role at join time so SessionParticipant
+        // captures it (HOST / FACULTY / RESIDENT / etc.). Falls back to a
+        // generic 'PARTICIPANT' if the user record has been deleted.
+        const u = await db.user.findUnique({
+          where: { id: userId },
+          select: { role: true },
+        });
+        const roleStr = u?.role ?? 'PARTICIPANT';
+        // Upsert so we record joins even if there was no pre-created row
+        // (e.g. an open-to-all session where attendance wasn't pre-seeded).
+        // The unique constraint on (sessionId, userId) makes this idempotent.
+        await db.sessionParticipant.upsert({
+          where: { sessionId_userId: { sessionId, userId } },
+          create: {
+            sessionId,
+            userId,
+            role: roleStr,
             joinedAt: new Date(),
+            livekitIdentity: userId,
+          },
+          update: {
+            joinedAt: new Date(),
+            leftAt: null, // re-join: clear the old leave timestamp
             livekitIdentity: userId,
           },
         });

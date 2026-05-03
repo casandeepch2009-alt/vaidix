@@ -21,6 +21,7 @@ export async function GET(req: Request) {
     const events = await listCalendarEvents(gate.user.id, gate.user.role, from, to);
     return jsonOk({ events });
   } catch (err) {
+    console.error('[GET /api/calendar/events] failed:', err);
     return handleUnexpected(err);
   }
 }

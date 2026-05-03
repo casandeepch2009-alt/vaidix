@@ -12,10 +12,11 @@ import {
   CheckCircle2,
   Clock,
   Ban,
+  Pencil,
 } from 'lucide-react';
 import { motion } from 'framer-motion';
 import type { Role } from '@prisma/client';
-import { InviteModal } from './_components/invite-modal';
+import { InviteModal, type InviteModalEditData } from './_components/invite-modal';
 import { InvitationDrawer } from './_components/invitation-drawer';
 import { ConfirmDialog } from './_components/confirm-dialog';
 
@@ -62,6 +63,8 @@ export default function InvitationsPage() {
   const [roleFilter, setRoleFilter] = useState<Role | ''>('');
 
   const [inviteOpen, setInviteOpen] = useState(false);
+  const [editing, setEditing] = useState<InviteModalEditData | null>(null);
+  const [editLoadingId, setEditLoadingId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<{
     kind: 'revoke' | 'delete';
@@ -110,6 +113,52 @@ export default function InvitationsPage() {
       return () => clearTimeout(t);
     }
   }, [toast]);
+
+  // Auto-refresh while pending invitations exist so admins see "Registered"
+  // appear without manual reload once the invitee completes acceptance.
+  useEffect(() => {
+    if (summary.pending === 0) return;
+    const interval = setInterval(() => {
+      void fetchList();
+    }, 15_000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summary.pending, statusFilter, roleFilter, search]);
+
+  async function openEdit(id: string) {
+    setEditLoadingId(id);
+    try {
+      const res = await fetch(`/api/invitations/${id}`);
+      const body = await res.json();
+      if (!body.ok) {
+        setToast({ kind: 'error', msg: body.error?.message ?? 'Failed to load invitation' });
+        return;
+      }
+      const inv = body.data.invitation;
+      if (inv.status !== 'PENDING') {
+        setToast({ kind: 'error', msg: 'Only pending invitations can be edited' });
+        return;
+      }
+      setEditing({
+        id: inv.id,
+        fullName: inv.fullName,
+        email: inv.email,
+        mobile: inv.mobile,
+        mciRegNumber: inv.mciRegNumber,
+        role: inv.role,
+        subspecialty: inv.subspecialty,
+        department: inv.department,
+        yearOfResidency: inv.yearOfResidency,
+        moduleOverrides: inv.moduleOverrides ?? null,
+        expiresAt: inv.expiresAt,
+      });
+      setSelectedId(null);
+    } catch {
+      setToast({ kind: 'error', msg: 'Network error loading invitation' });
+    } finally {
+      setEditLoadingId(null);
+    }
+  }
 
   const filteredRows = useMemo(() => rows, [rows]);
 
@@ -323,6 +372,14 @@ export default function InvitationsPage() {
                       <td className="px-4 py-3 text-slate-500">{relativeTime(row.createdAt)}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-1">
+                          {row.status === 'PENDING' && (
+                            <ActionBtn
+                              onClick={() => openEdit(row.id)}
+                              disabled={actionRunning || editLoadingId === row.id}
+                              title="Edit"
+                              icon={Pencil}
+                            />
+                          )}
                           {canResend && (
                             <ActionBtn
                               onClick={() => handleResend(row.id)}
@@ -379,10 +436,22 @@ export default function InvitationsPage() {
         }}
       />
 
+      <InviteModal
+        open={!!editing}
+        edit={editing ?? undefined}
+        onClose={() => setEditing(null)}
+        onCreated={() => {
+          setEditing(null);
+          setToast({ kind: 'success', msg: 'Invitation updated' });
+          fetchList();
+        }}
+      />
+
       <InvitationDrawer
         invitationId={selectedId}
         onClose={() => setSelectedId(null)}
         onCopyLink={handleCopyLink}
+        onEdit={openEdit}
         onResend={handleResend}
         onRevoke={(id, email) => setPendingAction({ kind: 'revoke', id, email })}
         onDelete={(id, email) => setPendingAction({ kind: 'delete', id, email })}

@@ -32,6 +32,11 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+# …but commit the templates so other devs / the AWS server know what to fill in
+!.env.example
+!.env.production.example
+# encrypted sealed env is safe to commit — only the age key decrypts it
+!vaidix.env.enc
 
 # vercel
 .vercel
@@ -39,3 +44,27 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# vaidix-specific
+dump.rdb
+*.rdb
+appendonly.aof
+.docker-build.log
+*.bak
+
+# tests / e2e / smoke (excluded from the AWS-deploy repo)
+/tests/
+/test-results/
+playwright-report/
+playwright.config.ts
+scripts/test-*.ts
+scripts/test-*.sh
+scripts/e2e-*.ts
+scripts/e2e-*.sh
+scripts/cleanup-test-users.ts
+src/lib/smoke-test.ts
+
+# editor / OS
+.idea/
+.vscode/
+Thumbs.db

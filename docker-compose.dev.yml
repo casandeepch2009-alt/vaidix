@@ -12,8 +12,16 @@
 
 services:
   # ─── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────
+  # NOTE for local dev on Docker Desktop (Windows + WSL2): WebRTC media via
+  # this container is unreliable because WSL2 is a separate network namespace
+  # from Windows and Docker's UDP port-forwarder mangles ICE candidates.
+  # On the production Linux server this works fine. For LOCAL dev, the
+  # recommended path is to run the native livekit-server binary on Windows
+  # (see scripts/start-livekit-native.md) and stop this container.
   livekit:
-    image: livekit/livekit-server:v1.8
+    # v1.9+ added the /rtc/v1 signal path used by livekit-client >= 2.x.
+    # v1.8.x rejects the upgraded client with "v1 RTC path not found".
+    image: livekit/livekit-server:v1.10
     container_name: vaidix-livekit
     command: --config /etc/livekit.yaml
     restart: unless-stopped

@@ -1,168 +1,91 @@
-'use client'
-
-import { useMemo } from 'react'
-import { Map } from 'lucide-react'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import {
-  Tooltip,
-  TooltipTrigger,
-  TooltipContent,
-  TooltipProvider,
-} from '@/components/ui/tooltip'
-import { cn } from '@/lib/utils'
+import { redirect } from 'next/navigation'
+import { Map, FlaskConical, ArrowRight } from 'lucide-react'
+import Link from 'next/link'
+import { Role } from '@prisma/client'
+import { auth } from '@/auth'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { EPA_LIST, ENTRUSTMENT_LEVELS } from '@/lib/constants'
-import type { User } from '@/lib/types'
-import usersData from '@/mock-data/users.json'
-import { PageTransition, StaggerItem, motion, staggerContainer, staggerItem } from '@/lib/motion'
+import { PageTransition, StaggerItem } from '@/lib/motion'
 
-// ---------------------------------------------------------------------------
-// Mock entrustment levels (resident x EPA)
-// Senior residents / fellows have higher levels, juniors lower
-// ---------------------------------------------------------------------------
-
-const entrustmentData: Record<string, number[]> = {
-  // PGY-1
-  'user-006': [2, 2, 1, 1, 2, 1, 2, 1, 1, 1, 1, 2, 2],
-  'user-007': [2, 1, 2, 1, 2, 2, 1, 1, 1, 1, 1, 1, 2],
-  'user-008': [2, 2, 2, 1, 2, 1, 2, 1, 1, 1, 1, 2, 2],
-  // PGY-2
-  'user-009': [3, 3, 3, 2, 3, 2, 3, 2, 2, 2, 2, 3, 3],
-  'user-010': [3, 3, 2, 3, 3, 3, 3, 2, 2, 1, 2, 3, 3],
-  'user-011': [3, 2, 3, 2, 3, 2, 3, 2, 2, 2, 2, 2, 3],
-  // PGY-3
-  'user-012': [4, 4, 4, 3, 4, 3, 4, 3, 3, 3, 3, 4, 4],
-  'user-013': [4, 3, 4, 3, 4, 4, 4, 3, 3, 2, 3, 3, 4],
-  // Fellows
-  'user-014': [5, 4, 4, 4, 4, 4, 5, 4, 4, 3, 4, 4, 5],
-  'user-015': [4, 4, 5, 4, 5, 4, 4, 3, 3, 3, 4, 4, 4],
-}
-
-function getLevelColor(level: number): string {
-  const entry = ENTRUSTMENT_LEVELS.find((e) => e.level === level)
-  return entry?.color ?? '#6b7280'
-}
-
-function getLevelBgClass(level: number): string {
-  switch (level) {
-    case 1: return 'bg-red-500 text-white'
-    case 2: return 'bg-orange-500 text-white'
-    case 3: return 'bg-amber-400 text-amber-950'
-    case 4: return 'bg-emerald-400 text-emerald-950'
-    case 5: return 'bg-emerald-600 text-white'
-    default: return 'bg-muted text-muted-foreground'
+export default async function CompetencyMapPage() {
+  const session = await auth()
+  if (!session?.user) redirect('/login')
+  if (session.user.role !== Role.PROGRAM_DIRECTOR && session.user.role !== Role.ADMIN) {
+    redirect('/dashboard')
   }
-}
-
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
-
-export default function CompetencyMapPage() {
-  const residents = useMemo(() => {
-    return (usersData as unknown as User[]).filter((u) => u.role === 'resident')
-  }, [])
 
   return (
-    <PageTransition className="mx-auto max-w-7xl space-y-6">
-      {/* Header */}
+    <PageTransition className="mx-auto max-w-6xl space-y-6">
       <StaggerItem>
-        <div>
-          <div className="flex items-center gap-2">
-            <Map className="size-6 text-primary" />
-            <h1 className="text-2xl font-bold tracking-tight">Competency Map</h1>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
-            All Residents x All EPAs
-          </p>
+        <div className="flex items-center gap-2">
+          <Map className="size-6 text-primary" />
+          <h1 className="text-2xl font-bold tracking-tight">Competency Map</h1>
         </div>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Resident × EPA entrustment heatmap. Populates from real DOPS / Mini-CEX / EPA records.
+        </p>
       </StaggerItem>
 
-      {/* Legend */}
       <StaggerItem>
-        <div className="flex flex-wrap items-center gap-3">
-          <span className="text-xs font-medium text-muted-foreground uppercase">Entrustment:</span>
-          {ENTRUSTMENT_LEVELS.map((lvl) => (
-            <div key={lvl.level} className="flex items-center gap-1.5">
-              <div
-                className={cn('flex size-5 items-center justify-center rounded text-[10px] font-bold', getLevelBgClass(lvl.level))}
+        <Card className="border-dashed">
+          <CardContent className="flex items-start gap-3 pt-6">
+            <FlaskConical className="mt-0.5 size-5 shrink-0 text-amber-600" />
+            <div className="text-sm">
+              <p className="font-medium">Scheduled for Week 8 of the build plan.</p>
+              <p className="mt-1 text-muted-foreground">
+                The competency heatmap reads from the <span className="font-medium">EpaRecord</span> + <span className="font-medium">DopsAssessment</span> + <span className="font-medium">MiniCexAssessment</span> tables. Those tables exist in the schema (per W0 lock) but no records have been written yet — DOPS / Mini-CEX assessment forms ship in W8. This page will populate automatically once the first assessments land.
+              </p>
+              <Link
+                href="/calendar/new"
+                className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
               >
-                {lvl.level}
-              </div>
-              <span className="text-xs text-muted-foreground">{lvl.label}</span>
+                Schedule an assessment session in the meantime
+                <ArrowRight className="size-3" />
+              </Link>
             </div>
-          ))}
-        </div>
-      </StaggerItem>
-
-      {/* Heatmap */}
-      <StaggerItem>
-        <Card>
-          <CardContent className="overflow-x-auto pt-1">
-            <TooltipProvider>
-              <table className="w-full min-w-[700px]">
-                <thead>
-                  <tr>
-                    <th className="sticky left-0 z-10 bg-card pb-2 pr-3 text-left text-xs font-medium text-muted-foreground min-w-[180px]">
-                      Resident
-                    </th>
-                    {EPA_LIST.map((epa) => (
-                      <th key={epa.id} className="pb-2 px-1 text-center">
-                        <Tooltip>
-                          <TooltipTrigger className="text-xs font-medium text-muted-foreground cursor-help">
-                            EPA-{epa.id}
-                          </TooltipTrigger>
-                          <TooltipContent side="top">
-                            {epa.title}
-                          </TooltipContent>
-                        </Tooltip>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <motion.tbody
-                  initial="hidden"
-                  animate="visible"
-                  variants={staggerContainer}
-                >
-                  {residents.map((r) => {
-                    const levels = entrustmentData[r.id] ?? []
-                    return (
-                      <motion.tr key={r.id} variants={staggerItem} className="border-b last:border-0">
-                        <td className="sticky left-0 z-10 bg-card py-2 pr-3 text-sm font-medium whitespace-nowrap">
-                          {r.name}
-                          <span className="ml-2 text-[10px] text-muted-foreground">
-                            {r.yearOfTraining}
-                          </span>
-                        </td>
-                        {EPA_LIST.map((epa, idx) => {
-                          const level = levels[idx] ?? 0
-                          return (
-                            <td key={epa.id} className="py-2 px-1 text-center">
-                              <Tooltip>
-                                <TooltipTrigger
-                                  className={cn(
-                                    'mx-auto flex size-7 items-center justify-center rounded text-xs font-bold transition-transform hover:scale-110',
-                                    getLevelBgClass(level)
-                                  )}
-                                >
-                                  {level}
-                                </TooltipTrigger>
-                                <TooltipContent side="top">
-                                  {ENTRUSTMENT_LEVELS.find((e) => e.level === level)?.label ?? 'N/A'}
-                                </TooltipContent>
-                              </Tooltip>
-                            </td>
-                          )
-                        })}
-                      </motion.tr>
-                    )
-                  })}
-                </motion.tbody>
-              </table>
-            </TooltipProvider>
           </CardContent>
         </Card>
+      </StaggerItem>
+
+      <StaggerItem>
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">EPAs ({EPA_LIST.length})</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-1 text-sm">
+                {EPA_LIST.map((e) => (
+                  <li key={e.id} className="flex items-start gap-2">
+                    <span className="mt-0.5 size-1.5 shrink-0 rounded-full bg-primary/40" />
+                    <span><span className="font-medium">EPA {e.id}.</span> {e.title}</span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Entrustment scale</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm">
+                {ENTRUSTMENT_LEVELS.map((l) => (
+                  <li key={l.level} className="flex items-center gap-3">
+                    <span
+                      className="flex size-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold text-white"
+                      style={{ backgroundColor: l.color }}
+                    >
+                      {l.level}
+                    </span>
+                    <span>{l.label}</span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        </div>
       </StaggerItem>
     </PageTransition>
   )

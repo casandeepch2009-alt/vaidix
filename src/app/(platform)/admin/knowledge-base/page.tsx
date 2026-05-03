@@ -1,6 +1,6 @@
 'use client'
 
-import { BookOpen, Plus, FileText, Calendar } from 'lucide-react'
+import { BookOpen, Plus, FileText, Calendar, FlaskConical } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -116,12 +116,39 @@ export default function KnowledgeBasePage() {
               <BookOpen className="size-6 text-primary" />
               <h1 className="text-2xl font-bold tracking-tight">Knowledge Base</h1>
             </div>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Curated guidelines, protocols, and references. RAG ingestion lands in Week 13.
+            </p>
           </div>
-          <Button>
+          <Button disabled title="Article authoring ships in Week 13">
             <Plus className="size-4 mr-1.5" />
             Add Article
           </Button>
         </div>
+      </StaggerItem>
+
+      {/* W13 build-plan banner — preview list below is illustrative until
+          /api/admin/ingestion/jobs + /api/rag/query land per VAIDIX-BUILD-PLAN-NOW.md §10g. */}
+      <StaggerItem>
+        <Card className="border-dashed">
+          <CardContent className="flex items-start gap-3 pt-6">
+            <FlaskConical className="mt-0.5 size-5 shrink-0 text-amber-600" />
+            <div className="text-sm">
+              <p className="font-medium">Scheduled for Week 13 of the build plan.</p>
+              <p className="mt-1 text-muted-foreground">
+                The Knowledge Base is the front-end for the RAG ingestion pipeline:{' '}
+                <span className="font-medium">RagCollection</span> +{' '}
+                <span className="font-medium">RagDocument</span> +{' '}
+                <span className="font-medium">RagChunkMeta</span> tables exist in the schema (W0
+                lock) but no documents have been ingested yet — content ingestion (PubMed PMC,
+                journal scraping), BGE-M3 embeddings into Qdrant, and the{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">/api/rag/query</code>{' '}
+                retrieval endpoint all ship in W13. The articles listed below are illustrative
+                placeholders, not real records.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </StaggerItem>
 
       {/* Articles grid */}

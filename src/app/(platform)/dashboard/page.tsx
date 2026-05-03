@@ -32,8 +32,10 @@ import {
   BarChart3,
   GraduationCap,
   AlertTriangle,
+  Lightbulb,
   Milestone,
   Shield,
+  Video,
   HardDrive,
   Activity,
   Wifi,
@@ -225,7 +227,10 @@ function ResidentDashboard() {
     <PageTransition className="space-y-6">
       {/* Welcome banner — clean premium card, no big green bar */}
       <StaggerItem>
-        <WelcomeBanner firstName={firstName} subtitle={`${currentUser.yearOfTraining ?? 'Resident'} · ${currentUser.department ?? 'Ophthalmology'}`} />
+        <WelcomeBanner
+          firstName={firstName}
+          subtitle={`${currentUser.yearOfTraining ?? 'Resident'} · ${currentUser.department ?? 'Ophthalmology'}`}
+        />
       </StaggerItem>
 
       {/* Stats row */}
@@ -604,10 +609,14 @@ function FacultyDashboard() {
     { id: '3', learner: 'Dr. Deepika Nair', caseTitle: 'Pediatric Amblyopia', summary: 'Excellent parent communication. Strong diagnostic accuracy with appropriate investigations.', date: 'Mar 30', headScore: 82, heartScore: 90 },
   ]
 
+  const facultySubtitle = currentUser.department
+    ? `${currentUser.designation} · ${currentUser.department}`
+    : currentUser.designation
+
   return (
     <PageTransition className="space-y-6">
       <StaggerItem>
-        <GreetingBanner name={currentUser.name.split(' ').slice(1).join(' ')} subtitle={`${currentUser.designation} - ${currentUser.department}`} />
+        <GreetingBanner name={currentUser.name.split(' ').slice(1).join(' ')} subtitle={facultySubtitle} />
       </StaggerItem>
 
       <StaggerItem>
@@ -775,9 +784,13 @@ function ProgramDirectorDashboard() {
 
   const statusBadge = { on_track: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', attention: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' }
 
+  const pdSubtitle = currentUser.department
+    ? `${currentUser.designation} · ${currentUser.department}`
+    : currentUser.designation
+
   return (
     <PageTransition className="space-y-6">
-      <StaggerItem><GreetingBanner name={currentUser.name.split(' ').slice(1).join(' ')} subtitle={`${currentUser.designation} - ${currentUser.department}`} /></StaggerItem>
+      <StaggerItem><GreetingBanner name={currentUser.name.split(' ').slice(1).join(' ')} subtitle={pdSubtitle} /></StaggerItem>
 
       <StaggerItem>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -913,9 +926,13 @@ function AdminDashboard() {
     { id: '5', action: 'Role updated', details: 'Dr. Jalali promoted to Program Director', time: '1 day ago', icon: Shield },
   ]
 
+  const adminSubtitle = currentUser.department
+    ? `${currentUser.designation} · ${currentUser.department}`
+    : currentUser.designation
+
   return (
     <PageTransition className="space-y-6">
-      <StaggerItem><GreetingBanner name={currentUser.name} subtitle={`${currentUser.designation} - ${currentUser.department}`} /></StaggerItem>
+      <StaggerItem><GreetingBanner name={currentUser.name} subtitle={adminSubtitle} /></StaggerItem>
 
       <StaggerItem>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
@@ -992,17 +1009,83 @@ function AdminDashboard() {
 }
 
 // ===========================================================================
+// EXTERNAL LEARNER DASHBOARD
+// Slim view for invited guests (visiting fellows, alumni, conference
+// attendees). No DOPS / EPA / cohort-analytics widgets — they don't have
+// records on those tables. Surfaces sessions, cases, pearls, atlas.
+// ===========================================================================
+
+function ExternalLearnerDashboard() {
+  const { currentUser } = useRole()
+  const firstName = currentUser.name.replace(/^Dr\.\s+/, '').split(' ')[0]
+  const subtitle = currentUser.department ?? 'Invited learner · LVPEI'
+
+  const quickLinks: Array<{
+    title: string
+    description: string
+    href: string
+    icon: React.ElementType
+    accent: string
+  }> = [
+    { title: 'Browse cases',    description: 'Read clinical cases and dialogues',  href: '/cases',     icon: BookOpen,  accent: 'bg-teal-500/10 text-teal-600' },
+    { title: 'Pearls library',  description: 'Faculty-curated clinical wisdom',    href: '/pearls',    icon: Lightbulb, accent: 'bg-amber-500/10 text-amber-600' },
+    { title: 'Signs atlas',     description: 'Ophthalmology image atlas',          href: '/atlas',     icon: Eye,       accent: 'bg-violet-500/10 text-violet-600' },
+    { title: 'Live sessions',   description: 'Upcoming grand rounds & lectures',   href: '/classroom', icon: Video,    accent: 'bg-rose-500/10 text-rose-600' },
+  ]
+
+  return (
+    <PageTransition className="space-y-6">
+      <StaggerItem>
+        <WelcomeBanner firstName={firstName} subtitle={subtitle} />
+      </StaggerItem>
+
+      <StaggerItem>
+        <div className="grid gap-4 md:grid-cols-2">
+          {quickLinks.map((q) => {
+            const Icon = q.icon
+            return (
+              <HoverCard key={q.href}>
+                <Link
+                  href={q.href}
+                  className="group flex items-center gap-4 rounded-2xl border border-border/60 bg-card/80 p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-border hover:shadow-md"
+                >
+                  <span className={cn('flex size-12 shrink-0 items-center justify-center rounded-xl', q.accent)}>
+                    <Icon className="size-5" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-foreground">{q.title}</p>
+                    <p className="truncate text-xs text-muted-foreground">{q.description}</p>
+                  </div>
+                  <ChevronRight className="size-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
+                </Link>
+              </HoverCard>
+            )
+          })}
+        </div>
+      </StaggerItem>
+    </PageTransition>
+  )
+}
+
+// ===========================================================================
 // MAIN
 // ===========================================================================
 
 export default function DashboardPage() {
   const { currentRole } = useRole()
 
+  // Exhaustive switch over UserRole — the `never` fallthrough makes TS error
+  // at build time if a new role is added to the union without a branch here.
   switch (currentRole) {
-    case 'resident': return <ResidentDashboard />
-    case 'faculty': return <FacultyDashboard />
+    case 'resident':         return <ResidentDashboard />
+    case 'faculty':          return <FacultyDashboard />
     case 'program_director': return <ProgramDirectorDashboard />
-    case 'admin': return <AdminDashboard />
-    default: return <ResidentDashboard />
+    case 'admin':            return <AdminDashboard />
+    case 'external_learner': return <ExternalLearnerDashboard />
+    default: {
+      const _exhaustive: never = currentRole
+      void _exhaustive
+      return <ResidentDashboard />
+    }
   }
 }

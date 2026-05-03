@@ -6,7 +6,12 @@
 
 api_key: devkey
 api_secret: secret_change_me_in_week_0_day_5_32chars_min
-ws_url: ws://livekit:7880
+# Local-dev: use the host LAN IP so the egress Chrome bot connects to the
+# same address LiveKit advertises in ICE candidates (node_ip in livekit.yaml).
+# Mismatched URLs (service-name here vs LAN IP in node_ip) caused the bot's
+# WebSocket to time out with "page load error: websocket url timeout reached".
+# On production: replace with your public TLS-fronted URL (wss://lms.example.com).
+ws_url: ws://192.168.1.7:7880
 
 redis:
   address: redis:6379

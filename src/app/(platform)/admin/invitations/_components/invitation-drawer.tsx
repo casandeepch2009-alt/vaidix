@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { X, Copy, RefreshCw, Ban, Trash2, ExternalLink, Check } from 'lucide-react';
+import { X, Copy, RefreshCw, Ban, Trash2, ExternalLink, Check, Pencil } from 'lucide-react';
 
 interface InvitationDetail {
   id: string;
@@ -38,6 +38,7 @@ export function InvitationDrawer({
   invitationId,
   onClose,
   onCopyLink,
+  onEdit,
   onResend,
   onRevoke,
   onDelete,
@@ -45,6 +46,7 @@ export function InvitationDrawer({
   invitationId: string | null;
   onClose: () => void;
   onCopyLink: (token: string) => void;
+  onEdit?: (id: string) => void;
   onResend: (id: string) => Promise<void> | void;
   onRevoke: (id: string, email: string) => void;
   onDelete: (id: string, email: string) => void;
@@ -175,7 +177,15 @@ export function InvitationDrawer({
                 </div>
 
                 {/* Actions */}
-                <footer className="flex items-center gap-2 border-t border-slate-100 px-6 py-4">
+                <footer className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-6 py-4">
+                  {data.invitation.status === 'PENDING' && onEdit && (
+                    <button
+                      onClick={() => onEdit(data.invitation.id)}
+                      className="flex items-center gap-1.5 rounded-lg border border-primary/30 bg-primary/5 px-3 py-2 text-sm font-semibold text-primary hover:bg-primary/10"
+                    >
+                      <Pencil className="size-4" /> Edit
+                    </button>
+                  )}
                   {(data.invitation.status === 'PENDING' || data.invitation.status === 'EXPIRED') && (
                     <button
                       onClick={() => onResend(data.invitation.id)}
@@ -212,10 +222,10 @@ export function InvitationDrawer({
 
 function StatusPill({ status }: { status: string }) {
   const cfg: Record<string, { label: string; bg: string; text: string }> = {
-    PENDING: { label: 'Invited — waiting acceptance', bg: 'bg-amber-100', text: 'text-amber-800' },
-    ACCEPTED: { label: 'Registered & active', bg: 'bg-green-100', text: 'text-green-800' },
-    EXPIRED: { label: 'Expired', bg: 'bg-slate-200', text: 'text-slate-700' },
-    REVOKED: { label: 'Revoked', bg: 'bg-red-100', text: 'text-red-800' },
+    PENDING:  { label: 'Invited — waiting acceptance', bg: 'bg-amber-100', text: 'text-amber-800' },
+    ACCEPTED: { label: 'Registered & active',          bg: 'bg-green-100', text: 'text-green-800' },
+    EXPIRED:  { label: 'Expired',                       bg: 'bg-slate-200', text: 'text-slate-700' },
+    REVOKED:  { label: 'Revoked',                       bg: 'bg-red-100',   text: 'text-red-800' },
   };
   const c = cfg[status] ?? cfg.PENDING;
   return (
@@ -271,13 +281,14 @@ function MagicLinkRow({ token, onCopy }: { token: string; onCopy: (token: string
 
 function prettyEventType(t: string): string {
   const map: Record<string, string> = {
-    'invitation.created': 'Invitation created',
-    'invitation.sent': 'Email delivered',
-    'invitation.resent': 'Invitation re-sent',
-    'invitation.revoked': 'Revoked',
-    'invitation.deleted': 'Deleted',
+    'invitation.created':  'Invitation created',
+    'invitation.sent':     'Email delivered',
+    'invitation.resent':   'Invitation re-sent',
+    'invitation.updated':  'Invitation edited',
+    'invitation.revoked':  'Revoked',
+    'invitation.deleted':  'Deleted',
     'invitation.accepted': 'Accepted',
-    'invitation.expired': 'Expired',
+    'invitation.expired':  'Expired',
   };
   return map[t] ?? t;
 }

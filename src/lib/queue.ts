@@ -18,9 +18,40 @@ export const QUEUES = {
   SAFETY: 'safety-escalation',
   WEBHOOK: 'webhook-delivery',
   REMINDER: 'session-reminder',
+  PRE_QUESTION_CLUSTER: 'pre-question-cluster',
+  PHI_SCAN: 'phi-scan',
+  // W6.8 — Promo teaser video render (own queue so no co-tenant skipping)
+  PROMO: 'promo-pipeline',
+  // HARDENING-PLAN item #14
+  AUDIT_WRITE: 'audit-write',
+  // HARDENING-PLAN item #16
+  RETENTION: 'retention',
+  // HARDENING-PLAN item #17 — DSR / DPDPA
+  DSR_EXPORT: 'dsr-export',
+  ERASURE: 'erasure',
 } as const;
 
 export type QueueName = typeof QUEUES[keyof typeof QUEUES];
+
+// HARDENING-PLAN item #8 — DLQ queues for jobs that must not silently drop.
+// Use `dlqOf(QUEUES.X)` to get the dlq queue for kind X. The worker for X
+// moves its failed jobs into the DLQ via the `failed` event handler.
+export function dlqOf(name: QueueName): string {
+  return `${name}-dlq`;
+}
+
+/** Critical queues whose failures MUST surface in the admin failed-jobs view. */
+export const CRITICAL_QUEUES: QueueName[] = [
+  QUEUES.RECORDING,
+  QUEUES.TRANSCRIBE,
+  QUEUES.REMINDER,
+  QUEUES.EMAIL,
+  QUEUES.PHI_SCAN,
+  QUEUES.AUDIT_WRITE,
+  QUEUES.RETENTION,
+  QUEUES.DSR_EXPORT,
+  QUEUES.ERASURE,
+];
 
 const queueCache = new Map<QueueName, Queue>();
 

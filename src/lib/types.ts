@@ -1,5 +1,12 @@
-// Roles
-export type UserRole = 'resident' | 'faculty' | 'program_director' | 'admin'
+// Roles — keep in sync with prisma/schema.prisma `Role` enum.
+// Mapped from Prisma's UPPERCASE_SNAKE_CASE to lowercase strings via
+// mapPrismaRoleToUserRole() in src/lib/identity.ts.
+export type UserRole =
+  | 'resident'
+  | 'faculty'
+  | 'program_director'
+  | 'admin'
+  | 'external_learner'
 
 // User
 export interface User {

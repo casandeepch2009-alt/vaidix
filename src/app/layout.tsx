@@ -1,8 +1,8 @@
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
+import Script from 'next/script'
 import './globals.css'
 import { ThemeProvider } from '@/providers/theme-provider'
-import { RoleProvider } from '@/contexts/role-context'
 import { CommandPalette } from '@/components/shared/command-palette'
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-sans' })
@@ -32,18 +32,15 @@ const themeInitScript = `
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
-      <head>
-        <script
-          // eslint-disable-next-line react/no-danger
+      <body className={`${inter.variable} font-sans antialiased`}>
+        <Script
+          id="theme-init"
+          strategy="beforeInteractive"
           dangerouslySetInnerHTML={{ __html: themeInitScript }}
         />
-      </head>
-      <body className={`${inter.variable} font-sans antialiased`}>
         <ThemeProvider>
-          <RoleProvider>
-            <CommandPalette />
-            {children}
-          </RoleProvider>
+          <CommandPalette />
+          {children}
         </ThemeProvider>
       </body>
     </html>

@@ -10,6 +10,18 @@ import { db } from '@/lib/db';
 import { presignDownload } from '@/lib/storage';
 import { Role, RecordingStatus } from '@prisma/client';
 
+// Statuses where the HLS package has been fully written to MinIO and the
+// video is playable. Transcription/AI may have failed or be in progress, but
+// the video itself is ready. We serve playback for all of these — captions
+// will just be absent when transcription hasn't finished.
+const HLS_PLAYABLE_STATUSES = new Set<RecordingStatus>([
+  RecordingStatus.TRANSCRIBING,
+  RecordingStatus.TRANSCRIBING_FAILED,
+  RecordingStatus.AI_PROCESSING,
+  RecordingStatus.AI_PROCESSING_FAILED,
+  RecordingStatus.READY,
+]);
+
 export interface RecordingViewModel {
   id: string;
   sessionId: string;
@@ -34,7 +46,7 @@ export class RecordingAccessError extends Error {
   }
 }
 
-async function userCanViewSession(actor: RecordingAccessActor, sessionId: string): Promise<boolean> {
+export async function userCanViewSession(actor: RecordingAccessActor, sessionId: string): Promise<boolean> {
   // Admin / Program Director / Faculty have broad access to recordings within institution.
   if (actor.role === Role.ADMIN || actor.role === Role.PROGRAM_DIRECTOR) return true;
 
@@ -90,8 +102,14 @@ export async function listSessionRecordings(
 
   const out: RecordingViewModel[] = [];
   for (const r of recordings) {
-    const hlsUrl = r.hlsPath && r.status === RecordingStatus.READY
-      ? await presignDownload(r.hlsPath, 6 * 3600)
+    // HLS is served through an authenticated Next.js proxy (see
+    // /api/recordings/[id]/hls/[...path]). Presigning only the master.m3u8
+    // doesn't work for HLS — the player resolves variant playlists and
+    // segments relative to the master URL, dropping the signature.
+    // Serve the video for any post-transcode status — captions may be absent
+    // if transcription hasn't completed, but the video itself is playable.
+    const hlsUrl = r.hlsPath && HLS_PLAYABLE_STATUSES.has(r.status)
+      ? `/api/recordings/${r.id}/hls/master.m3u8`
       : null;
     const thumbnailUrl = r.thumbnailUrl
       ? await presignDownload(r.thumbnailUrl, 6 * 3600).catch(() => null)
@@ -133,8 +151,8 @@ export async function getRecordingForViewer(
   if (!allowed) throw new RecordingAccessError('FORBIDDEN', 'No access');
 
   const hlsUrl =
-    recording.hlsPath && recording.status === RecordingStatus.READY
-      ? await presignDownload(recording.hlsPath, 6 * 3600)
+    recording.hlsPath && HLS_PLAYABLE_STATUSES.has(recording.status)
+      ? `/api/recordings/${recording.id}/hls/master.m3u8`
       : null;
   const thumbnailUrl = recording.thumbnailUrl
     ? await presignDownload(recording.thumbnailUrl, 6 * 3600).catch(() => null)

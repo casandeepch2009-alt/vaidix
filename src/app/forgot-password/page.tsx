@@ -2,13 +2,13 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Mail, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
+import { AtSign, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { AuthShell, AuthInput, AuthSubmit } from '@/components/auth/auth-shell';
 import { forgotPasswordSchema } from '@/lib/validation/auth';
 
 export default function ForgotPasswordPage() {
-  const [email, setEmail] = useState('');
+  const [identifier, setIdentifier] = useState('');
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -19,9 +19,10 @@ export default function ForgotPasswordPage() {
     setFieldError(null);
     setFormError(null);
 
-    const parsed = forgotPasswordSchema.safeParse({ email });
+    const parsed = forgotPasswordSchema.safeParse({ identifier });
     if (!parsed.success) {
-      setFieldError(parsed.error.flatten().fieldErrors.email?.[0] ?? 'Invalid email');
+      const flat = parsed.error.flatten().fieldErrors as Record<string, string[] | undefined>;
+      setFieldError(flat.identifier?.[0] ?? 'Invalid email, mobile, or username');
       return;
     }
 
@@ -66,19 +67,19 @@ export default function ForgotPasswordPage() {
           <CheckCircle2 className="mb-3 size-10 text-green-600" />
           <h2 className="text-xl font-bold text-slate-900">Check your inbox</h2>
           <p className="mt-2 text-sm text-slate-600">
-            If an account exists for <strong>{email}</strong>, we&rsquo;ve sent a password reset link.
-            It will expire in 1 hour.
+            If a Vaidix account is associated with <strong>{identifier}</strong>, a password reset
+            link has been sent to the email on file. The link expires in 1 hour.
           </p>
           <p className="mt-4 text-xs text-slate-500">
             Didn&rsquo;t receive anything? Check your spam folder, or{' '}
             <button
               onClick={() => {
                 setSubmitted(false);
-                setEmail('');
+                setIdentifier('');
               }}
               className="font-medium text-teal-600 hover:text-teal-700"
             >
-              try a different email
+              try a different identifier
             </button>
             .
           </p>
@@ -93,7 +94,7 @@ export default function ForgotPasswordPage() {
         <>
           <h2 className="text-3xl font-black tracking-tight text-slate-900">Reset password</h2>
           <p className="mt-1.5 text-sm text-slate-500">
-            Enter the email associated with your Vaidix account.
+            Enter your email, mobile, or username. The reset link is sent to the email on file.
           </p>
 
           {formError && (
@@ -105,16 +106,29 @@ export default function ForgotPasswordPage() {
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-5" noValidate>
             <AuthInput
-              id="email"
-              type="email"
-              label="Email"
-              value={email}
-              onChange={setEmail}
-              placeholder="you@lvpei.org"
+              id="identifier"
+              type="text"
+              label="Email, mobile, or username"
+              value={identifier}
+              onChange={(v) => {
+                setIdentifier(v);
+                if (fieldError) setFieldError(null);
+              }}
+              onBlur={(v) => {
+                const r = forgotPasswordSchema.safeParse({ identifier: v });
+                if (r.success) {
+                  setFieldError(null);
+                  return;
+                }
+                const flat = r.error.flatten().fieldErrors as Record<string, string[] | undefined>;
+                setFieldError(flat.identifier?.[0] ?? 'Invalid email, mobile, or username');
+              }}
+              placeholder="you@lvpei.org / 9XXXXXXXXX / username"
               error={fieldError ?? undefined}
               disabled={loading}
-              icon={Mail}
-              autoComplete="email"
+              icon={AtSign}
+              autoComplete="username"
+              helpText="The reset link is always sent to the email on your account."
             />
             <AuthSubmit loading={loading}>Send reset link</AuthSubmit>
           </form>

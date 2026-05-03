@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { handleUnexpected, jsonError, jsonOk, requireAuth } from '@/server/services/api-helpers';
 import {
   applyAiClassification,
+  enqueuePhiScan,
   heuristicClassify,
   DocumentAccessError,
 } from '@/server/services/documents/document-service';
@@ -27,6 +28,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     if (!doc) return jsonError('NOT_FOUND', 'Document not found', 404);
     const classification = heuristicClassify({ title: doc.title, kind: doc.kind, mimeType: doc.mimeType });
     await applyAiClassification(id, classification);
+    // The client calls /classify right after the presigned PUT completes — that's
+    // the natural trigger point for the PHI scan. Idempotent jobId means
+    // re-classifying doesn't duplicate work.
+    await enqueuePhiScan(id);
     await audit({
       actorId: auth.user.id,
       actorRole: auth.user.role,

@@ -12,6 +12,7 @@ import { spawn } from 'child_process';
 import { mkdtemp, rm, writeFile, readFile } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import ffmpegStatic from 'ffmpeg-static';
 import { db } from '@/lib/db';
 import { createWorker, QUEUES } from '@/lib/queue';
 import { presignDownload, presignUpload, s3, BUCKET } from '@/lib/storage';
@@ -24,9 +25,11 @@ interface TranscribeJobData {
   recordingId: string;
 }
 
+const FFMPEG_BIN: string = process.env.FFMPEG_PATH ?? ffmpegStatic ?? 'ffmpeg';
+
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'inherit', 'inherit'] });
+    const child = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'inherit', 'inherit'] });
     child.on('error', reject);
     child.on('exit', (code) => (code === 0 ? resolve() : reject(new Error(`ffmpeg exited ${code}`))));
   });
@@ -116,7 +119,7 @@ async function transcribeJob(data: TranscribeJobData): Promise<{ recordingId: st
     const result: TranscriptionResult = await provider.transcribe({
       audioUrl,
       languageHint: 'auto',
-      diarize: true,
+      diarize: provider.name === 'self_hosted', // Sarvam real-time API rejects diarization
       initialPrompt:
         'Ophthalmology lecture. Common terms: PDR, NVG, OCT, anti-VEGF, ranibizumab, aflibercept, vitrectomy, fundus, retina, glaucoma, DALK, PKP.',
     });

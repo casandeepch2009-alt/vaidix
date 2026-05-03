@@ -109,12 +109,12 @@ export function startReelRenderWorker() {
   const worker = createWorker<ReelOnlyJob>(
     QUEUES.RECORDING,
     async (job) => {
-      // Co-tenants the RECORDING queue with the transcode job. We discriminate
-      // by job.name (set when added) — only handle reel-render here.
+      // Co-tenants the RECORDING queue with the transcode job. BullMQ assigns
+      // each job to exactly ONE worker — returning success on a foreign job
+      // would lose it (transcode-worker never sees). Throw so BullMQ retries
+      // and the sibling worker eventually picks it up.
       if (job.name !== 'reel-render') {
-        // Skip; the transcode worker handles 'transcode' jobs.
-        // BullMQ runs all workers on the same queue against all jobs — discriminate explicitly.
-        return { skipped: true };
+        throw new Error(`Not my job (name=${job.name}); retrying for sibling worker`);
       }
       return renderReel(job.data);
     },

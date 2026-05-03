@@ -4,7 +4,7 @@
 // Teaching session lifecycle: create/draft, submit for approval, approve/reject,
 // reschedule, cancel. Conflict checks, recurrence expansion, invite management.
 
-import { randomBytes } from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { db } from '@/lib/db';
 import { audit } from './audit';
 import { sessionAudit, SESSION_AUDIT } from './session-audit';
@@ -28,7 +28,24 @@ import {
   Role,
   Prisma,
 } from '@prisma/client';
-import type { CreateSessionInput, RescheduleInput, UpdateSessionInput } from '@/lib/validation/session';
+import type {
+  CreateSessionInput,
+  RescheduleInput,
+  UpdateSessionInput,
+  ObjectiveInput,
+} from '@/lib/validation/session';
+
+// Stamps a server-generated id on every objective lacking one. Curators can
+// reorder freely on the client; the id is what resident achievements key on.
+export function normaliseObjectives(input: ObjectiveInput[] | null | undefined) {
+  if (!input || input.length === 0) return null;
+  return input.map((o) => ({
+    id: o.id ?? randomUUID(),
+    text: o.text.trim(),
+    blooms: o.blooms,
+    epaTag: o.epaTag ?? null,
+  }));
+}
 
 // Runs async side effects without letting their errors surface to the caller.
 // Lifecycle transitions must not roll back when a downstream email or queue
@@ -134,6 +151,7 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
         consentRequired: input.consentRequired,
         topicId: input.topicId ?? null,
         tags: input.tags,
+        objectives: normaliseObjectives(input.objectives) ?? Prisma.JsonNull,
       },
     });
 
@@ -752,6 +770,19 @@ export async function updateSession(
     throw new Error('NOT_AUTHORIZED');
   }
 
+  // Objectives semantic: undefined → leave untouched; null or [] → clear; array → replace.
+  let objectivesPatch: { objectives: Prisma.InputJsonValue | typeof Prisma.JsonNull } | Record<string, never> = {};
+  if (input.objectives === undefined) {
+    objectivesPatch = {};
+  } else if (input.objectives === null) {
+    objectivesPatch = { objectives: Prisma.JsonNull };
+  } else {
+    const normalised = normaliseObjectives(input.objectives);
+    objectivesPatch = normalised === null
+      ? { objectives: Prisma.JsonNull }
+      : { objectives: normalised as unknown as Prisma.InputJsonValue };
+  }
+
   const updated = await db.teachingSession.update({
     where: { id: sessionId },
     data: {
@@ -761,6 +792,7 @@ export async function updateSession(
       recordingEnabled: input.recordingEnabled ?? undefined,
       consentRequired: input.consentRequired ?? undefined,
       tags: input.tags ?? undefined,
+      ...objectivesPatch,
     },
   });
   await audit({

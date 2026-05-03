@@ -5,7 +5,7 @@
 
 import { RRule, rrulestr } from 'rrule';
 import { db } from '@/lib/db';
-import { getUserCohortIds } from './cohort-service';
+import { buildSessionVisibilityWhere } from './sessions/visibility';
 import {
   SessionApprovalStatus,
   SessionStatus,
@@ -23,77 +23,38 @@ export interface CalendarEvent {
   status: SessionStatus;
   approvalStatus: SessionApprovalStatus;
   visibility: SessionVisibility;
-  host: { id: string; name: string } | null;
+  sessionType: string;
+  host: { id: string; name: string; role: string } | null;
   isRecurring: boolean;
   isOccurrence: boolean;       // true when expanded from an RRULE
   cohortId: string | null;
+  cohortName: string | null;
 }
 
 // ----------------------------------------------------------------------------
 // Visibility filter. Returns a Prisma `where` clause describing sessions the
 // given user may see on their calendar for the given date range.
+//
+// Visibility rules live in `sessions/visibility.ts` so the same logic is
+// applied to the classroom feed, calendar, and per-session detail pages.
+// ADMIN / PD bypass approvalStatus too (they need to see drafts/pending in
+// the calendar to approve them); other roles see APPROVED only.
 // ----------------------------------------------------------------------------
 async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: Date) {
-  const timeWindow = {
-    scheduledStart: { lt: to },
-    // Use `OR` with recurrence: single sessions must overlap window; recurring
-    // masters may start before `from` but still have occurrences inside window.
-  };
+  const isPrivileged = role === Role.ADMIN || role === Role.PROGRAM_DIRECTOR;
+  const visibility = await buildSessionVisibilityWhere({ userId, role });
 
-  const baseFilter = {
-    deletedAt: null,
-    approvalStatus: SessionApprovalStatus.APPROVED,
-    ...timeWindow,
-  };
-
-  // Admin / PD see everything
-  if (role === Role.ADMIN || role === Role.PROGRAM_DIRECTOR) {
-    return {
-      ...baseFilter,
-      OR: [
-        { scheduledEnd: { gt: from } },
-        // Recurring masters always included (we filter occurrences in JS)
-        { recurrenceRule: { not: null } },
-      ],
-    };
-  }
-
-  const myCohorts = await getUserCohortIds(userId);
-
-  // Faculty — see open-to-all + cohort (if member) + invites + hosted + proposed
-  if (role === Role.FACULTY) {
-    return {
-      ...baseFilter,
-      OR: [
-        { scheduledEnd: { gt: from } },
-        { recurrenceRule: { not: null } },
-      ],
-      AND: [
-        {
-          OR: [
-            { visibility: SessionVisibility.OPEN_TO_ALL },
-            { visibility: SessionVisibility.COHORT, cohortId: { in: myCohorts } },
-            { visibility: SessionVisibility.INVITE_ONLY, invites: { some: { userId } } },
-            { hostId: userId },
-            { proposedBy: userId },
-          ],
-        },
-      ],
-    };
-  }
-
-  // Resident / external learner
+  // Compose under `AND` so the two independent OR-clauses (time-window vs.
+  // visibility) don't collide on a shared top-level `OR` key.
   return {
-    ...baseFilter,
-    OR: [{ scheduledEnd: { gt: from } }, { recurrenceRule: { not: null } }],
+    deletedAt: null,
+    scheduledStart: { lt: to },
+    ...(isPrivileged ? {} : { approvalStatus: SessionApprovalStatus.APPROVED }),
     AND: [
-      {
-        OR: [
-          { visibility: SessionVisibility.OPEN_TO_ALL },
-          { visibility: SessionVisibility.COHORT, cohortId: { in: myCohorts } },
-          { visibility: SessionVisibility.INVITE_ONLY, invites: { some: { userId } } },
-        ],
-      },
+      // Single sessions must overlap [from, to]; recurring masters may start
+      // earlier but still have occurrences in-window (filtered in JS below).
+      { OR: [{ scheduledEnd: { gt: from } }, { recurrenceRule: { not: null } }] },
+      visibility,
     ],
   };
 }
@@ -104,8 +65,8 @@ async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: 
 function expandOccurrences(
   session: Pick<
     TeachingSession,
-    'id' | 'title' | 'scheduledStart' | 'scheduledEnd' | 'recurrenceRule' | 'recurrenceUntil' | 'status' | 'approvalStatus' | 'visibility' | 'cohortId'
-  > & { host: { id: string; name: string } | null },
+    'id' | 'title' | 'sessionType' | 'scheduledStart' | 'scheduledEnd' | 'recurrenceRule' | 'recurrenceUntil' | 'status' | 'approvalStatus' | 'visibility' | 'cohortId'
+  > & { host: { id: string; name: string; role: string } | null; cohortName: string | null },
   from: Date,
   to: Date
 ): CalendarEvent[] {
@@ -124,10 +85,12 @@ function expandOccurrences(
         status: session.status,
         approvalStatus: session.approvalStatus,
         visibility: session.visibility,
+        sessionType: session.sessionType,
         host: session.host,
         isRecurring: false,
         isOccurrence: false,
         cohortId: session.cohortId,
+        cohortName: session.cohortName,
       },
     ];
   }
@@ -156,10 +119,12 @@ function expandOccurrences(
       status: session.status,
       approvalStatus: session.approvalStatus,
       visibility: session.visibility,
+      sessionType: session.sessionType,
       host: session.host,
       isRecurring: true,
       isOccurrence: true,
       cohortId: session.cohortId,
+      cohortName: session.cohortName,
     };
   });
 }
@@ -174,6 +139,13 @@ function formatICalDate(d: Date): string {
 
 // ----------------------------------------------------------------------------
 // Public: list events for user in range, with recurrence expansion applied.
+//
+// Hosts are resolved via a separate batched query rather than a Prisma include.
+// The TeachingSession.host relation is required at the schema level, but
+// orphaned FKs (e.g. a host that was hard-deleted) make `findMany` throw:
+//   "Field host is required to return data, got `null` instead."
+// Looking the host up separately lets the calendar degrade gracefully —
+// orphaned sessions still appear, just with no host name.
 // ----------------------------------------------------------------------------
 export async function listCalendarEvents(
   userId: string,
@@ -187,6 +159,7 @@ export async function listCalendarEvents(
     select: {
       id: true,
       title: true,
+      sessionType: true,
       scheduledStart: true,
       scheduledEnd: true,
       recurrenceRule: true,
@@ -195,10 +168,41 @@ export async function listCalendarEvents(
       approvalStatus: true,
       visibility: true,
       cohortId: true,
-      host: { select: { id: true, name: true } },
+      hostId: true,
     },
     orderBy: { scheduledStart: 'asc' },
   });
 
-  return sessions.flatMap((s) => expandOccurrences(s, from, to));
+  const hostIds = Array.from(new Set(sessions.map((s) => s.hostId)));
+  const cohortIds = Array.from(new Set(sessions.map((s) => s.cohortId).filter((id): id is string => !!id)));
+
+  const [hosts, cohorts] = await Promise.all([
+    hostIds.length
+      ? db.user.findMany({
+          where: { id: { in: hostIds } },
+          select: { id: true, name: true, role: true },
+        })
+      : [],
+    cohortIds.length
+      ? db.cohort.findMany({
+          where: { id: { in: cohortIds } },
+          select: { id: true, name: true },
+        })
+      : [],
+  ]);
+
+  const hostById = new Map(hosts.map((h) => [h.id, h]));
+  const cohortById = new Map(cohorts.map((c) => [c.id, c]));
+
+  return sessions.flatMap((s) =>
+    expandOccurrences(
+      {
+        ...s,
+        host: hostById.get(s.hostId) ?? null,
+        cohortName: s.cohortId ? (cohortById.get(s.cohortId)?.name ?? null) : null,
+      },
+      from,
+      to
+    )
+  );
 }

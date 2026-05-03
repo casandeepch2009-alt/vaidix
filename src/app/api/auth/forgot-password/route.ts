@@ -14,6 +14,7 @@ const RESET_EXPIRY_MIN = 60;
 export async function POST(req: Request) {
   try {
     const meta = extractRequestMetadata(req);
+    // IP-keyed bucket — fail-closed for credential paths (HARDENING-PLAN #11).
     const rl = await checkRateLimit({
       bucket: `forgot:${meta.ipAddress ?? 'unknown'}`,
       ...LIMITS.FORGOT_PASSWORD,
@@ -24,23 +25,29 @@ export async function POST(req: Request) {
 
     const parsed = await parseBody(req, forgotPasswordSchema);
     if (!parsed.ok) return parsed.response;
+    const { identifier, identifierKind } = parsed.data;
 
-    const user = await db.user.findUnique({
-      where: { email: parsed.data.email },
-    });
+    // Resolve user by the kind that was detected. No OR-clause across columns
+    // — see auth-service.ts for the rationale (avoid query-planner side-channel).
+    const user =
+      identifierKind === 'email'
+        ? await db.user.findUnique({ where: { email: identifier } })
+        : identifierKind === 'mobile'
+          ? await db.user.findUnique({ where: { mobile: identifier } })
+          : await db.user.findUnique({ where: { username: identifier } });
 
     // Constant response regardless of user existence (prevents enumeration).
-    // Short artificial delay below helps keep timing stable.
+    // The dummy-delay branch below keeps response time indistinguishable.
 
-    if (user && user.status === 'ACTIVE') {
+    if (user && user.status === 'ACTIVE' && user.email) {
       const token = mintToken(32);
-      const tokenHash = hashToken(token);
+      const tokenHashed = hashToken(token);
       const expiresAt = new Date(Date.now() + RESET_EXPIRY_MIN * 60_000);
 
       await db.passwordResetToken.create({
         data: {
           userId: user.id,
-          token: tokenHash,
+          token: tokenHashed,
           expiresAt,
         },
       });
@@ -67,15 +74,21 @@ export async function POST(req: Request) {
         summary: 'Password reset requested',
         ipAddress: meta.ipAddress,
         userAgent: meta.userAgent,
+        // identifierKind is logged so SREs can review which channel users
+        // initiate resets through — never log the raw identifier (PII).
+        details: { identifierKind },
       });
     } else {
-      // Dummy delay to prevent email-enumeration via timing.
+      // Dummy delay to prevent identifier enumeration via timing.
       await new Promise((r) => setTimeout(r, 300));
     }
 
     return NextResponse.json({
       ok: true,
-      data: { message: 'If an account exists for this email, a reset link has been sent.' },
+      data: {
+        message:
+          'If a Vaidix account is associated with this email, mobile, or username, a reset link has been sent to the email on file.',
+      },
     });
   } catch (err) {
     return handleUnexpected(err);

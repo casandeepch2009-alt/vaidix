@@ -35,6 +35,25 @@ interface AtlasSeed {
   modality?: string;
 }
 
+interface CaseTemplateSeed {
+  id: string;
+  title: string;
+  condition: string;
+  specialty: string;
+  bloomsLevel: number;
+  patientName: string;
+  patientAge: string | number;
+  patientGender: string;
+  difficulty: string; // 'beginner' | 'intermediate' | 'advanced'
+  estimatedMinutes: number;
+  description: string;
+  tags: string[];
+  imageCount: number;
+  topic?: string;
+  oslerianPrinciples?: string[];
+  isEmergency?: boolean;
+}
+
 // ─── Ophthalmology subspecialty topics (16 LVPEI subspecialties) ──────────
 const TOPICS = [
   { slug: 'cornea', name: 'Cornea & Anterior Segment', subspecialty: 'Cornea' },
@@ -62,13 +81,15 @@ const LEVELS = [
   { levelNumber: 4, name: 'Proficient', description: 'Teaching and supervising others', minMastery: 85 },
 ];
 
-// ─── Default password for all seeded users ────────────────────────────────
-const DEFAULT_PASSWORD = 'Vaidix@2026!';
+// ─── Default passwords ────────────────────────────────────────────────────
+const DEFAULT_PASSWORD      = 'Vaidix@2026!';
+const DEMO_PASSWORD         = '12345678';
 
 async function main() {
   console.log('🌱 Seeding Vaidix database...\n');
 
-  const passwordHash = await bcrypt.hash(DEFAULT_PASSWORD, 12);
+  const passwordHash     = await bcrypt.hash(DEFAULT_PASSWORD, 12);
+  const demoPasswordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   // ─── 1. LEVELS ────────────────────────────────────────────────────────────
   console.log('📊 Seeding Levels...');
@@ -92,30 +113,124 @@ async function main() {
   }
   console.log(`   ✓ ${TOPICS.length} topics`);
 
-  // ─── 3. SUPER ADMIN (only seeded user — all others invited via admin UI) ─
-  console.log('👑 Seeding Super Admin...');
-  await prisma.user.upsert({
-    where: { email: 'sandeep@vaidix.local' },
-    update: {},
-    create: {
-      email: 'sandeep@vaidix.local',
-      name: 'Sandeep',
-      role: Role.ADMIN,
-      status: UserStatus.ACTIVE,
-      passwordHash,
-      emailVerifiedAt: new Date(),
-      profile: {
-        create: {
-          affiliation: 'Vaidix Platform',
-          languages: ['en'],
-          timezone: 'Asia/Kolkata',
-        },
-      },
-      preferences: { create: {} },
-      stats: { create: {} },
+  // ─── 3. USERS ─────────────────────────────────────────────────────────────
+  console.log('👥 Seeding Users...');
+
+  const demoUsers = [
+    {
+      email:       'sandeep@vaidix.local',
+      mobile:      '+919876543210',
+      name:        'Sandeep',
+      role:        Role.ADMIN,
+      hash:        passwordHash,
+      affiliation: 'Vaidix Platform',
     },
-  });
-  console.log('   ✓ sandeep@vaidix.local (super admin)');
+    {
+      email:       'arjun.mehta@vaidix.local',
+      mobile:      '+919876543211',
+      name:        'Arjun Mehta',
+      role:        Role.RESIDENT,
+      hash:        demoPasswordHash,
+      affiliation: 'LVPEI Residency Program',
+    },
+    {
+      email:       'meera.krishnan@vaidix.local',
+      mobile:      '+919876543212',
+      name:        'Dr. Meera Krishnan',
+      role:        Role.FACULTY,
+      hash:        demoPasswordHash,
+      affiliation: 'LVPEI Faculty',
+    },
+    {
+      email:       'rajeev.nair@vaidix.local',
+      mobile:      '+919876543213',
+      name:        'Dr. Rajeev Nair',
+      role:        Role.PROGRAM_DIRECTOR,
+      hash:        demoPasswordHash,
+      affiliation: 'LVPEI Program Leadership',
+    },
+    {
+      email:       'priya.sharma@vaidix.local',
+      mobile:      '+919876543214',
+      name:        'Priya Sharma',
+      role:        Role.EXTERNAL_LEARNER,
+      hash:        demoPasswordHash,
+      affiliation: 'External',
+    },
+  ];
+
+  for (const u of demoUsers) {
+    await prisma.user.upsert({
+      where: { email: u.email },
+      update: { mobile: u.mobile, passwordHash: u.hash },
+      create: {
+        email:          u.email,
+        mobile:         u.mobile,
+        name:           u.name,
+        role:           u.role,
+        status:         UserStatus.ACTIVE,
+        passwordHash:   u.hash,
+        emailVerifiedAt: new Date(),
+        profile: {
+          create: {
+            affiliation: u.affiliation,
+            languages:   ['en'],
+            timezone:    'Asia/Kolkata',
+          },
+        },
+        preferences: { create: {} },
+        stats:       { create: {} },
+      },
+    });
+    console.log(`   ✓ ${u.mobile}  ${u.name.padEnd(24)} [${u.role}]`);
+  }
+
+  // ─── 4. ROLE MAPPINGS (Faculty → PD, Cohort → Faculty mentor) ─────────────
+  // Demonstrates the dynamic mapping fields added in 20260501120000:
+  //   * Meera (FACULTY) reports to Rajeev (PD).
+  //   * One cohort "PGY-1 Residents 2026–27" with Meera as mentor and Arjun
+  //     as a member. Idempotent via createdBy + name uniqueness check.
+  console.log('🪢 Seeding mappings (faculty↔PD, cohort↔mentor)...');
+  const sandeep = await prisma.user.findUnique({ where: { email: 'sandeep@vaidix.local' } });
+  const rajeev  = await prisma.user.findUnique({ where: { email: 'rajeev.nair@vaidix.local' } });
+  const meera   = await prisma.user.findUnique({ where: { email: 'meera.krishnan@vaidix.local' } });
+  const arjun   = await prisma.user.findUnique({ where: { email: 'arjun.mehta@vaidix.local' } });
+
+  if (meera && rajeev && meera.programDirectorId !== rajeev.id) {
+    await prisma.user.update({
+      where: { id: meera.id },
+      data:  { programDirectorId: rajeev.id },
+    });
+    console.log(`   ✓ Meera → reports to Rajeev (PD)`);
+  }
+
+  if (sandeep && meera && arjun) {
+    const cohortName = 'PGY-1 Residents 2026–27';
+    const existing = await prisma.cohort.findFirst({
+      where: { name: cohortName, deletedAt: null },
+      select: { id: true, facultyId: true },
+    });
+    const cohort = existing
+      ? await prisma.cohort.update({
+          where: { id: existing.id },
+          data:  { facultyId: meera.id },
+        })
+      : await prisma.cohort.create({
+          data: {
+            name:         cohortName,
+            description:  'Demo cohort wired up by seed: PGY-1 ophthalmology residents.',
+            academicYear: '2026–27',
+            createdBy:    sandeep.id,
+            facultyId:    meera.id,
+          },
+        });
+    await prisma.cohortMember.upsert({
+      where:  { cohortId_userId: { cohortId: cohort.id, userId: arjun.id } },
+      create: { cohortId: cohort.id, userId: arjun.id, addedBy: sandeep.id },
+      update: {},
+    });
+    console.log(`   ✓ Cohort "${cohortName}" — mentor: Meera, member: Arjun`);
+  }
 
   // ─── 5. PEARLS ────────────────────────────────────────────────────────────
   console.log('💎 Seeding Pearls...');
@@ -165,7 +280,63 @@ async function main() {
   }
   console.log(`   ✓ ${atlasCount} atlas images`);
 
-  // Cases skipped — no residents seeded. They'll be created after first invited resident logs in.
+  // ─── 7. CASE TEMPLATES (W6 P2 — library of clinical cases) ───────────────
+  console.log('📚 Seeding Case Templates...');
+  const mockCases = loadJson<CaseTemplateSeed[]>('cases.json');
+  let templateCount = 0;
+  for (const c of mockCases) {
+    const topic = c.topic ? topicBySlug.get(c.topic) : undefined;
+    const ageYears = typeof c.patientAge === 'number'
+      ? c.patientAge
+      : parseInt(String(c.patientAge).replace(/[^0-9]/g, ''), 10) || 0;
+    const difficulty =
+      c.difficulty === 'beginner' ? 'BEGINNER'
+      : c.difficulty === 'advanced' ? 'ADVANCED'
+      : 'INTERMEDIATE';
+    await prisma.caseTemplate.upsert({
+      where: { legacyId: c.id },
+      update: {
+        title: c.title,
+        condition: c.condition,
+        specialty: c.specialty,
+        topicId: topic?.id ?? null,
+        bloomsLevel: c.bloomsLevel,
+        difficulty,
+        estimatedMinutes: c.estimatedMinutes,
+        description: c.description,
+        patientName: c.patientName,
+        patientAgeYears: ageYears,
+        patientSex: c.patientGender,
+        patientPresentingComplaint: c.description,
+        oslerianPrinciples: c.oslerianPrinciples ?? [],
+        tags: c.tags ?? [],
+        imageCount: c.imageCount ?? 0,
+        isEmergency: c.isEmergency ?? false,
+      },
+      create: {
+        legacyId: c.id,
+        title: c.title,
+        condition: c.condition,
+        specialty: c.specialty,
+        topicId: topic?.id ?? null,
+        bloomsLevel: c.bloomsLevel,
+        difficulty,
+        estimatedMinutes: c.estimatedMinutes,
+        description: c.description,
+        patientName: c.patientName,
+        patientAgeYears: ageYears,
+        patientSex: c.patientGender,
+        patientPresentingComplaint: c.description,
+        oslerianPrinciples: c.oslerianPrinciples ?? [],
+        tags: c.tags ?? [],
+        imageCount: c.imageCount ?? 0,
+        isEmergency: c.isEmergency ?? false,
+        publishedAt: new Date(),
+      },
+    });
+    templateCount++;
+  }
+  console.log(`   ✓ ${templateCount} case templates`);
 
   // ─── 8. SAMPLE COURSES (for W7+ but useful to have) ───────────────────────
   console.log('🎓 Seeding Sample Courses...');
@@ -228,10 +399,13 @@ async function main() {
   console.log(`   ✓ ${flags.length} feature flags`);
 
   console.log('\n✅ Seed complete.\n');
-  console.log('📝 Super Admin credentials:');
-  console.log('   • Email:    sandeep@vaidix.local');
-  console.log(`   • Password: ${DEFAULT_PASSWORD}`);
-  console.log('\n   All other users must be invited via /admin/invitations.\n');
+  console.log('📝 Demo credentials (password: 12345678 except Sandeep):');
+  console.log('   9876543210  Sandeep           [ADMIN]            pw: Vaidix@2026!');
+  console.log('   9876543211  Arjun Mehta        [RESIDENT]');
+  console.log('   9876543212  Dr. Meera Krishnan [FACULTY]');
+  console.log('   9876543213  Dr. Rajeev Nair    [PROGRAM_DIRECTOR]');
+  console.log('   9876543214  Priya Sharma        [EXTERNAL_LEARNER]');
+  console.log('');
 }
 
 main()

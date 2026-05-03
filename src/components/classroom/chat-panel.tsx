@@ -131,7 +131,7 @@ export function ChatPanel({
             <div className="flex items-baseline justify-between gap-2">
               <span className="text-xs font-semibold">{m.userName}</span>
               <span className="text-[10px] text-muted-foreground">
-                {new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {new Date(m.createdAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
               </span>
             </div>
             <div className="text-sm">{m.content}</div>

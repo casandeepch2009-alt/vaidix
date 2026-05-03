@@ -3,8 +3,18 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Writes to audit_events table. Used by auth, invitation, admin action flows.
 
+import crypto from 'node:crypto';
 import { db } from '@/lib/db';
 import type { Role } from '@prisma/client';
+import { log } from '@/lib/log';
+import { getQueue, QUEUES } from '@/lib/queue';
+
+/** Internal — used by the direct write fallback path in audit() below. */
+async function enqueueAuditRetry(input: AuditInput): Promise<void> {
+  // Idempotency key prevents the worker from double-inserting on retry.
+  const jobId = crypto.randomUUID();
+  await getQueue(QUEUES.AUDIT_WRITE).add('write', input, { jobId });
+}
 
 export interface AuditInput {
   actorId?: string | null;
@@ -36,8 +46,15 @@ export async function audit(input: AuditInput): Promise<void> {
       },
     });
   } catch (err) {
-    // Audit failures should not break user flow. Log to server console.
-    console.error('[audit] failed to write:', err, 'input:', input.eventType);
+    // Audit failures must surface in structured logs so SREs notice.
+    // Direct DB write is best-effort; the durable path is the AUDIT_WRITE
+    // queue (HARDENING-PLAN item #14) which is processed async by a worker.
+    log.error(
+      { err, eventType: input.eventType, entityId: input.entityId },
+      '[audit] direct write failed — relying on queued retry'
+    );
+    // Best-effort enqueue for the audit-worker to retry.
+    void enqueueAuditRetry(input).catch(() => {});
   }
 }
 
@@ -55,6 +72,7 @@ export const AUDIT_EVENTS = {
   INVITATION_CREATED: 'invitation.created',
   INVITATION_SENT: 'invitation.sent',
   INVITATION_RESENT: 'invitation.resent',
+  INVITATION_UPDATED: 'invitation.updated',
   INVITATION_REVOKED: 'invitation.revoked',
   INVITATION_DELETED: 'invitation.deleted',
   INVITATION_ACCEPTED: 'invitation.accepted',
@@ -64,7 +82,17 @@ export const AUDIT_EVENTS = {
   USER_CREATED: 'user.created',
   USER_ROLE_CHANGED: 'user.role_changed',
   USER_STATUS_CHANGED: 'user.status_changed',
+  USER_UPDATED: 'user.updated',
   USER_MODULES_UPDATED: 'user.modules_updated',
+  // Faculty → Program Director mapping. Set when admin links a faculty user to
+  // a PD (or clears the link). Cleared on role change away from FACULTY too.
+  FACULTY_PD_ASSIGNED: 'faculty.pd.assigned',
+  FACULTY_PD_CLEARED: 'faculty.pd.cleared',
+
+  // Cohort → Faculty mentor mapping. Set when admin/PD links a cohort to a
+  // faculty mentor (or clears it). Independent of cohort membership writes.
+  COHORT_FACULTY_ASSIGNED: 'cohort.faculty.assigned',
+  COHORT_FACULTY_CLEARED: 'cohort.faculty.cleared',
 
   // Module permissions
   MODULE_GRANTED: 'module.granted',
@@ -99,6 +127,77 @@ export const AUDIT_EVENTS = {
   WHATSAPP_PEARL_SENT: 'whatsapp.pearl.sent',
   WHATSAPP_PEARL_BLOCKED: 'whatsapp.pearl.blocked',
   WHATSAPP_PEARLS_SCHEDULED: 'whatsapp.pearls.scheduled',
+
+  // ─── W5 events ───────────────────────────────────────────────────────
+  // Q&A threads
+  QA_QUESTION_POSTED: 'qa.question.posted',
+  QA_REPLY_POSTED: 'qa.reply.posted',
+  QA_PINNED: 'qa.pinned',
+  QA_UNPINNED: 'qa.unpinned',
+  QA_QUESTION_ANSWERED: 'qa.question.answered',
+  QA_ANSWER_CLEARED: 'qa.answer.cleared',
+
+  // Breakouts
+  BREAKOUT_CREATED: 'breakout.created',
+  BREAKOUT_PARTICIPANT_ASSIGNED: 'breakout.participant.assigned',
+  BREAKOUT_PARTICIPANT_LEFT: 'breakout.participant.left',
+  BREAKOUT_RECONVENED: 'breakout.reconvened',
+  BREAKOUT_ENDED: 'breakout.ended',
+  BREAKOUT_AGENT_LOG_INGESTED: 'breakout.agent_log.ingested',
+
+  // Recording share
+  RECORDING_SHARE_CREATED: 'recording_share.created',
+  RECORDING_SHARE_ACCESSED: 'recording_share.accessed',
+  RECORDING_SHARE_BLOCKED: 'recording_share.blocked',
+  RECORDING_SHARE_REVOKED: 'recording_share.revoked',
+
+  // ─── W6 events ───────────────────────────────────────────────────────
+  // Cases (W6 Phase 2)
+  CASE_STARTED: 'case.started',
+  CASE_MESSAGE_SENT: 'case.message_sent',
+  CASE_COMPLETED: 'case.completed',
+
+  // Pre-Conference Question Submission Engine (Feeddback #2)
+  PRE_QUESTION_SUBMITTED: 'pre_question.submitted',
+  PRE_QUESTION_VOTED: 'pre_question.voted',
+  PRE_QUESTION_UNVOTED: 'pre_question.unvoted',
+  PRE_QUESTION_RECLUSTER_REQUESTED: 'pre_question.recluster_requested',
+  PRE_QUESTION_THEMES_GENERATED: 'pre_question.themes_generated',
+  PRE_QUESTION_CLUSTER_FAILED: 'pre_question.cluster_failed',
+
+  // ─── W6.8 — Pre-Conference Polish ────────────────────────────────────
+  // Promo teaser video (Feeddback #1, video form — extends SVG promo)
+  PROMO_TEASER_REQUESTED: 'promo.teaser.requested',
+  PROMO_TEASER_RENDERED: 'promo.teaser.rendered',
+  PROMO_TEASER_FAILED: 'promo.teaser.failed',
+  // Study Pack curation (Feeddback #3 — Study Material Hub pre-session surface)
+  STUDY_PACK_DOC_ADDED: 'study_pack.doc.added',
+  STUDY_PACK_DOC_REMOVED: 'study_pack.doc.removed',
+  STUDY_PACK_VIEW_RECORDED: 'study_pack.view.recorded',
+  // Pre-Case scaffolding (Feeddback #6A — Pre-Case Scenario Simulations)
+  PRE_CASE_ATTACHED: 'pre_case.attached',
+  PRE_CASE_DETACHED: 'pre_case.detached',
+  PRE_CASE_STARTED: 'pre_case.started',
+  PRE_CASE_COMPLETED: 'pre_case.completed',
+  // Readiness Predictor (Feeddback #5)
+  READINESS_VIEWED: 'readiness.viewed',
+  // Learning objectives — structured per-session goals
+  OBJECTIVES_UPDATED: 'objectives.updated',
+  OBJECTIVE_ACHIEVEMENT_MARKED: 'objective.achievement.marked',
+
+  // ─── Hardening sprint events ────────────────────────────────────────
+  // Item #8 — DLQ
+  WORKER_JOB_DLQ: 'worker.job.dlq',
+  WORKER_JOB_RETRIED: 'worker.job.retried',
+  // Item #16 — Retention
+  RETENTION_SWEEP_RAN: 'retention.sweep_ran',
+  RETENTION_RECORD_PURGED: 'retention.record_purged',
+  // Item #17 — DPDPA
+  DSR_EXPORT_REQUESTED: 'dsr.export.requested',
+  DSR_EXPORT_DELIVERED: 'dsr.export.delivered',
+  DSR_ERASURE_REQUESTED: 'dsr.erasure.requested',
+  DSR_ERASURE_APPROVED: 'dsr.erasure.approved',
+  DSR_ERASURE_EXECUTED: 'dsr.erasure.executed',
 } as const;
 
 export function extractRequestMetadata(req: Request): {

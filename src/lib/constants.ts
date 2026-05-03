@@ -126,6 +126,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
   faculty: 'Faculty',
   program_director: 'Program Director',
   admin: 'Admin',
+  external_learner: 'External Learner',
 }
 
 export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: string; badge?: string }[]> = {
@@ -136,7 +137,7 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
     { label: 'Reviews', href: '/reviews', icon: 'RotateCcw' },
     { label: 'Journal', href: '/journal', icon: 'NotebookPen' },
     { label: 'Classroom', href: '/classroom', icon: 'Video' },
-    { label: 'Calendar', href: '/calendar', icon: 'CalendarDays' },
+    { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
     { label: 'Challenges', href: '/challenges', icon: 'Trophy' },
   ],
   faculty: [
@@ -147,7 +148,8 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
     { label: 'AI Audit', href: '/faculty/ai-audit', icon: 'Shield' },
     { label: 'Cohort Analytics', href: '/faculty/cohort', icon: 'BarChart3' },
     { label: 'Classroom', href: '/classroom', icon: 'Video' },
-    { label: 'Calendar', href: '/calendar', icon: 'CalendarDays' },
+    { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
+    { label: 'Documents', href: '/faculty/documents', icon: 'FolderOpen' },
     { label: 'Approvals', href: '/inbox/approvals', icon: 'Inbox' },
   ],
   program_director: [
@@ -157,20 +159,33 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
     { label: 'Accreditation', href: '/program/accreditation', icon: 'Award' },
     { label: 'Learners', href: '/faculty/learners', icon: 'Users' },
     { label: 'Cohort Analytics', href: '/faculty/cohort', icon: 'BarChart3' },
-    { label: 'Calendar', href: '/calendar', icon: 'CalendarDays' },
+    { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
+    { label: 'Documents', href: '/faculty/documents', icon: 'FolderOpen' },
+    { label: 'Approvals', href: '/inbox/approvals', icon: 'Inbox' },
     { label: 'Cohorts', href: '/admin/cohorts', icon: 'UsersRound' },
   ],
   admin: [
     { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
     { label: 'Institution', href: '/admin/institution', icon: 'Building2' },
     { label: 'Users', href: '/admin/users', icon: 'UserCog' },
+    { label: 'Invitations', href: '/admin/invitations', icon: 'Inbox' },
     { label: 'Cohorts', href: '/admin/cohorts', icon: 'UsersRound' },
-    { label: 'Calendar', href: '/calendar', icon: 'CalendarDays' },
-    { label: 'Roles', href: '/admin/roles', icon: 'ShieldCheck' },
+    { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
+    { label: 'Documents', href: '/faculty/documents', icon: 'FolderOpen' },
     { label: 'Knowledge Base', href: '/admin/knowledge-base', icon: 'Database' },
     { label: 'ML Training Queue', href: '/admin/training-queue', icon: 'Brain' },
-    { label: 'Image Library', href: '/admin/image-library', icon: 'Image' },
     { label: 'Settings', href: '/admin/settings', icon: 'Settings' },
     { label: 'Audit Logs', href: '/admin/audit-logs', icon: 'ScrollText' },
+  ],
+  // External learners are invited guests (visiting fellows, conference attendees,
+  // alumni). Module defaults in src/lib/modules.ts give them Pearls/Atlas/Classroom;
+  // the additions below match that surface plus Cases for read-only review.
+  external_learner: [
+    { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
+    { label: 'Cases', href: '/cases', icon: 'BookOpen' },
+    { label: 'Pearls', href: '/pearls', icon: 'Lightbulb' },
+    { label: 'Atlas', href: '/atlas', icon: 'ScanEye' },
+    { label: 'Classroom', href: '/classroom', icon: 'Video' },
+    { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
   ],
 }

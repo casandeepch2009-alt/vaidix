@@ -26,6 +26,9 @@ export default async function CohortsPage() {
           name: c.name,
           description: c.description,
           academicYear: c.academicYear,
+          faculty: c.faculty
+            ? { id: c.faculty.id, name: c.faculty.name, email: c.faculty.email, avatarUrl: c.faculty.avatarUrl }
+            : null,
           memberCount: c._count.members,
           createdAt: c.createdAt.toISOString(),
         }))}

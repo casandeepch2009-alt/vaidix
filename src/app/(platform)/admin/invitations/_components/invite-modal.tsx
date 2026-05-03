@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   X,
@@ -13,20 +13,59 @@ import {
   Phone,
   IdCard,
   Send,
+  CheckCircle2,
+  Clock,
+  Stethoscope,
+  BookOpen,
+  Users,
+  Settings,
+  GraduationCap,
+  Sparkles,
+  Loader2,
+  AlertCircle,
 } from 'lucide-react';
 import { Role } from '@prisma/client';
 import { MODULES, CATEGORY_LABELS, defaultModulesForRole, type ModuleDef, type ModuleCategory } from '@/lib/modules';
-import { createInvitationSchema } from '@/lib/validation/auth';
+import { createInvitationSchema, updateInvitationSchema } from '@/lib/validation/auth';
+
+export interface InviteModalEditData {
+  id: string;
+  fullName: string | null;
+  email: string;
+  mobile: string | null;
+  mciRegNumber: string | null;
+  role: Role;
+  subspecialty: string | null;
+  department: string | null;
+  yearOfResidency: number | null;
+  moduleOverrides: { granted?: string[]; revoked?: string[] } | null;
+  expiresAt: string;
+}
 
 type Step = 1 | 2 | 3;
 
-const ROLE_OPTIONS: Array<{ value: Role; label: string; description: string }> = [
-  { value: Role.RESIDENT, label: 'Resident', description: 'Ophthalmology resident in training' },
-  { value: Role.FACULTY, label: 'Faculty', description: 'Consultant / teaching faculty' },
-  { value: Role.PROGRAM_DIRECTOR, label: 'Program Director', description: 'Residency program leadership' },
-  { value: Role.ADMIN, label: 'Admin', description: 'Platform administrator' },
-  { value: Role.EXTERNAL_LEARNER, label: 'External Learner', description: 'Non-LVPEI invited learner' },
+const ROLE_OPTIONS: Array<{
+  value: Role;
+  label: string;
+  description: string;
+  icon: typeof UserCircle;
+}> = [
+  { value: Role.RESIDENT,         label: 'Resident',        description: 'Ophthalmology resident in training', icon: GraduationCap },
+  { value: Role.FACULTY,          label: 'Faculty',          description: 'Consultant / teaching faculty',      icon: Stethoscope },
+  { value: Role.PROGRAM_DIRECTOR, label: 'Program Director', description: 'Residency program leadership',       icon: BookOpen },
+  { value: Role.ADMIN,            label: 'Admin',            description: 'Platform administrator',             icon: Settings },
+  { value: Role.EXTERNAL_LEARNER, label: 'External Learner', description: 'Non-LVPEI invited learner',          icon: Users },
 ];
+
+const STEP_META = [
+  { label: 'Basic details', sub: 'Name, email & contacts', icon: UserCircle },
+  { label: 'Role & scope',  sub: 'Permissions & expiry',   icon: ShieldCheck },
+  { label: 'Module access', sub: 'Feature toggles',        icon: LayoutGrid },
+];
+
+function getInitials(name: string): string {
+  return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('');
+}
 
 function defaultModuleMap(role: Role): Record<string, boolean> {
   const defaults = defaultModulesForRole(role);
@@ -35,34 +74,104 @@ function defaultModuleMap(role: Role): Record<string, boolean> {
   return map;
 }
 
-function InviteModalBody({
-  onClose,
-  onCreated,
-}: {
+function emptyModuleMap(): Record<string, boolean> {
+  const map: Record<string, boolean> = {};
+  for (const m of MODULES) map[m.key] = false;
+  return map;
+}
+
+function deriveModuleMapFromEdit(edit: InviteModalEditData): Record<string, boolean> {
+  const base = defaultModuleMap(edit.role);
+  const granted = edit.moduleOverrides?.granted ?? [];
+  const revoked = edit.moduleOverrides?.revoked ?? [];
+  for (const k of granted) base[k] = true;
+  for (const k of revoked) base[k] = false;
+  return base;
+}
+
+function hoursUntil(iso: string): number {
+  const ms = new Date(iso).getTime() - Date.now();
+  const hrs = Math.max(1, Math.round(ms / 3_600_000));
+  return [24, 48, 72, 168].includes(hrs) ? hrs : 48;
+}
+
+function InviteModalBody({ onClose, onCreated, edit }: {
   onClose: () => void;
   onCreated: () => void;
+  edit?: InviteModalEditData;
 }) {
+  const isEdit = !!edit;
   const [step, setStep] = useState<Step>(1);
 
-  // Step 1 — basic details
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
-  const [mobile, setMobile] = useState('');
-  const [mciRegNumber, setMciRegNumber] = useState('');
+  const [fullName,      setFullName]      = useState(edit?.fullName ?? '');
+  const [email,         setEmail]         = useState(edit?.email ?? '');
+  const [mobile,        setMobile]        = useState(edit?.mobile ?? '');
+  const [mciRegNumber,  setMciRegNumber]  = useState(edit?.mciRegNumber ?? '');
 
-  // Step 2 — role & scope
-  const [role, setRoleState] = useState<Role>(Role.RESIDENT);
-  const [subspecialty, setSubspecialty] = useState('');
-  const [department, setDepartment] = useState('');
-  const [yearOfResidency, setYearOfResidency] = useState<number | ''>(1);
-  const [expiresInHours, setExpiresInHours] = useState(48);
+  const [role,           setRoleState]      = useState<Role | null>(edit?.role ?? null);
+  const [subspecialty,   setSubspecialty]   = useState(edit?.subspecialty ?? '');
+  const [department,     setDepartment]     = useState(edit?.department ?? '');
+  const [yearOfResidency, setYearOfResidency] = useState<number | ''>(edit?.yearOfResidency ?? 1);
+  const [expiresInHours, setExpiresInHours]  = useState(edit ? hoursUntil(edit.expiresAt) : 48);
 
-  // Step 3 — module overrides (modulekey → enabled?)
-  const [moduleMap, setModuleMap] = useState<Record<string, boolean>>(() => defaultModuleMap(Role.RESIDENT));
+  const [moduleMap, setModuleMap] = useState<Record<string, boolean>>(
+    () => (edit ? deriveModuleMapFromEdit(edit) : emptyModuleMap())
+  );
 
-  const [submitting, setSubmitting] = useState(false);
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
-  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting,   setSubmitting]   = useState(false);
+  const [fieldErrors,  setFieldErrors]  = useState<Record<string, string>>({});
+  const [formError,    setFormError]    = useState<string | null>(null);
+
+  // ─── Live email-availability check (create mode only) ──────────────────
+  // Hits /api/invitations/check-email after the user pauses typing. Blocks
+  // the "Continue" button if the email is already a registered user OR a
+  // pending invitation, so the admin doesn't fill 3 steps before finding out.
+  type EmailCheck =
+    | { state: 'idle' }
+    | { state: 'checking' }
+    | { state: 'available' }
+    | { state: 'taken'; reason: 'USER_EXISTS' | 'PENDING_INVITE'; message: string };
+
+  const [emailCheck, setEmailCheck] = useState<EmailCheck>({ state: 'idle' });
+
+  useEffect(() => {
+    if (isEdit) return;
+    const trimmed = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailCheck({ state: 'idle' });
+      return;
+    }
+    let cancelled = false;
+    setEmailCheck({ state: 'checking' });
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/invitations/check-email?email=${encodeURIComponent(trimmed)}`);
+        const body = await res.json();
+        if (cancelled) return;
+        if (!body.ok) { setEmailCheck({ state: 'idle' }); return; }
+        if (body.data.available) {
+          setEmailCheck({ state: 'available' });
+        } else if (body.data.reason === 'USER_EXISTS') {
+          setEmailCheck({
+            state: 'taken',
+            reason: 'USER_EXISTS',
+            message: `${body.data.user?.name ?? 'A user'} already has an account with this email`,
+          });
+        } else {
+          const inv = body.data.invitation;
+          const who = inv?.fullName ?? 'Someone';
+          setEmailCheck({
+            state: 'taken',
+            reason: 'PENDING_INVITE',
+            message: `${who} already has a pending invitation. Revoke it first to re-invite.`,
+          });
+        }
+      } catch {
+        if (!cancelled) setEmailCheck({ state: 'idle' });
+      }
+    }, 400);
+    return () => { cancelled = true; clearTimeout(t); };
+  }, [email, isEdit]);
 
   function setRole(next: Role) {
     setRoleState(next);
@@ -72,7 +181,15 @@ function InviteModalBody({
   function step1Valid(): boolean {
     const errs: Record<string, string> = {};
     if (fullName.trim().length < 2) errs.fullName = 'Full name is required';
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) errs.email = 'Valid email required';
+    if (!isEdit) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        errs.email = 'Valid email required';
+      } else if (emailCheck.state === 'taken') {
+        errs.email = emailCheck.message;
+      } else if (emailCheck.state === 'checking') {
+        errs.email = 'Checking email availability…';
+      }
+    }
     if (mobile && !/^(\+91[-\s]?)?[6-9]\d{9}$/.test(mobile.replace(/\s|-/g, '')))
       errs.mobile = 'Invalid Indian mobile number';
     setFieldErrors(errs);
@@ -81,15 +198,16 @@ function InviteModalBody({
 
   function step2Valid(): boolean {
     const errs: Record<string, string> = {};
-    if (role === Role.RESIDENT && !yearOfResidency) {
-      errs.yearOfResidency = 'Year required for residents';
-    }
+    if (!role) errs.role = 'Please select a role';
+    if (role === Role.RESIDENT && !yearOfResidency) errs.yearOfResidency = 'Year required for residents';
     setFieldErrors(errs);
     return Object.keys(errs).length === 0;
   }
 
   async function handleSubmit() {
     setFormError(null);
+    if (!role) { setFormError('Please select a role first.'); return; }
+
     const roleDefaults = new Set(defaultModulesForRole(role));
     const granted: string[] = [];
     const revoked: string[] = [];
@@ -99,43 +217,61 @@ function InviteModalBody({
       else if (!enabled && isDefault) revoked.push(key);
     }
 
-    const payload = {
-      fullName: fullName.trim(),
-      email: email.trim().toLowerCase(),
-      mobile: mobile.trim() || undefined,
-      mciRegNumber: mciRegNumber.trim() || undefined,
+    const basePayload = {
+      fullName:        fullName.trim(),
+      mobile:          mobile.trim() || undefined,
+      mciRegNumber:    mciRegNumber.trim() || undefined,
       role,
-      subspecialty: subspecialty.trim() || undefined,
-      department: department.trim() || undefined,
+      subspecialty:    subspecialty.trim() || undefined,
+      department:      department.trim() || undefined,
       yearOfResidency: role === Role.RESIDENT && typeof yearOfResidency === 'number' ? yearOfResidency : undefined,
       moduleOverrides: { granted, revoked },
       expiresInHours,
     };
 
-    const parsed = createInvitationSchema.safeParse(payload);
+    if (isEdit) {
+      const parsed = updateInvitationSchema.safeParse(basePayload);
+      if (!parsed.success) {
+        setFormError('Validation failed. Please check highlighted fields.');
+        setFieldErrors(Object.fromEntries(
+          Object.entries(parsed.error.flatten().fieldErrors).map(([k, v]) => [k, (v as string[])?.[0] ?? ''])
+        ));
+        return;
+      }
+
+      setSubmitting(true);
+      try {
+        const res  = await fetch(`/api/invitations/${edit!.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(parsed.data),
+        });
+        const body = await res.json();
+        if (res.ok) onCreated();
+        else setFormError(body?.error?.message ?? 'Failed to update invitation');
+      } catch {
+        setFormError('Network error. Please try again.');
+      }
+      setSubmitting(false);
+      return;
+    }
+
+    const createPayload = { ...basePayload, email: email.trim().toLowerCase() };
+    const parsed = createInvitationSchema.safeParse(createPayload);
     if (!parsed.success) {
       setFormError('Validation failed. Please check highlighted fields.');
-      setFieldErrors(
-        Object.fromEntries(
-          Object.entries(parsed.error.flatten().fieldErrors).map(([k, v]) => [k, (v as string[])?.[0] ?? ''])
-        )
-      );
+      setFieldErrors(Object.fromEntries(
+        Object.entries(parsed.error.flatten().fieldErrors).map(([k, v]) => [k, (v as string[])?.[0] ?? ''])
+      ));
       return;
     }
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/invitations', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(parsed.data),
-      });
+      const res  = await fetch('/api/invitations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(parsed.data) });
       const body = await res.json();
-      if (res.ok) {
-        onCreated();
-      } else {
-        setFormError(body?.error?.message ?? 'Failed to create invitation');
-      }
+      if (res.ok) onCreated();
+      else setFormError(body?.error?.message ?? 'Failed to create invitation');
     } catch {
       setFormError('Network error. Please try again.');
     }
@@ -148,472 +284,487 @@ function InviteModalBody({
     setStep((s) => (s < 3 ? ((s + 1) as Step) : s));
   }
 
+  const enabledModuleCount = Object.values(moduleMap).filter(Boolean).length;
+  const roleOption          = role ? ROLE_OPTIONS.find((r) => r.value === role) : null;
+  const RoleIcon            = roleOption?.icon ?? null;
+
   return (
     <>
+      {/* Backdrop */}
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
         exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm"
+        className="fixed inset-0 z-50 bg-foreground/60 backdrop-blur-md"
         onClick={submitting ? undefined : onClose}
       />
+
+      {/* Modal */}
       <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
+        initial={{ opacity: 0, scale: 0.94, y: 24 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        transition={{ duration: 0.15 }}
-        className="fixed left-1/2 top-1/2 z-50 w-full max-w-3xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-2xl bg-white shadow-2xl"
-        style={{ maxHeight: '90vh', display: 'flex', flexDirection: 'column' }}
+        exit={{ opacity: 0, scale: 0.94, y: 24 }}
+        transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+        className="fixed left-1/2 top-1/2 z-50 flex w-full max-w-4xl -translate-x-1/2 -translate-y-1/2 overflow-hidden rounded-3xl bg-card shadow-[0_32px_80px_-8px_oklch(0.12_0.05_260/0.35)]"
+        style={{ maxHeight: '92vh' }}
+        onClick={(e) => e.stopPropagation()}
       >
-            {/* Header */}
-            <header className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-              <div>
-                <h2 className="text-lg font-bold text-slate-900">Invite a new user</h2>
-                <div className="mt-0.5 flex items-center gap-2 text-xs text-slate-500">
-                  <span>Step {step} of 3</span>
-                  <span>&middot;</span>
-                  <span>
-                    {step === 1 ? 'Basic details' : step === 2 ? 'Role & scope' : 'Module access'}
-                  </span>
+        {/* ── Sidebar ── */}
+        <aside className="relative flex w-60 shrink-0 flex-col overflow-hidden">
+          {/* premium-hero gradient using Vaidix primary palette */}
+          <div className="absolute inset-0" style={{
+            background: `
+              radial-gradient(at 20% 30%, oklch(0.45 0.17 165 / 0.95) 0px, transparent 55%),
+              radial-gradient(at 80% 20%, oklch(0.45 0.18 190 / 0.85) 0px, transparent 60%),
+              radial-gradient(at 60% 90%, oklch(0.40 0.16 220 / 0.75) 0px, transparent 60%),
+              linear-gradient(135deg, oklch(0.18 0.06 220), oklch(0.15 0.05 200))
+            `,
+          }} />
+
+          <div className="relative z-10 flex flex-1 flex-col">
+            {/* Avatar preview */}
+            <div className="flex flex-col items-center px-5 pb-5 pt-8">
+              <div className="relative mb-3">
+                <div className="absolute -inset-2 rounded-3xl blur-xl" style={{ background: 'oklch(0.55 0.17 165 / 0.4)' }} />
+                <motion.div
+                  layout
+                  className="relative flex size-18 items-center justify-center rounded-2xl text-2xl font-extrabold text-white shadow-xl"
+                  style={{ background: 'oklch(0.55 0.17 165)', boxShadow: '0 8px 24px oklch(0.45 0.17 165 / 0.5)' }}
+                >
+                  <AnimatePresence mode="wait">
+                    {getInitials(fullName) ? (
+                      <motion.span key={getInitials(fullName)} initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.6, opacity: 0 }} transition={{ duration: 0.15 }} className="tracking-tight">
+                        {getInitials(fullName)}
+                      </motion.span>
+                    ) : (
+                      <motion.div key="icon" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                        <UserCircle className="size-9 opacity-50" />
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </motion.div>
+              </div>
+
+              <AnimatePresence mode="wait">
+                {fullName.trim() ? (
+                  <motion.p key="name" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}
+                    className="text-center text-sm font-bold leading-snug text-white"
+                  >
+                    {fullName}
+                  </motion.p>
+                ) : (
+                  <motion.p key="ph" initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center text-xs italic text-white/40">
+                    No name yet
+                  </motion.p>
+                )}
+              </AnimatePresence>
+
+              {email && (
+                <motion.p initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} className="mt-1 max-w-45 truncate text-center text-[11px] text-white/50">
+                  {email}
+                </motion.p>
+              )}
+
+              <motion.div layout className="mt-3 flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-wide" style={{ background: 'oklch(1 0 0 / 0.12)', color: 'oklch(1 0 0 / 0.85)' }}>
+                {RoleIcon ? <RoleIcon className="size-3" /> : <UserCircle className="size-3" />}
+                {roleOption?.label ?? 'No role yet'}
+              </motion.div>
+            </div>
+
+            {/* Divider */}
+            <div className="mx-5 border-t border-white/10" />
+
+            {/* Steps */}
+            <nav className="flex flex-1 flex-col gap-0.5 px-2.5 py-4">
+              {STEP_META.map((meta, i) => {
+                const n      = (i + 1) as Step;
+                const Icon   = meta.icon;
+                const active = step === n;
+                const done   = step > n;
+                return (
+                  <div key={n} className={`flex items-center gap-3 rounded-xl px-3 py-2.5 transition-colors ${active ? 'bg-white/10' : ''}`}>
+                    <motion.div
+                      animate={done ? { background: 'oklch(0.55 0.17 165)', color: '#fff' } : active ? { background: '#fff', color: 'oklch(0.18 0.06 220)' } : { background: 'rgba(255,255,255,0.08)', color: 'rgba(255,255,255,0.35)' }}
+                      className="flex size-7 shrink-0 items-center justify-center rounded-full"
+                    >
+                      {done ? <CheckCircle2 className="size-4" /> : <Icon className="size-3.5" />}
+                    </motion.div>
+                    <div>
+                      <div className={`text-[10px] ${active ? 'text-white/50' : done ? 'text-white/30' : 'text-white/25'}`}>Step {n}</div>
+                      <div className={`text-sm font-semibold leading-none ${active ? 'text-white' : done ? 'text-white/60' : 'text-white/35'}`}>{meta.label}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </nav>
+
+            {/* Stats */}
+            <div className="mx-3 mb-5 rounded-2xl border border-white/10 p-3.5" style={{ background: 'oklch(1 0 0 / 0.06)' }}>
+              <div className="mb-2 flex items-center gap-1.5">
+                <Sparkles className="size-3 text-white/60" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">Summary</span>
+              </div>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/50">Modules</span>
+                  <span className="font-bold text-white/80">{enabledModuleCount} / {MODULES.length}</span>
+                </div>
+                <div className="h-1 w-full overflow-hidden rounded-full" style={{ background: 'oklch(1 0 0 / 0.12)' }}>
+                  <motion.div
+                    className="h-full rounded-full"
+                    style={{ background: 'oklch(0.65 0.17 165)' }}
+                    animate={{ width: `${(enabledModuleCount / MODULES.length) * 100}%` }}
+                    transition={{ duration: 0.4 }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-white/50">Expires in</span>
+                  <span className="font-bold text-white/80">{expiresInHours}h</span>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                disabled={submitting}
-                className="rounded-lg p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              >
-                <X className="size-5" />
-              </button>
-            </header>
-
-            {/* Step indicator */}
-            <div className="flex items-center gap-0 border-b border-slate-100 px-6 py-3">
-              {[1, 2, 3].map((n, i) => (
-                <div key={n} className="flex items-center gap-2 flex-1">
-                  <StepDot
-                    active={step === n}
-                    completed={step > n}
-                    icon={n === 1 ? UserCircle : n === 2 ? ShieldCheck : LayoutGrid}
-                  />
-                  {i < 2 && <div className={`flex-1 h-0.5 ${step > n ? 'bg-teal-500' : 'bg-slate-200'}`} />}
-                </div>
-              ))}
             </div>
+          </div>
+        </aside>
 
-            {/* Body */}
-            <div className="flex-1 overflow-y-auto px-6 py-6">
+        {/* ── Right panel ── */}
+        <div className="flex flex-1 flex-col overflow-hidden bg-card">
+          {/* Header */}
+          <header className="flex items-start justify-between border-b border-border px-7 py-5">
+            <div>
+              <p className="mb-0.5 text-[11px] font-bold uppercase tracking-widest text-primary">
+                {isEdit ? 'Edit invitation' : 'New invitation'} · Step {step} of 3
+              </p>
+              <h2 className="text-2xl font-extrabold tracking-tight text-foreground">
+                {STEP_META[step - 1].label}
+              </h2>
+              <p className="mt-0.5 text-sm text-muted-foreground">{STEP_META[step - 1].sub}</p>
+            </div>
+            <button
+              onClick={onClose}
+              disabled={submitting}
+              className="mt-1 rounded-xl p-2 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            >
+              <X className="size-5" />
+            </button>
+          </header>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto px-7 py-6">
+            <AnimatePresence>
               {formError && (
-                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                <motion.div
+                  initial={{ opacity: 0, y: -8, height: 0 }}
+                  animate={{ opacity: 1, y: 0, height: 'auto' }}
+                  exit={{ opacity: 0, y: -8, height: 0 }}
+                  className="mb-5 flex items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"
+                >
+                  <X className="size-4 shrink-0" />
                   {formError}
-                </div>
+                </motion.div>
               )}
+            </AnimatePresence>
 
+            <AnimatePresence mode="wait">
               {step === 1 && (
-                <Step1
-                  fullName={fullName}
-                  email={email}
-                  mobile={mobile}
-                  mciRegNumber={mciRegNumber}
-                  errors={fieldErrors}
-                  onChange={(patch) => {
-                    if ('fullName' in patch) setFullName(patch.fullName!);
-                    if ('email' in patch) setEmail(patch.email!);
-                    if ('mobile' in patch) setMobile(patch.mobile!);
-                    if ('mciRegNumber' in patch) setMciRegNumber(patch.mciRegNumber!);
-                  }}
-                />
+                <motion.div key="s1" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}>
+                  <Step1
+                    fullName={fullName} email={email} mobile={mobile} mciRegNumber={mciRegNumber} errors={fieldErrors}
+                    emailLocked={isEdit}
+                    emailCheck={emailCheck}
+                    onChange={(patch) => {
+                      if ('fullName'     in patch) setFullName(patch.fullName!);
+                      if ('email'        in patch) setEmail(patch.email!);
+                      if ('mobile'       in patch) setMobile(patch.mobile!);
+                      if ('mciRegNumber' in patch) setMciRegNumber(patch.mciRegNumber!);
+                    }}
+                  />
+                </motion.div>
               )}
-
               {step === 2 && (
-                <Step2
-                  role={role}
-                  subspecialty={subspecialty}
-                  department={department}
-                  yearOfResidency={yearOfResidency}
-                  expiresInHours={expiresInHours}
-                  errors={fieldErrors}
-                  onRoleChange={setRole}
-                  onSubspecialtyChange={setSubspecialty}
-                  onDepartmentChange={setDepartment}
-                  onYearChange={setYearOfResidency}
-                  onExpiryChange={setExpiresInHours}
-                />
+                <motion.div key="s2" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}>
+                  <Step2
+                    role={role} subspecialty={subspecialty} department={department}
+                    yearOfResidency={yearOfResidency} expiresInHours={expiresInHours} errors={fieldErrors}
+                    onRoleChange={setRole} onSubspecialtyChange={setSubspecialty}
+                    onDepartmentChange={setDepartment} onYearChange={setYearOfResidency} onExpiryChange={setExpiresInHours}
+                  />
+                </motion.div>
               )}
-
               {step === 3 && (
-                <Step3
-                  role={role}
-                  moduleMap={moduleMap}
-                  onToggle={(key) => setModuleMap((m) => ({ ...m, [key]: !m[key] }))}
-                  onResetToRoleDefaults={() => setModuleMap(defaultModuleMap(role))}
-                />
+                <motion.div key="s3" initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -24 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}>
+                  <Step3
+                    role={role!} moduleMap={moduleMap}
+                    onToggle={(key) => setModuleMap((m) => ({ ...m, [key]: !m[key] }))}
+                    onResetToRoleDefaults={() => role && setModuleMap(defaultModuleMap(role))}
+                  />
+                </motion.div>
               )}
-            </div>
+            </AnimatePresence>
+          </div>
 
-            {/* Footer */}
-            <footer className="flex items-center justify-between border-t border-slate-100 px-6 py-4">
-              {step > 1 ? (
-                <button
-                  onClick={() => setStep((s) => (s > 1 ? ((s - 1) as Step) : s))}
-                  disabled={submitting}
-                  className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  <ChevronLeft className="size-4" /> Back
-                </button>
-              ) : (
-                <button
-                  onClick={onClose}
-                  disabled={submitting}
-                  className="rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                >
-                  Cancel
-                </button>
-              )}
-              {step < 3 ? (
-                <button
-                  onClick={handleNext}
-                  className="flex items-center gap-1 rounded-xl bg-linear-to-br from-teal-600 to-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-teal-500/20 hover:shadow-xl"
-                >
-                  Next <ChevronRight className="size-4" />
-                </button>
-              ) : (
-                <button
-                  onClick={handleSubmit}
-                  disabled={submitting}
-                  className="flex items-center gap-2 rounded-xl bg-linear-to-br from-teal-600 to-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg shadow-teal-500/20 hover:shadow-xl disabled:opacity-70"
-                >
-                  <Send className="size-4" />
-                  {submitting ? 'Sending...' : 'Send invitation'}
-                </button>
-              )}
-            </footer>
-          </motion.div>
+          {/* Footer */}
+          <footer className="flex items-center justify-between border-t border-border px-7 py-4">
+            {step > 1 ? (
+              <button onClick={() => setStep((s) => (s > 1 ? ((s - 1) as Step) : s))} disabled={submitting}
+                className="flex items-center gap-1.5 rounded-xl px-4 py-2.5 text-sm font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              >
+                <ChevronLeft className="size-4" /> Back
+              </button>
+            ) : (
+              <button onClick={onClose} disabled={submitting}
+                className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted-foreground transition hover:bg-accent hover:text-foreground"
+              >
+                Cancel
+              </button>
+            )}
+
+            {step < 3 ? (
+              <motion.button
+                onClick={handleNext}
+                disabled={step === 1 && !isEdit && (emailCheck.state === 'taken' || emailCheck.state === 'checking')}
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-lg transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ boxShadow: '0 8px 24px oklch(0.45 0.15 165 / 0.35)' }}
+              >
+                Continue <ChevronRight className="size-4" />
+              </motion.button>
+            ) : (
+              <motion.button onClick={handleSubmit} disabled={submitting} whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
+                className="flex items-center gap-2 rounded-xl bg-primary px-6 py-2.5 text-sm font-bold text-primary-foreground shadow-lg transition hover:opacity-90 disabled:opacity-60"
+                style={{ boxShadow: '0 8px 24px oklch(0.45 0.15 165 / 0.35)' }}
+              >
+                <Send className="size-4" />
+                {submitting
+                  ? (isEdit ? 'Saving...' : 'Sending...')
+                  : (isEdit ? 'Save changes' : 'Send invitation')}
+              </motion.button>
+            )}
+          </footer>
+        </div>
+      </motion.div>
     </>
   );
 }
 
-export function InviteModal({
-  open,
-  onClose,
-  onCreated,
-}: {
+export function InviteModal({ open, onClose, onCreated, edit }: {
   open: boolean;
   onClose: () => void;
   onCreated: () => void;
+  edit?: InviteModalEditData;
 }) {
   return (
     <AnimatePresence>
-      {open && <InviteModalBody onClose={onClose} onCreated={onCreated} />}
+      {open && <InviteModalBody key={edit?.id ?? 'new'} onClose={onClose} onCreated={onCreated} edit={edit} />}
     </AnimatePresence>
   );
 }
 
-function StepDot({
-  active,
-  completed,
-  icon: Icon,
-}: {
-  active: boolean;
-  completed: boolean;
-  icon: typeof UserCircle;
-}) {
-  return (
-    <div
-      className={`flex size-8 items-center justify-center rounded-full transition ${
-        completed
-          ? 'bg-teal-500 text-white'
-          : active
-          ? 'bg-linear-to-br from-teal-600 to-blue-600 text-white'
-          : 'bg-slate-100 text-slate-400'
-      }`}
-    >
-      <Icon className="size-4" />
-    </div>
-  );
-}
+// ─── Step 1 ───────────────────────────────────────────────────────────────────
+type EmailCheckState =
+  | { state: 'idle' }
+  | { state: 'checking' }
+  | { state: 'available' }
+  | { state: 'taken'; reason: 'USER_EXISTS' | 'PENDING_INVITE'; message: string };
 
-// ─── Step 1: basic details ────────────────────────────────────────────────────
-function Step1({
-  fullName,
-  email,
-  mobile,
-  mciRegNumber,
-  errors,
-  onChange,
-}: {
-  fullName: string;
-  email: string;
-  mobile: string;
-  mciRegNumber: string;
+function Step1({ fullName, email, mobile, mciRegNumber, errors, emailLocked, emailCheck, onChange }: {
+  fullName: string; email: string; mobile: string; mciRegNumber: string;
   errors: Record<string, string>;
+  emailLocked?: boolean;
+  emailCheck?: EmailCheckState;
   onChange: (patch: Partial<{ fullName: string; email: string; mobile: string; mciRegNumber: string }>) => void;
 }) {
-  return (
-    <div className="space-y-4">
-      <Field label="Full name" icon={UserCircle} required error={errors.fullName}>
-        <input
-          value={fullName}
-          onChange={(e) => onChange({ fullName: e.target.value })}
-          placeholder="Dr. Priya Nair"
-          className="input"
-        />
-      </Field>
-      <Field label="Email address" icon={Mail} required error={errors.email}>
-        <input
-          type="email"
-          value={email}
-          onChange={(e) => onChange({ email: e.target.value })}
-          placeholder="priya@lvpei.org"
-          className="input"
-        />
-      </Field>
-      <Field label="Mobile (optional)" icon={Phone} error={errors.mobile}>
-        <input
-          value={mobile}
-          onChange={(e) => onChange({ mobile: e.target.value })}
-          placeholder="+91 98765 43210"
-          className="input"
-        />
-      </Field>
-      <Field label="MCI registration (optional)" icon={IdCard} error={errors.mciRegNumber}>
-        <input
-          value={mciRegNumber}
-          onChange={(e) => onChange({ mciRegNumber: e.target.value })}
-          placeholder="TSMC-12345"
-          className="input"
-        />
-      </Field>
+  const emailFormatValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const nameValid   = fullName.trim().length >= 2;
+  const mobileValid = !mobile || /^(\+91[-\s]?)?[6-9]\d{9}$/.test(mobile.replace(/\s|-/g, ''));
 
-      <style jsx>{`
-        .input {
-          width: 100%;
-          border-radius: 10px;
-          border: 1px solid #e2e8f0;
-          padding: 10px 12px;
-          font-size: 14px;
-          outline: none;
-          transition: border-color 0.15s, box-shadow 0.15s;
-        }
-        .input:focus {
-          border-color: #0d9488;
-          box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
-        }
-      `}</style>
+  // The Field-level "valid" tick only lights when format is good AND, in
+  // create mode, the live availability check came back available.
+  const emailValid =
+    !emailLocked &&
+    emailFormatValid &&
+    email.length > 0 &&
+    (!emailCheck || emailCheck.state === 'available' || emailCheck.state === 'idle');
+
+  // We hide the standard error message when the live check has its own
+  // banner, so we don't show the same thing twice.
+  const showStandardEmailError =
+    !!errors.email && (!emailCheck || emailCheck.state !== 'taken');
+
+  return (
+    <div className="space-y-5">
+      <Field label="Full name" icon={UserCircle} required error={errors.fullName} valid={nameValid && fullName.length > 0}>
+        <FancyInput value={fullName} onChange={(v) => onChange({ fullName: v })} placeholder="Dr. Priya Nair" />
+      </Field>
+      <Field
+        label="Email address"
+        icon={Mail}
+        required={!emailLocked}
+        error={showStandardEmailError ? errors.email : undefined}
+        valid={emailValid}
+        hint={emailLocked ? 'Locked — revoke & re-invite to change' : undefined}
+      >
+        {emailLocked ? (
+          <div className="w-full rounded-xl border-2 border-dashed border-border bg-muted/30 px-3.5 py-2.5 text-sm font-medium text-muted-foreground">
+            {email}
+          </div>
+        ) : (
+          <FancyInput type="email" value={email} onChange={(v) => onChange({ email: v })} placeholder="priya@lvpei.org" />
+        )}
+        {!emailLocked && emailFormatValid && emailCheck && (
+          <EmailCheckBanner check={emailCheck} />
+        )}
+      </Field>
+      <div className="grid grid-cols-2 gap-4">
+        <Field label="Mobile" icon={Phone} hint="Optional" error={errors.mobile} valid={mobileValid && mobile.length > 0}>
+          <FancyInput value={mobile} onChange={(v) => onChange({ mobile: v })} placeholder="+91 98765 43210" />
+        </Field>
+        <Field label="MCI registration" icon={IdCard} hint="Optional">
+          <FancyInput value={mciRegNumber} onChange={(v) => onChange({ mciRegNumber: v })} placeholder="TSMC-12345" />
+        </Field>
+      </div>
     </div>
   );
 }
 
-// ─── Step 2: role + scope ─────────────────────────────────────────────────────
-function Step2({
-  role,
-  subspecialty,
-  department,
-  yearOfResidency,
-  expiresInHours,
-  errors,
-  onRoleChange,
-  onSubspecialtyChange,
-  onDepartmentChange,
-  onYearChange,
-  onExpiryChange,
-}: {
-  role: Role;
-  subspecialty: string;
-  department: string;
-  yearOfResidency: number | '';
-  expiresInHours: number;
+// ─── Step 2 ───────────────────────────────────────────────────────────────────
+function Step2({ role, subspecialty, department, yearOfResidency, expiresInHours, errors, onRoleChange, onSubspecialtyChange, onDepartmentChange, onYearChange, onExpiryChange }: {
+  role: Role | null; subspecialty: string; department: string; yearOfResidency: number | ''; expiresInHours: number;
   errors: Record<string, string>;
-  onRoleChange: (r: Role) => void;
-  onSubspecialtyChange: (v: string) => void;
-  onDepartmentChange: (v: string) => void;
-  onYearChange: (v: number | '') => void;
-  onExpiryChange: (v: number) => void;
+  onRoleChange: (r: Role) => void; onSubspecialtyChange: (v: string) => void; onDepartmentChange: (v: string) => void;
+  onYearChange: (v: number | '') => void; onExpiryChange: (v: number) => void;
 }) {
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <div>
-        <label className="mb-2 block text-xs font-bold uppercase tracking-wider text-slate-500">Role</label>
+        <p className="mb-3 text-xs font-bold uppercase tracking-widest text-muted-foreground">Select role</p>
+        {errors.role && (
+          <p className="mb-2 text-xs font-medium text-destructive">{errors.role}</p>
+        )}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {ROLE_OPTIONS.map((opt) => (
-            <label
-              key={opt.value}
-              className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${
-                role === opt.value
-                  ? 'border-teal-500 bg-teal-50 shadow-sm'
-                  : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-              }`}
-            >
-              <input
-                type="radio"
-                name="role"
-                value={opt.value}
-                checked={role === opt.value}
-                onChange={() => onRoleChange(opt.value)}
-                className="mt-0.5 size-4"
-              />
-              <div>
-                <div className="text-sm font-semibold text-slate-900">{opt.label}</div>
-                <div className="text-xs text-slate-500">{opt.description}</div>
-              </div>
-            </label>
-          ))}
+          {ROLE_OPTIONS.map((opt) => {
+            const Icon     = opt.icon;
+            const selected = role === opt.value;
+            return (
+              <motion.label key={opt.value} whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }}
+                className={`flex cursor-pointer items-start gap-3 rounded-2xl border-2 p-3.5 transition-all ${
+                  selected
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-border hover:border-primary/40 hover:bg-accent/50'
+                }`}
+              >
+                <input type="radio" name="role" value={opt.value} checked={selected} onChange={() => onRoleChange(opt.value)} className="sr-only" />
+                <div className={`mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl transition ${selected ? 'bg-primary/10' : 'bg-muted'}`}>
+                  <Icon className={`size-5 transition ${selected ? 'text-primary' : 'text-muted-foreground'}`} />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center justify-between gap-1">
+                    <span className="text-sm font-bold text-foreground">{opt.label}</span>
+                    <AnimatePresence>
+                      {selected && (
+                        <motion.span initial={{ scale: 0 }} animate={{ scale: 1 }} exit={{ scale: 0 }}>
+                          <CheckCircle2 className="size-4 text-primary" />
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{opt.description}</p>
+                </div>
+              </motion.label>
+            );
+          })}
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-2 gap-4">
         <Field label="Subspecialty">
-          <input
-            value={subspecialty}
-            onChange={(e) => onSubspecialtyChange(e.target.value)}
-            placeholder="Vitreoretinal Surgery"
-            className="input"
-          />
+          <FancyInput value={subspecialty} onChange={onSubspecialtyChange} placeholder="Vitreoretinal Surgery" />
         </Field>
         <Field label="Department">
-          <input
-            value={department}
-            onChange={(e) => onDepartmentChange(e.target.value)}
-            placeholder="Department name"
-            className="input"
-          />
+          <FancyInput value={department} onChange={onDepartmentChange} placeholder="Department name" />
         </Field>
-
         {role === Role.RESIDENT && (
           <Field label="Year of Residency" required error={errors.yearOfResidency}>
-            <select
-              value={yearOfResidency}
-              onChange={(e) => onYearChange(e.target.value ? parseInt(e.target.value) : '')}
-              className="input"
-            >
+            <FancySelect value={String(yearOfResidency)} onChange={(v) => onYearChange(v ? parseInt(v) : '')}>
               <option value="">Select year</option>
-              {[1, 2, 3, 4, 5].map((y) => (
-                <option key={y} value={y}>
-                  PGY-{y}
-                </option>
-              ))}
-            </select>
+              {[1, 2, 3, 4, 5].map((y) => <option key={y} value={y}>PGY-{y}</option>)}
+            </FancySelect>
           </Field>
         )}
-
-        <Field label="Invitation valid for">
-          <select
-            value={expiresInHours}
-            onChange={(e) => onExpiryChange(parseInt(e.target.value))}
-            className="input"
-          >
+        <Field label="Invitation expires" icon={Clock}>
+          <FancySelect value={String(expiresInHours)} onChange={(v) => onExpiryChange(parseInt(v))}>
             <option value={24}>24 hours</option>
             <option value={48}>48 hours (recommended)</option>
             <option value={72}>72 hours</option>
             <option value={168}>7 days</option>
-          </select>
+          </FancySelect>
         </Field>
       </div>
-
-      <style jsx>{`
-        .input {
-          width: 100%;
-          border-radius: 10px;
-          border: 1px solid #e2e8f0;
-          padding: 10px 12px;
-          font-size: 14px;
-          outline: none;
-          background: white;
-        }
-        .input:focus {
-          border-color: #0d9488;
-          box-shadow: 0 0 0 3px rgba(13, 148, 136, 0.15);
-        }
-      `}</style>
     </div>
   );
 }
 
-// ─── Step 3: module access ────────────────────────────────────────────────────
-function Step3({
-  role,
-  moduleMap,
-  onToggle,
-  onResetToRoleDefaults,
-}: {
-  role: Role;
-  moduleMap: Record<string, boolean>;
-  onToggle: (key: string) => void;
-  onResetToRoleDefaults: () => void;
+// ─── Step 3 ───────────────────────────────────────────────────────────────────
+function Step3({ role, moduleMap, onToggle, onResetToRoleDefaults }: {
+  role: Role; moduleMap: Record<string, boolean>;
+  onToggle: (key: string) => void; onResetToRoleDefaults: () => void;
 }) {
   const byCategory = useMemo(() => {
-    const groups: Record<ModuleCategory, ModuleDef[]> = {
-      learning: [], assessment: [], faculty: [], program: [], admin: [],
-    };
-    for (const m of MODULES) groups[m.category].push(m);
-    return groups;
+    const g: Record<ModuleCategory, ModuleDef[]> = { learning: [], assessment: [], faculty: [], program: [], admin: [] };
+    for (const m of MODULES) g[m.category].push(m);
+    return g;
   }, []);
 
   const enabledCount = Object.values(moduleMap).filter(Boolean).length;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm">
-        <div className="text-teal-900">
-          Default modules for <strong>{humanRole(role)}</strong> are pre-selected.
-          <br />
-          <span className="text-xs text-teal-700">
-            Uncheck to restrict access, or check others to grant extra modules.
-          </span>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3.5">
+        <div>
+          <p className="text-sm font-bold text-foreground">
+            Defaults for <span className="text-primary">{humanRole(role)}</span> pre-selected
+          </p>
+          <p className="text-xs text-muted-foreground">{enabledCount} of {MODULES.length} enabled · customise below</p>
         </div>
-        <button
-          onClick={onResetToRoleDefaults}
-          type="button"
-          className="shrink-0 rounded-lg border border-teal-300 bg-white px-3 py-1.5 text-xs font-semibold text-teal-700 hover:bg-teal-100"
+        <button onClick={onResetToRoleDefaults} type="button"
+          className="rounded-xl border border-primary/30 bg-card px-3 py-1.5 text-xs font-bold text-primary transition hover:bg-primary/5"
         >
           Reset
         </button>
       </div>
 
-      <div className="text-xs text-slate-500">
-        {enabledCount} of {MODULES.length} modules enabled for this user.
-      </div>
-
       {(['learning', 'assessment', 'faculty', 'program', 'admin'] as ModuleCategory[]).map((cat) => (
         <div key={cat}>
-          <div className="mb-2 text-[11px] font-bold uppercase tracking-wider text-slate-500">
-            {CATEGORY_LABELS[cat]}
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{CATEGORY_LABELS[cat]}</span>
+            <div className="flex-1 border-t border-border" />
           </div>
-          <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             {byCategory[cat].map((m) => {
-              const enabled = moduleMap[m.key] ?? false;
+              const enabled   = moduleMap[m.key] ?? false;
               const isDefault = m.defaultRoles.includes(role);
               return (
-                <label
-                  key={m.key}
-                  className={`flex cursor-pointer items-start gap-2.5 rounded-lg border p-2.5 text-sm transition ${
-                    enabled
-                      ? 'border-teal-300 bg-teal-50'
-                      : 'border-slate-200 bg-white hover:border-slate-300'
+                <motion.label key={m.key} whileHover={{ scale: 1.01 }}
+                  className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition ${
+                    enabled ? 'border-primary/30 bg-primary/5' : 'border-border bg-card hover:border-primary/20'
                   }`}
                 >
-                  <input
-                    type="checkbox"
-                    checked={enabled}
-                    onChange={() => onToggle(m.key)}
-                    className="mt-0.5 size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                  <input type="checkbox" checked={enabled} onChange={() => onToggle(m.key)}
+                    className="mt-0.5 size-4 rounded border-border text-primary focus:ring-primary/20"
                   />
-                  <div className="flex-1">
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-semibold text-slate-900">{m.label}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="text-sm font-semibold text-foreground">{m.label}</span>
                       {!isDefault && enabled && (
-                        <span className="rounded bg-blue-100 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
-                          EXTRA
-                        </span>
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-bold text-primary">EXTRA</span>
                       )}
                       {isDefault && !enabled && (
-                        <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700">
-                          REMOVED
-                        </span>
+                        <span className="rounded-full bg-destructive/10 px-2 py-0.5 text-[10px] font-bold text-destructive">REMOVED</span>
                       )}
                     </div>
-                    <div className="text-xs text-slate-500">{m.description}</div>
+                    <p className="truncate text-xs text-muted-foreground">{m.description}</p>
                   </div>
-                </label>
+                </motion.label>
               );
             })}
           </div>
@@ -623,28 +774,130 @@ function Step3({
   );
 }
 
-function Field({
-  label,
-  icon: Icon,
-  error,
-  required,
-  children,
-}: {
-  label: string;
-  icon?: typeof UserCircle;
-  error?: string;
-  required?: boolean;
+// ─── Field ────────────────────────────────────────────────────────────────────
+function Field({ label, icon: Icon, error, required, hint, valid, children }: {
+  label: string; icon?: typeof UserCircle; error?: string; required?: boolean; hint?: string; valid?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div>
-      <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-slate-700">
-        {Icon && <Icon className="size-3.5 text-slate-400" />}
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
+      <div className="mb-1.5 flex items-center justify-between">
+        <label className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+          {Icon && <Icon className="size-3.5 text-muted-foreground" />}
+          {label}
+          {required && <span className="text-destructive">*</span>}
+        </label>
+        <div className="flex items-center gap-2">
+          {hint && <span className="text-xs text-muted-foreground">{hint}</span>}
+          <AnimatePresence>
+            {valid && (
+              <motion.span initial={{ scale: 0, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0, opacity: 0 }} transition={{ type: 'spring', stiffness: 400, damping: 20 }}>
+                <CheckCircle2 className="size-3.5 text-primary" />
+              </motion.span>
+            )}
+          </AnimatePresence>
+        </div>
+      </div>
       {children}
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+      <AnimatePresence>
+        {error && (
+          <motion.p initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }}
+            className="mt-1 text-xs font-medium text-destructive"
+          >
+            {error}
+          </motion.p>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+// ─── FancyInput ───────────────────────────────────────────────────────────────
+function FancyInput({ value, onChange, placeholder, type = 'text' }: {
+  value: string; onChange: (v: string) => void; placeholder?: string; type?: string;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <input
+      type={type}
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      placeholder={placeholder}
+      className={`w-full rounded-xl border-2 bg-muted/40 px-3.5 py-2.5 text-sm font-medium text-foreground outline-none placeholder:font-normal placeholder:text-muted-foreground/60 transition-all ${
+        focused
+          ? 'border-primary bg-card shadow-[0_0_0_4px_oklch(0.45_0.15_165/0.12)]'
+          : 'border-input hover:border-primary/30 hover:bg-card'
+      }`}
+    />
+  );
+}
+
+// ─── FancySelect ─────────────────────────────────────────────────────────────
+function FancySelect({ value, onChange, children }: {
+  value: string; onChange: (v: string) => void; children: React.ReactNode;
+}) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      className={`w-full rounded-xl border-2 bg-muted/40 px-3.5 py-2.5 text-sm font-medium text-foreground outline-none transition-all ${
+        focused
+          ? 'border-primary bg-card shadow-[0_0_0_4px_oklch(0.45_0.15_165/0.12)]'
+          : 'border-input hover:border-primary/30 hover:bg-card'
+      }`}
+    >
+      {children}
+    </select>
+  );
+}
+
+// ─── EmailCheckBanner ────────────────────────────────────────────────────────
+function EmailCheckBanner({ check }: { check: EmailCheckState }) {
+  if (check.state === 'idle') return null;
+  if (check.state === 'checking') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mt-2 flex items-center gap-2 text-xs text-muted-foreground"
+      >
+        <Loader2 className="size-3.5 animate-spin" />
+        Checking availability…
+      </motion.div>
+    );
+  }
+  if (check.state === 'available') {
+    return (
+      <motion.div
+        initial={{ opacity: 0, y: -4 }}
+        animate={{ opacity: 1, y: 0 }}
+        className="mt-2 flex items-center gap-2 rounded-lg bg-primary/5 px-2.5 py-1.5 text-xs font-medium text-primary"
+      >
+        <CheckCircle2 className="size-3.5" />
+        Email is available — ready to invite
+      </motion.div>
+    );
+  }
+  // taken
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: -4 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mt-2 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-2 text-xs text-destructive"
+    >
+      <AlertCircle className="mt-0.5 size-3.5 shrink-0" />
+      <div>
+        <div className="font-bold uppercase tracking-wide text-[10px]">
+          {check.reason === 'USER_EXISTS' ? 'Already a registered user' : 'Already invited'}
+        </div>
+        <div className="mt-0.5">{check.message}</div>
+      </div>
+    </motion.div>
   );
 }
 

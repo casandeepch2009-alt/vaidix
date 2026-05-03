@@ -9,6 +9,16 @@ import { startTranscodeWorker } from './transcode-worker';
 import { startTranscribeWorker } from './transcribe-worker';
 import { startWhatsappWorker } from './whatsapp-worker';
 import { startReelRenderWorker } from './reel-render-worker';
+import { startPreQuestionClusterWorker } from './pre-question-cluster-worker';
+import { startPhiScanWorker } from './phi-scan-worker';
+import { startPromoTeaserWorker } from './promo-teaser-worker';
+// HARDENING-PLAN sprint
+import { startAuditWorker } from './audit-worker';                  // item #14
+import { startRetentionWorker } from './retention-worker';          // item #16
+import { startDsrExportWorker } from './dsr-export-worker';         // item #17
+import { startErasureWorker } from './erasure-worker';              // item #17
+import { startDlqWatchers } from './dlq-watcher';                    // item #8
+import { log } from '@/lib/log';
 
 const workers = [
   startReminderWorker(),
@@ -16,13 +26,28 @@ const workers = [
   startTranscribeWorker(),
   startWhatsappWorker(),
   startReelRenderWorker(),
+  startPreQuestionClusterWorker(),
+  startPhiScanWorker(),
+  startPromoTeaserWorker(),
+  startAuditWorker(),
+  startRetentionWorker(),
+  startDsrExportWorker(),
+  startErasureWorker(),
 ];
 
-console.log(`[workers] started ${workers.length} worker(s):`, workers.map((w) => w.name));
+const dlqWatchers = startDlqWatchers();
+
+log.info(
+  { workers: workers.map((w) => w.name), dlqWatchers: dlqWatchers.length },
+  '[workers] started'
+);
 
 async function shutdown(signal: string) {
-  console.log(`[workers] ${signal} received, closing ${workers.length} worker(s)...`);
-  await Promise.all(workers.map((w) => w.close()));
+  log.info({ signal, workers: workers.length, dlqWatchers: dlqWatchers.length }, '[workers] shutting down');
+  await Promise.all([
+    ...workers.map((w) => w.close()),
+    ...dlqWatchers.map((d) => d.close()),
+  ]);
   process.exit(0);
 }
 

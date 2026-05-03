@@ -1,11 +1,10 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { ClipboardCheck, CheckCircle2 } from 'lucide-react'
+import { ClipboardCheck, FlaskConical } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import { PageTransition, StaggerItem, motion } from '@/lib/motion'
 import type { User } from '@/lib/types'
@@ -67,44 +66,16 @@ export default function DOPSAssessmentPage() {
   const [domainScores, setDomainScores] = useState<Record<string, number>>({})
   const [overallRating, setOverallRating] = useState<number>(0)
   const [feedback, setFeedback] = useState('')
-  const [submitted, setSubmitted] = useState(false)
 
   const handleDomainScore = (domainId: string, score: number) => {
     setDomainScores((prev) => ({ ...prev, [domainId]: score }))
   }
 
-  const handleSubmit = () => {
-    setSubmitted(true)
-    // In production, this would POST to an API
-  }
-
-  const allDomainsScored = SCORING_DOMAINS.every((d) => domainScores[d.id])
-  const canSubmit =
-    selectedLearner && selectedProcedure && allDomainsScored && overallRating > 0
-
-  if (submitted) {
-    return (
-      <div className="mx-auto max-w-2xl py-20 text-center">
-        <div className="mx-auto mb-4 flex size-16 items-center justify-center rounded-full bg-emerald-500/10">
-          <CheckCircle2 className="size-8 text-emerald-500" />
-        </div>
-        <h2 className="text-xl font-bold">Assessment Submitted</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          DOPS assessment has been recorded successfully.
-        </p>
-        <Button className="mt-6" onClick={() => {
-          setSubmitted(false)
-          setSelectedLearner('')
-          setSelectedProcedure('')
-          setDomainScores({})
-          setOverallRating(0)
-          setFeedback('')
-        }}>
-          Submit Another Assessment
-        </Button>
-      </div>
-    )
-  }
+  // Submit is intentionally disabled until W8 wires `POST /api/faculty/dops` and
+  // writes to the existing `DopsAssessment` table. The previous "Submission
+  // Successful" screen was UI-theatre — it dropped the assessment on the floor
+  // and gave faculty a false-positive receipt. Removed until the real route
+  // exists. See VAIDIX-BUILD-PLAN-NOW.md §10b.
 
   return (
     <PageTransition className="mx-auto max-w-3xl space-y-6">
@@ -116,9 +87,32 @@ export default function DOPSAssessmentPage() {
             <h1 className="text-2xl font-bold tracking-tight">DOPS Assessment</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Direct Observation of Procedural Skills
+            Direct Observation of Procedural Skills. Persistence to the{' '}
+            <span className="font-medium">DopsAssessment</span> table lands in Week 8.
           </p>
         </div>
+      </StaggerItem>
+
+      {/* W8 build-plan banner — DOPS form is preview-only until /api/faculty/dops + ScoringEvent log land per VAIDIX-BUILD-PLAN-NOW.md §10b. */}
+      <StaggerItem>
+        <Card className="border-dashed">
+          <CardContent className="flex items-start gap-3 pt-6">
+            <FlaskConical className="mt-0.5 size-5 shrink-0 text-amber-600" />
+            <div className="text-sm">
+              <p className="font-medium">Scheduled for Week 8 of the build plan.</p>
+              <p className="mt-1 text-muted-foreground">
+                This form is a UI preview. Submission is disabled — the{' '}
+                <span className="font-medium">DopsAssessment</span> +{' '}
+                <span className="font-medium">ScoringEvent</span> tables exist in the schema (W0
+                lock) but the writing endpoint{' '}
+                <code className="rounded bg-muted px-1 py-0.5 text-xs">POST /api/faculty/dops</code>{' '}
+                ships in W8 alongside Mini-CEX, EPA records, and the resident progress page (3H
+                radar + Bloom&rsquo;s + EPA heatmap). Submitting today would silently drop the
+                assessment, so the button stays disabled until the route lands.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </StaggerItem>
 
       {/* Form */}
@@ -271,17 +265,20 @@ export default function DOPSAssessmentPage() {
         </Card>
       </StaggerItem>
 
-      {/* Submit */}
+      {/* Submit — intentionally disabled until W8 lands the real POST endpoint */}
       <StaggerItem>
-        <div className="flex justify-end pb-6">
+        <div className="flex flex-col items-end gap-2 pb-6">
           <Button
             size="lg"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
+            disabled
+            title="Submission lands in Week 8 with /api/faculty/dops"
           >
             <ClipboardCheck className="size-4" />
-            Submit Assessment
+            Submit Assessment (W8)
           </Button>
+          <p className="text-xs text-muted-foreground">
+            Disabled until the W8 endpoint ships — see banner above.
+          </p>
         </div>
       </StaggerItem>
     </PageTransition>

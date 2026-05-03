@@ -1,13 +1,14 @@
 import { db } from '@/lib/db';
 import { Role } from '@prisma/client';
-import { revokeInvitationSchema } from '@/lib/validation/auth';
+import { revokeInvitationSchema, updateInvitationSchema } from '@/lib/validation/auth';
 import {
   jsonOk,
   jsonError,
+  parseBody,
   requireRole,
   handleUnexpected,
 } from '@/server/services/api-helpers';
-import { revokeInvitation } from '@/server/services/invitation-service';
+import { revokeInvitation, updateInvitation } from '@/server/services/invitation-service';
 
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
@@ -30,6 +31,29 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     });
 
     return jsonOk({ invitation: inv, timeline });
+  } catch (err) {
+    return handleUnexpected(err);
+  }
+}
+
+export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }> }) {
+  try {
+    const gate = await requireRole(Role.ADMIN);
+    if (!gate.ok) return gate.response;
+
+    const { id } = await ctx.params;
+    const parsed = await parseBody(req, updateInvitationSchema);
+    if (!parsed.ok) return parsed.response;
+
+    try {
+      const invitation = await updateInvitation(id, parsed.data, gate.user.id);
+      return jsonOk({ invitation });
+    } catch (err) {
+      const code = (err as Error).message;
+      if (code === 'NOT_FOUND')   return jsonError('NOT_FOUND',   'Invitation not found', 404);
+      if (code === 'NOT_EDITABLE') return jsonError('NOT_EDITABLE', 'Only pending invitations can be edited', 409);
+      throw err;
+    }
   } catch (err) {
     return handleUnexpected(err);
   }

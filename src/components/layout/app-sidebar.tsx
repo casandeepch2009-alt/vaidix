@@ -36,11 +36,12 @@ import {
   CalendarDays,
   Inbox,
   UsersRound,
+  FolderOpen,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useRole } from '@/contexts/role-context'
-import { SIDEBAR_NAV, ROLE_LABELS } from '@/lib/constants'
+import { SIDEBAR_NAV } from '@/lib/constants'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import {
@@ -83,6 +84,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   CalendarDays,
   Inbox,
   UsersRound,
+  FolderOpen,
 }
 
 interface AppSidebarProps {
@@ -95,8 +97,11 @@ export function AppSidebar({ collapsed: controlledCollapsed, onToggle }: AppSide
   const collapsed = controlledCollapsed ?? internalCollapsed
   const handleToggle = onToggle ?? (() => setInternalCollapsed((prev) => !prev))
   const pathname = usePathname()
-  const { currentUser, currentRole } = useRole()
+  const { currentRole } = useRole()
 
+  // Falls back to [] for any future role missing a nav definition. The TS
+  // exhaustiveness check on `Record<UserRole, ...>` in constants.ts should
+  // catch the omission at build time, but this guards runtime regardless.
   const navItems = SIDEBAR_NAV[currentRole] ?? []
 
   return (
@@ -107,17 +112,32 @@ export function AppSidebar({ collapsed: controlledCollapsed, onToggle }: AppSide
           collapsed ? 'w-17' : 'w-64'
         )}
       >
-        {/* Logo / Branding */}
-        <div className="flex h-14 shrink-0 items-center gap-2.5 px-4">
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-teal-500 via-teal-600 to-blue-600 text-sm font-bold text-white shadow-lg shadow-teal-500/30">
-            V
-          </span>
-          {!collapsed && (
-            <span className="bg-linear-to-r from-teal-700 to-blue-700 bg-clip-text text-lg font-bold tracking-tight text-transparent dark:from-teal-300 dark:to-blue-300">
-              Vaidix
-              <span className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-emerald-500" />
+        {/* Logo / Branding + Collapse toggle */}
+        <div className={cn('flex h-14 shrink-0 items-center px-3', collapsed ? 'flex-col justify-center gap-1.5' : 'justify-between gap-2')}>
+          <div className="flex items-center gap-2.5">
+            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-teal-500 via-teal-600 to-blue-600 text-sm font-bold text-white shadow-lg shadow-teal-500/30">
+              V
             </span>
-          )}
+            {!collapsed && (
+              <span className="bg-linear-to-r from-teal-700 to-blue-700 bg-clip-text text-lg font-bold tracking-tight text-transparent dark:from-teal-300 dark:to-blue-300">
+                Vaidix
+                <span className="ml-1 inline-block size-1.5 animate-pulse rounded-full bg-emerald-500" />
+              </span>
+            )}
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={handleToggle}
+            className="size-7 shrink-0 rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            {collapsed ? (
+              <ChevronRight className="size-4" />
+            ) : (
+              <ChevronLeft className="size-4" />
+            )}
+          </Button>
         </div>
 
         <div className="mx-3 h-px bg-linear-to-r from-transparent via-border/60 to-transparent" />
@@ -192,22 +212,6 @@ export function AppSidebar({ collapsed: controlledCollapsed, onToggle }: AppSide
           </nav>
         </ScrollArea>
 
-        {/* Collapse toggle */}
-        <div className={cn('shrink-0 border-t border-border/30 p-2', collapsed ? 'flex justify-center' : 'flex justify-end')}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={handleToggle}
-            className="size-7 rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? (
-              <ChevronRight className="size-4" />
-            ) : (
-              <ChevronLeft className="size-4" />
-            )}
-          </Button>
-        </div>
       </aside>
     </TooltipProvider>
   )

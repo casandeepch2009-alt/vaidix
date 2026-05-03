@@ -1,7 +1,11 @@
 'use client'
 
+// W6 P2 — DB-backed case detail page. The "Start Case" button creates a real
+// Case + Conversation server-side via POST /api/cases/[id]/conversations and
+// then routes to the live chat at /cases/[id]/session?conv=<id>.
+
 import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   ArrowLeft,
@@ -16,40 +20,113 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { PageTransition, StaggerItem, motion } from '@/lib/motion'
-import type { ClinicalCase, Conversation } from '@/lib/types'
-import casesData from '@/mock-data/cases.json'
-import conversationsData from '@/mock-data/conversations.json'
+
+interface CaseTemplateApi {
+  id: string
+  legacyId: string | null
+  title: string
+  condition: string
+  specialty: string
+  topicSlug: string | null
+  bloomsLevel: number
+  difficulty: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'
+  estimatedMinutes: number
+  description: string
+  patientName: string
+  patientAgeYears: number
+  patientSex: string
+  oslerianPrinciples: string[]
+  tags: string[]
+  imageCount: number
+  isEmergency: boolean
+  completions: number
+}
+
+interface ConversationSummary {
+  id: string
+  caseId: string
+  status: 'ACTIVE' | 'COMPLETED' | 'FLAGGED'
+  stage: string
+  startedAt: string
+  updatedAt: string
+}
 
 const difficultyConfig = {
-  beginner: {
+  BEGINNER: {
     label: 'Beginner',
     cls: 'bg-emerald-500/10 text-emerald-700 border-emerald-500/30 dark:text-emerald-400',
   },
-  intermediate: {
+  INTERMEDIATE: {
     label: 'Intermediate',
     cls: 'bg-amber-500/10 text-amber-700 border-amber-500/30 dark:text-amber-400',
   },
-  advanced: {
+  ADVANCED: {
     label: 'Advanced',
     cls: 'bg-red-500/10 text-red-700 border-red-500/30 dark:text-red-400',
   },
-}
+} as const
 
 export default function CaseOverviewPage() {
   const params = useParams<{ caseId: string }>()
-  const [caseData, setCaseData] = useState<ClinicalCase | null>(null)
-  const [previousConversation, setPreviousConversation] = useState<Conversation | null>(null)
+  const router = useRouter()
+  const [caseData, setCaseData] = useState<CaseTemplateApi | null>(null)
+  const [previousConversation, setPreviousConversation] = useState<ConversationSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [starting, setStarting] = useState(false)
 
   useEffect(() => {
-    const found = (casesData as unknown as ClinicalCase[]).find((c) => c.id === params.caseId)
-    setCaseData(found || null)
-
-    const prevConv = (conversationsData as unknown as Conversation[]).find(
-      (c) => c.caseId === params.caseId && c.status === 'completed'
-    )
-    setPreviousConversation(prevConv || null)
+    let cancelled = false
+    ;(async () => {
+      const [tplRes, convRes] = await Promise.all([
+        fetch(`/api/cases/${params.caseId}`, { credentials: 'include' }),
+        fetch(`/api/cases/${params.caseId}/conversations`, { credentials: 'include' }),
+      ])
+      const tpl = await tplRes.json()
+      const conv = await convRes.json()
+      if (cancelled) return
+      if (tpl.ok) setCaseData(tpl.data)
+      if (conv.ok && conv.data?.items?.length > 0) {
+        // Show the most recent completed attempt for "Review" — falls back
+        // to the most recent active one if none completed.
+        const items = conv.data.items as ConversationSummary[]
+        const completed = items.find((c) => c.status === 'COMPLETED')
+        setPreviousConversation(completed ?? items[0])
+      }
+      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
   }, [params.caseId])
 
+  const startCase = async () => {
+    if (!caseData) return
+    setStarting(true)
+    try {
+      const res = await fetch(`/api/cases/${params.caseId}/conversations`, {
+        method: 'POST',
+        credentials: 'include',
+      })
+      const json = await res.json()
+      if (json.ok) {
+        router.push(`/cases/${params.caseId}/session?conv=${json.data.conversationId}`)
+      } else {
+        alert(json.error?.message ?? 'Failed to start case')
+        setStarting(false)
+      }
+    } catch (err) {
+      alert((err as Error).message)
+      setStarting(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+        Loading case…
+      </div>
+    )
+  }
   if (!caseData) {
     return (
       <div className="flex h-full items-center justify-center">
@@ -59,15 +136,10 @@ export default function CaseOverviewPage() {
   }
 
   const difficulty = difficultyConfig[caseData.difficulty]
-
-  const genderLabel =
-    caseData.patientGender === 'M' || (caseData.patientGender as string) === 'Male'
-      ? 'Male'
-      : 'Female'
+  const genderLabel = caseData.patientSex === 'M' || caseData.patientSex === 'Male' ? 'Male' : 'Female'
 
   return (
     <PageTransition className="mx-auto max-w-3xl space-y-6">
-      {/* Back link */}
       <StaggerItem>
         <Link
           href="/cases"
@@ -78,8 +150,6 @@ export default function CaseOverviewPage() {
         </Link>
       </StaggerItem>
 
-      {/* Hero section — only difficulty + specialty. No Bloom's level, no Oslerian principles.
-          Revealing those upfront primes the learner and undermines Socratic discovery. */}
       <StaggerItem>
         <div className="space-y-4">
           <div className="flex flex-wrap items-center gap-2">
@@ -96,7 +166,7 @@ export default function CaseOverviewPage() {
           <div className="flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
             <span className="flex items-center gap-1.5">
               <Users className="size-4" />
-              {caseData.patientName} ({caseData.patientAge}y / {genderLabel})
+              {caseData.patientName} ({caseData.patientAgeYears}y / {genderLabel})
             </span>
             <span className="flex items-center gap-1.5">
               <Clock className="size-4" />
@@ -110,7 +180,6 @@ export default function CaseOverviewPage() {
         </div>
       </StaggerItem>
 
-      {/* Patient narrative — the hook. This is all the learner should see before starting. */}
       <StaggerItem>
         <Card>
           <CardContent className="relative">
@@ -127,7 +196,6 @@ export default function CaseOverviewPage() {
         </Card>
       </StaggerItem>
 
-      {/* Case statistics — peer benchmarking only. No pedagogical metadata that primes reasoning. */}
       <StaggerItem>
         <Card>
           <CardContent>
@@ -135,14 +203,10 @@ export default function CaseOverviewPage() {
               <BookOpen className="size-4 text-primary" />
               <h3 className="text-sm font-semibold">Case Statistics</h3>
             </div>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="text-center">
                 <p className="text-2xl font-bold tabular-nums text-foreground">{caseData.completions}</p>
                 <p className="text-xs text-muted-foreground">Learners completed</p>
-              </div>
-              <div className="text-center">
-                <p className="text-2xl font-bold tabular-nums text-foreground">{caseData.avgScore}%</p>
-                <p className="text-xs text-muted-foreground">Average score</p>
               </div>
               <div className="text-center">
                 <p className="text-2xl font-bold tabular-nums text-foreground">{caseData.imageCount}</p>
@@ -153,7 +217,6 @@ export default function CaseOverviewPage() {
         </Card>
       </StaggerItem>
 
-      {/* Tags — topic hints only, no pedagogical framework leak */}
       {caseData.tags.length > 0 && (
         <StaggerItem>
           <div>
@@ -174,24 +237,25 @@ export default function CaseOverviewPage() {
         </StaggerItem>
       )}
 
-      {/* Action buttons */}
       <StaggerItem>
         <div className="flex flex-col gap-3 pb-4 sm:flex-row">
-          <Link href={`/cases/${caseData.id}/session`} className="flex-1">
-            <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }}>
-              <Button className="h-12 w-full gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:bg-primary/90">
-                <Play className="size-5" />
-                Start Case
-              </Button>
-            </motion.div>
-          </Link>
+          <motion.div whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.99 }} className="flex-1">
+            <Button
+              onClick={startCase}
+              disabled={starting}
+              className="h-12 w-full gap-2 rounded-xl bg-primary text-base font-semibold text-primary-foreground hover:bg-primary/90"
+            >
+              <Play className="size-5" />
+              {starting ? 'Starting…' : 'Start Case'}
+            </Button>
+          </motion.div>
 
           {previousConversation && (
-            <Link href={`/cases/${caseData.id}/session?review=true`} className="sm:w-auto">
-              <Button
-                variant="outline"
-                className="h-12 w-full gap-2 rounded-xl text-base sm:px-6"
-              >
+            <Link
+              href={`/cases/${params.caseId}/session?conv=${previousConversation.id}`}
+              className="sm:w-auto"
+            >
+              <Button variant="outline" className="h-12 w-full gap-2 rounded-xl text-base sm:px-6">
                 <Eye className="size-5" />
                 Review Previous Attempt
               </Button>

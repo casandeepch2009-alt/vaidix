@@ -1,7 +1,9 @@
 'use client'
 
-import { usePathname, useRouter } from 'next/navigation'
-import { Bell, Search, LogOut, User, ChevronDown, Settings, Shuffle } from 'lucide-react'
+import Link from 'next/link'
+import { usePathname } from 'next/navigation'
+import { signOut } from 'next-auth/react'
+import { Bell, Search, LogOut, User, ChevronDown, Settings, Shuffle, X } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useRole } from '@/contexts/role-context'
@@ -36,12 +38,21 @@ const ROLE_COLORS: Record<UserRole, string> = {
   faculty:          'bg-violet-500/12 text-violet-700 dark:text-violet-300',
   program_director: 'bg-amber-500/12 text-amber-700 dark:text-amber-300',
   admin:            'bg-rose-500/12 text-rose-700 dark:text-rose-300',
+  external_learner: 'bg-slate-500/12 text-slate-700 dark:text-slate-300',
 }
 
 export function Header() {
   const pathname = usePathname()
-  const { currentUser, currentRole, switchRole, allRoles } = useRole()
-  const router = useRouter()
+  const {
+    currentUser,
+    currentRole,
+    realRole,
+    isImpersonating,
+    switchRole,
+    resetRole,
+    allRoles,
+    roleLabel,
+  } = useRole()
   const pageTitle = getPageTitle(pathname, currentRole)
   const [profileOpen, setProfileOpen] = useState(false)
   const profileRef = useRef<HTMLDivElement>(null)
@@ -58,8 +69,30 @@ export function Header() {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [])
 
+  // The switcher is visible only when the provider populated `allRoles`
+  // (admin + NEXT_PUBLIC_ENABLE_ROLE_SWITCHER === 'true'). For everyone
+  // else the dropdown's role section is omitted entirely.
+  const showRoleSwitcher = allRoles.length > 0
+
   return (
-    <header className="relative z-30 flex h-14 shrink-0 items-center gap-3 border-b border-border/70 bg-background/96 px-4 backdrop-blur-md lg:px-6">
+    <header className="relative z-30 flex shrink-0 flex-col border-b border-border/70 bg-background/96 backdrop-blur-md">
+      {/* Impersonation banner — admin-only, only when actively switched */}
+      {isImpersonating && (
+        <div className="flex items-center justify-between gap-2 bg-amber-500/15 px-4 py-1.5 text-[11px] font-medium text-amber-900 dark:bg-amber-500/20 dark:text-amber-200 lg:px-6">
+          <span>
+            Viewing as <strong>{ROLE_LABELS[currentRole]}</strong> (demo override) — your real role is {ROLE_LABELS[realRole]}.
+          </span>
+          <button
+            onClick={resetRole}
+            className="inline-flex items-center gap-1 rounded-md bg-amber-600/15 px-2 py-0.5 text-[11px] font-semibold text-amber-900 hover:bg-amber-600/25 dark:text-amber-100"
+          >
+            <X className="size-3" />
+            Reset
+          </button>
+        </div>
+      )}
+
+      <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
 
       {/* Left: Page title */}
       <div className="flex min-w-0 flex-1 items-center">
@@ -118,7 +151,7 @@ export function Header() {
                 'rounded-full px-1.5 py-px text-[9px] font-bold uppercase tracking-wide leading-none mt-0.5',
                 ROLE_COLORS[currentRole]
               )}>
-                {ROLE_LABELS[currentRole]}
+                {roleLabel}
               </span>
             </div>
             <ChevronDown className={cn(
@@ -139,46 +172,63 @@ export function Header() {
 
               {/* Profile actions */}
               <div className="p-1.5 space-y-px">
-                <button onClick={close} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted/60">
+                <Link
+                  href="/profile"
+                  onClick={close}
+                  className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted/60"
+                >
                   <User className="size-3.5 text-muted-foreground" />
                   View Profile
-                </button>
-                <button onClick={close} className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted/60">
-                  <Settings className="size-3.5 text-muted-foreground" />
-                  Settings
-                </button>
+                </Link>
+                {realRole === 'admin' && (
+                  <Link
+                    href="/admin/settings"
+                    onClick={close}
+                    className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-foreground transition-colors hover:bg-muted/60"
+                  >
+                    <Settings className="size-3.5 text-muted-foreground" />
+                    Settings
+                  </Link>
+                )}
               </div>
 
-              {/* Role switcher */}
-              <div className="border-t border-border/40 px-3 py-2.5">
-                <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <Shuffle className="size-3" />
-                  Switch Role
-                </p>
-                <div className="space-y-px">
-                  {allRoles.map((role) => (
-                    <button
-                      key={role}
-                      onClick={() => { switchRole(role); setProfileOpen(false) }}
-                      className={cn(
-                        'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors',
-                        currentRole === role
-                          ? cn('font-semibold', ROLE_COLORS[role])
-                          : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
-                      )}
-                    >
-                      {currentRole === role && <span className="size-1.5 rounded-full bg-current" />}
-                      {currentRole !== role && <span className="size-1.5 rounded-full" />}
-                      {ROLE_LABELS[role]}
-                    </button>
-                  ))}
+              {/* Role switcher — admin-only, gated by NEXT_PUBLIC_ENABLE_ROLE_SWITCHER */}
+              {showRoleSwitcher && (
+                <div className="border-t border-border/40 px-3 py-2.5">
+                  <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <Shuffle className="size-3" />
+                    Demo: View as role
+                  </p>
+                  <div className="space-y-px">
+                    {allRoles.map((role) => (
+                      <button
+                        key={role}
+                        onClick={() => { switchRole(role); setProfileOpen(false) }}
+                        className={cn(
+                          'flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition-colors',
+                          currentRole === role
+                            ? cn('font-semibold', ROLE_COLORS[role])
+                            : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
+                        )}
+                      >
+                        {currentRole === role && <span className="size-1.5 rounded-full bg-current" />}
+                        {currentRole !== role && <span className="size-1.5 rounded-full" />}
+                        {ROLE_LABELS[role]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              {/* Sign out */}
+              {/* Sign out — calls NextAuth's signOut so the JWT cookie is
+                  cleared and any in-flight Auth.js callbacks (logout audit,
+                  CSRF token rotation) run before the redirect. */}
               <div className="border-t border-border/40 p-1.5">
                 <button
-                  onClick={() => { close(); router.push('/login') }}
+                  onClick={() => {
+                    close()
+                    void signOut({ callbackUrl: '/login' })
+                  }}
                   className="flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-rose-600 transition-colors hover:bg-rose-50 dark:hover:bg-rose-500/10"
                 >
                   <LogOut className="size-3.5" />
@@ -188,6 +238,7 @@ export function Header() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </header>
   )

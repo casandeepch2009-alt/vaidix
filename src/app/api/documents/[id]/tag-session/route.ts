@@ -12,7 +12,13 @@ import {
 import { tagDocumentToSession, DocumentAccessError } from '@/server/services/documents/document-service';
 import { audit, AUDIT_EVENTS, extractRequestMetadata } from '@/server/services/audit';
 
-const schema = z.object({ sessionId: z.string().min(1) });
+const schema = z.object({
+  sessionId: z.string().min(1),
+  /** Admin/PD-only override to allow tagging a document the PHI scanner blocked.
+   *  Server still re-checks the actor's role; clients passing this without
+   *  authority will get FORBIDDEN. */
+  phiOverride: z.boolean().optional(),
+});
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
   const auth = await requireAuth();
@@ -25,7 +31,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     await tagDocumentToSession(
       { userId: auth.user.id, role: auth.user.role },
       id,
-      body.data.sessionId
+      body.data.sessionId,
+      { phiOverride: body.data.phiOverride === true }
     );
     await audit({
       actorId: auth.user.id,

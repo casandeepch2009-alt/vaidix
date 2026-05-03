@@ -14,6 +14,7 @@ import { spawn } from 'child_process';
 import { mkdtemp, rm, writeFile, readFile, readdir } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import ffmpegStatic from 'ffmpeg-static';
 import { db } from '@/lib/db';
 import { createWorker, getQueue, QUEUES } from '@/lib/queue';
 import { presignDownload, s3, BUCKET } from '@/lib/storage';
@@ -33,14 +34,45 @@ const HLS_LADDER = [
   { name: '240p',  height: 240,  vBitrate: '400k',  aBitrate: '64k'  },
 ];
 
+// Resolve the ffmpeg binary at startup. Production Linux servers should
+// install ffmpeg via apt-get and have it on $PATH; local dev (Windows / Mac)
+// falls back to the cross-platform ffmpeg-static binary bundled in node_modules.
+// FFMPEG_PATH env var lets ops override (e.g. point to a custom build with
+// hardware encoders enabled).
+const FFMPEG_BIN: string = process.env.FFMPEG_PATH ?? ffmpegStatic ?? 'ffmpeg';
+
 function runFfmpeg(args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('ffmpeg', args, { stdio: ['ignore', 'inherit', 'inherit'] });
+    const child = spawn(FFMPEG_BIN, args, { stdio: ['ignore', 'inherit', 'inherit'] });
     child.on('error', reject);
     child.on('exit', (code) => {
       if (code === 0) resolve();
       else reject(new Error(`ffmpeg exited with code ${code}`));
     });
+  });
+}
+
+/**
+ * Probe an MP4 with `ffprobe` to figure out which streams it has. Audio-only
+ * recordings (LiveKit Egress with audioOnly:true) have no video stream — we
+ * need a different HLS ladder for those.
+ *
+ * ffprobe ships in the same ffmpeg-static binary directory; if a separate
+ * ffprobe binary isn't available we fall back to ffmpeg with -i and parse.
+ * For simplicity we just use the ffmpeg binary in "info" mode.
+ */
+async function probeHasVideo(inputPath: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    let stderr = '';
+    const child = spawn(FFMPEG_BIN, ['-hide_banner', '-i', inputPath, '-f', 'null', '-'], {
+      stdio: ['ignore', 'ignore', 'pipe'],
+    });
+    child.stderr?.on('data', (d) => { stderr += d.toString(); });
+    child.on('exit', () => {
+      // ffmpeg always exits non-zero with `-f null -`; parse stderr regardless.
+      resolve(/Stream #\d+:\d+(?:\([^)]*\))?: Video/i.test(stderr));
+    });
+    child.on('error', () => resolve(false));
   });
 }
 
@@ -85,33 +117,29 @@ async function transcodeJob(data: TranscodeJobData): Promise<{ recordingId: stri
     const buf = Buffer.from(await res.arrayBuffer());
     await writeFile(inputPath, buf);
 
-    // 2. Build FFmpeg HLS args (one pass, multi-variant)
-    const variantArgs: string[] = [];
-    const masterEntries: string[] = [];
-    HLS_LADDER.forEach((rung, idx) => {
-      variantArgs.push(
-        '-map', '0:v:0', '-map', '0:a:0?',
-        `-c:v:${idx}`, 'libx264', `-b:v:${idx}`, rung.vBitrate,
-        `-maxrate:v:${idx}`, rung.vBitrate, `-bufsize:v:${idx}`, rung.vBitrate,
-        `-vf:${idx}`, `scale=-2:${rung.height}`,
-        `-c:a:${idx}`, 'aac', `-b:a:${idx}`, rung.aBitrate
-      );
-      masterEntries.push(`v:${idx},a:${idx}`);
-    });
+    // 2. Probe the input — audio-only egress recordings (recordingEnabled
+    //    sessions where no one starts video) have no video stream.
+    const hasVideo = await probeHasVideo(inputPath);
 
-    // Use a fresh dir per ladder; FFmpeg writes per-variant playlists + segments.
-    await runFfmpeg([
-      '-i', inputPath,
-      ...variantArgs,
-      '-f', 'hls',
-      '-hls_time', '6',
-      '-hls_list_size', '0',
-      '-hls_segment_filename', join(hlsDir, 'v%v', 'seg_%05d.ts'),
-      '-master_pl_name', 'master.m3u8',
-      '-var_stream_map', masterEntries.join(' '),
-      join(hlsDir, 'v%v', 'playlist.m3u8'),
-    ]).catch(async (e) => {
-      // FFmpeg might fail on `mkdir` of subdirs; try with mkdir flag.
+    // Ensure the HLS output dir exists; FFmpeg won't create deep paths on its own.
+    await rm(hlsDir, { recursive: true, force: true });
+    const { mkdir } = await import('fs/promises');
+    await mkdir(hlsDir, { recursive: true });
+
+    if (hasVideo) {
+      // Multi-variant video+audio HLS ladder.
+      const variantArgs: string[] = [];
+      const masterEntries: string[] = [];
+      HLS_LADDER.forEach((rung, idx) => {
+        variantArgs.push(
+          '-map', '0:v:0', '-map', '0:a:0?',
+          `-c:v:${idx}`, 'libx264', `-b:v:${idx}`, rung.vBitrate,
+          `-maxrate:v:${idx}`, rung.vBitrate, `-bufsize:v:${idx}`, rung.vBitrate,
+          `-vf:${idx}`, `scale=-2:${rung.height}`,
+          `-c:a:${idx}`, 'aac', `-b:a:${idx}`, rung.aBitrate
+        );
+        masterEntries.push(`v:${idx},a:${idx}`);
+      });
       await runFfmpeg([
         '-i', inputPath,
         ...variantArgs,
@@ -122,8 +150,32 @@ async function transcodeJob(data: TranscodeJobData): Promise<{ recordingId: stri
         '-master_pl_name', 'master.m3u8',
         '-var_stream_map', masterEntries.join(' '),
         join(hlsDir, 'v%v_playlist.m3u8'),
-      ]).catch(() => { throw e; });
-    });
+      ]);
+    } else {
+      // Audio-only single-variant HLS. The "ladder" collapses to one stream.
+      // Producing a master.m3u8 anyway so the player can load `master.m3u8`
+      // uniformly regardless of media type.
+      await runFfmpeg([
+        '-i', inputPath,
+        '-map', '0:a:0',
+        '-c:a', 'aac', '-b:a', '128k',
+        '-vn', // explicitly drop any video
+        '-f', 'hls',
+        '-hls_time', '10',
+        '-hls_list_size', '0',
+        '-hls_segment_filename', join(hlsDir, 'audio_seg_%05d.ts'),
+        join(hlsDir, 'audio_playlist.m3u8'),
+      ]);
+      // Hand-write a master.m3u8 that references the single audio variant.
+      const master = [
+        '#EXTM3U',
+        '#EXT-X-VERSION:6',
+        '#EXT-X-STREAM-INF:BANDWIDTH=128000,CODECS="mp4a.40.2"',
+        'audio_playlist.m3u8',
+        '',
+      ].join('\n');
+      await writeFile(join(hlsDir, 'master.m3u8'), master);
+    }
 
     // 3. Upload entire hlsDir tree to MinIO under hls/{sessionId}/
     const hlsKeyPrefix = `hls/${sessionId}`;
@@ -190,8 +242,14 @@ export function startTranscodeWorker() {
     QUEUES.RECORDING,
     async (job) => {
       // Co-tenant queue: 'transcode' (this) and 'reel-render' (reel-render-worker).
-      // Discriminate by job.name so we don't double-process.
-      if (job.name !== 'transcode') return { skipped: true };
+      // BullMQ assigns each job to exactly ONE worker. If we returned a value
+      // here for a non-transcode job, BullMQ would mark it complete and the
+      // reel-render-worker would never see it — losing the job. Throw instead
+      // so BullMQ retries, giving the other worker a chance to pick it up.
+      // (Both workers do this dance until the right one acks the job.)
+      if (job.name !== 'transcode') {
+        throw new Error(`Not my job (name=${job.name}); retrying for sibling worker`);
+      }
       return transcodeJob(job.data);
     },
     { concurrency: 1 } // FFmpeg is CPU-heavy — keep low

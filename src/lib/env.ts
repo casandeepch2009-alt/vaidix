@@ -31,12 +31,19 @@ const envSchema = z.object({
   LIVEKIT_API_KEY: z.string(),
   LIVEKIT_API_SECRET: z.string().min(16),
 
-  // MinIO / S3
+  // MinIO / S3 — S3_ENDPOINT is what the Next.js host process (or any
+  // worker running on the host) uses to reach object storage; for local dev
+  // that's localhost:9000.
   S3_ENDPOINT: z.string().url(),
   S3_BUCKET: z.string(),
   S3_ACCESS_KEY: z.string(),
   S3_SECRET_KEY: z.string(),
   S3_REGION: z.string().default('us-east-1'),
+  // EGRESS_S3_ENDPOINT is the same MinIO seen FROM INSIDE the LiveKit
+  // egress container, where `localhost` would mean the egress container
+  // itself. In dev, that's the Docker service name `http://minio:9000`.
+  // In production this typically equals S3_ENDPOINT (one canonical URL).
+  EGRESS_S3_ENDPOINT: z.string().url().default('http://minio:9000'),
 
   // AI providers
   SARVAM_API_KEY: z.string().optional(),

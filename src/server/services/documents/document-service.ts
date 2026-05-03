@@ -2,14 +2,18 @@
 // Document Service — W4 Stream C
 // ════════════════════════════════════════════════════════════════════════════
 // CRUD + presigned uploads + AI classification + session tagging.
-// PHI sanitizer (Presidio) hooks in for case_notes — currently flags but
-// doesn't block; full Presidio integration is a follow-up before any real
-// LVPEI data flows.
+//
+// PHI scanning: every uploaded document gets enqueued onto QUEUES.PHI_SCAN
+// after createDocumentDraft returns. The phi-scan-worker downloads, extracts
+// text, runs the regex scanner, and updates Document.phiScanStatus +
+// phiScanResult. High-severity findings flip status to PENDING_REVIEW and
+// block tag-to-session until a faculty reviewer overrides.
 
 import { db } from '@/lib/db';
 import { presignUpload, presignDownload } from '@/lib/storage';
 import { Role, DocumentKind, DocumentRoute, DocumentStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
+import { getQueue, QUEUES } from '@/lib/queue';
 
 const KIND_FROM_MIME: Array<[RegExp, DocumentKind]> = [
   [/^application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation$/, DocumentKind.PPT],
@@ -94,6 +98,40 @@ export async function createDocumentDraft(
   return { document: doc, presignedUploadUrl: presigned };
 }
 
+/**
+ * Enqueue a PHI scan for a freshly-uploaded document. Idempotent: BullMQ
+ * dedupes via the deterministic jobId, so calling it from multiple flows
+ * (classify + manual rescan) is safe.
+ */
+export async function enqueuePhiScan(documentId: string): Promise<{ jobId: string }> {
+  const jobId = `phi-scan-${documentId}`;
+  await getQueue(QUEUES.PHI_SCAN).add('scan', { documentId }, { jobId });
+  return { jobId };
+}
+
+/**
+ * Returns the latest persisted phiScanResult JSON (if any), expanded into a
+ * convenience object. Used by the tag-to-session guard.
+ */
+async function getPhiScanState(documentId: string): Promise<{
+  status: string | null;
+  blocked: boolean;
+  hasScan: boolean;
+}> {
+  const doc = await db.document.findUnique({
+    where: { id: documentId },
+    select: { phiScanStatus: true, phiScanResult: true },
+  });
+  if (!doc) return { status: null, blocked: false, hasScan: false };
+  const status = doc.phiScanStatus;
+  const result = doc.phiScanResult as { blocked?: boolean } | null;
+  return {
+    status,
+    blocked: status === 'BLOCKED' || result?.blocked === true,
+    hasScan: status !== null,
+  };
+}
+
 const FACULTY_ROLES: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
 
 function canManage(actor: DocumentAccessActor, doc: { uploadedById: string }): boolean {
@@ -127,8 +165,20 @@ export async function listDocuments(
     where,
     orderBy: { createdAt: 'desc' },
     take: 100,
-    include: { uploader: { select: { name: true } } },
   });
+
+  // Fetch uploader names via a separate batched query so orphaned FKs
+  // (uploader user soft-deleted) don't crash the route. Same pattern as the
+  // v1.8 calendar/classroom orphan-FK hardening.
+  const uploaderIds = Array.from(new Set(docs.map((d) => d.uploadedById)));
+  const uploaders = uploaderIds.length
+    ? await db.user.findMany({
+        where: { id: { in: uploaderIds } },
+        select: { id: true, name: true },
+      })
+    : [];
+  const nameById = new Map(uploaders.map((u) => [u.id, u.name]));
+
   return docs.map((d) => ({
     id: d.id,
     title: d.title,
@@ -136,7 +186,7 @@ export async function listDocuments(
     route: d.route,
     status: d.status,
     visibility: d.visibility,
-    uploaderName: d.uploader.name,
+    uploaderName: nameById.get(d.uploadedById) ?? 'Unknown user',
     sizeBytes: Number(d.sizeBytes),
     createdAt: d.createdAt.toISOString(),
   }));
@@ -162,6 +212,7 @@ export async function getDocumentForActor(
   uploaderName: string;
   phiScanStatus: string | null;
   phiScanResult: unknown;
+  rejectionReason: string | null;
   downloadUrl: string | null;
   tags: string[];
   sessions: Array<{ sessionId: string; visibleAfterSession: boolean }>;
@@ -207,6 +258,7 @@ export async function getDocumentForActor(
     uploaderName: doc.uploader.name,
     phiScanStatus: doc.phiScanStatus,
     phiScanResult: doc.phiScanResult,
+    rejectionReason: doc.rejectionReason,
     downloadUrl,
     tags: doc.tags.map((t) => t.tag),
     sessions: doc.sessionLinks,
@@ -232,11 +284,28 @@ export async function updateClassification(
 export async function tagDocumentToSession(
   actor: DocumentAccessActor,
   documentId: string,
-  sessionId: string
+  sessionId: string,
+  opts: { phiOverride?: boolean } = {}
 ): Promise<void> {
   const doc = await db.document.findUnique({ where: { id: documentId }, select: { uploadedById: true } });
   if (!doc) throw new DocumentAccessError('NOT_FOUND', 'Document not found');
   if (!canManage(actor, doc)) throw new DocumentAccessError('FORBIDDEN', 'Cannot tag this document');
+
+  // PHI gate: documents flagged BLOCKED by the scanner cannot be tagged to a
+  // session unless the actor is an admin/PD AND explicitly passes phiOverride.
+  // This stops sensitive case-notes PDFs from leaking into resident-visible
+  // resources sections.
+  const phi = await getPhiScanState(documentId);
+  if (phi.blocked) {
+    const isAdminOverride =
+      (actor.role === Role.ADMIN || actor.role === Role.PROGRAM_DIRECTOR) && opts.phiOverride === true;
+    if (!isAdminOverride) {
+      throw new DocumentAccessError(
+        'FORBIDDEN',
+        'PHI detected — cannot tag to session until reviewed and approved with phiOverride=true (admin/PD only).'
+      );
+    }
+  }
 
   await db.documentSessionLink.upsert({
     where: { documentId_sessionId: { documentId, sessionId } },

@@ -1,72 +1,74 @@
-'use client'
-
-import { useState, useMemo } from 'react'
-import { Search, Users, Eye } from 'lucide-react'
-import { Input } from '@/components/ui/input'
+import { redirect } from 'next/navigation'
+import { Users, Eye, Search } from 'lucide-react'
+import { ConversationStatus, Role } from '@prisma/client'
+import { auth } from '@/auth'
+import { db } from '@/lib/db'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { PageTransition, StaggerItem, motion } from '@/lib/motion'
-import type { User } from '@/lib/types'
-import usersData from '@/mock-data/users.json'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+import { PageTransition, StaggerItem } from '@/lib/motion'
+import { LearnerSearch } from './learner-search'
 
 function getInitials(name: string): string {
   return name
-    .split(' ')
-    .filter((part) => !part.startsWith('Dr.'))
-    .map((part) => part[0])
+    .split(/\s+/)
+    .filter((p) => !p.startsWith('Dr.'))
+    .map((p) => p[0])
     .join('')
     .slice(0, 2)
     .toUpperCase()
 }
 
-// ---------------------------------------------------------------------------
-// Mock 3H scores for each resident
-// ---------------------------------------------------------------------------
-
-const learnerScores: Record<string, { head: number; heart: number; hands: number; lastActive: string }> = {
-  'user-006': { head: 72, heart: 78, hands: 65, lastActive: '2 hours ago' },
-  'user-007': { head: 68, heart: 74, hands: 62, lastActive: '4 hours ago' },
-  'user-008': { head: 70, heart: 80, hands: 60, lastActive: '1 hour ago' },
-  'user-009': { head: 82, heart: 85, hands: 78, lastActive: '30 minutes ago' },
-  'user-010': { head: 79, heart: 88, hands: 75, lastActive: '3 hours ago' },
-  'user-011': { head: 76, heart: 82, hands: 73, lastActive: '6 hours ago' },
-  'user-012': { head: 88, heart: 90, hands: 85, lastActive: '1 hour ago' },
-  'user-013': { head: 85, heart: 87, hands: 82, lastActive: '5 hours ago' },
-  'user-014': { head: 91, heart: 92, hands: 88, lastActive: '45 minutes ago' },
-  'user-015': { head: 89, heart: 86, hands: 84, lastActive: '2 hours ago' },
+interface PageProps {
+  searchParams: Promise<{ q?: string }>
 }
 
-// ---------------------------------------------------------------------------
-// Page
-// ---------------------------------------------------------------------------
+export default async function LearnersPage({ searchParams }: PageProps) {
+  const session = await auth()
+  if (!session?.user) redirect('/login')
+  if (session.user.role !== Role.FACULTY && session.user.role !== Role.PROGRAM_DIRECTOR) {
+    redirect('/dashboard')
+  }
 
-export default function LearnersPage() {
-  const [searchQuery, setSearchQuery] = useState('')
+  const params = await searchParams
+  const search = params.q?.trim() ?? ''
 
-  const residents = useMemo(() => {
-    return (usersData as unknown as User[]).filter((u) => u.role === 'resident')
-  }, [])
-
-  const filteredResidents = useMemo(() => {
-    if (!searchQuery) return residents
-    const q = searchQuery.toLowerCase()
-    return residents.filter(
-      (r) =>
-        r.name.toLowerCase().includes(q) ||
-        r.department?.toLowerCase().includes(q) ||
-        r.yearOfTraining?.toLowerCase().includes(q)
-    )
-  }, [residents, searchQuery])
+  const residents = await db.user.findMany({
+    where: {
+      role: Role.RESIDENT,
+      deletedAt: null,
+      ...(search
+        ? {
+            OR: [
+              { name: { contains: search, mode: 'insensitive' as const } },
+              { email: { contains: search, mode: 'insensitive' as const } },
+            ],
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      lastLoginAt: true,
+      profile: { select: { subspecialty: true, yearOfResidency: true } },
+      cohortMemberships: {
+        where: { cohort: { deletedAt: null } },
+        select: { cohort: { select: { id: true, name: true } } },
+      },
+      _count: {
+        select: {
+          sessionParticipations: true,
+          conversations: { where: { status: ConversationStatus.COMPLETED } },
+        },
+      },
+    },
+    orderBy: { name: 'asc' },
+    take: 100,
+  })
 
   return (
     <PageTransition className="mx-auto max-w-6xl space-y-6">
-      {/* Header */}
       <StaggerItem>
         <div>
           <div className="flex items-center gap-2">
@@ -74,120 +76,87 @@ export default function LearnersPage() {
             <h1 className="text-2xl font-bold tracking-tight">Learners</h1>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
-            Monitor resident progress and development
+            Real-time view of resident engagement. DOPS / 3H scoring lands in Week 8.
           </p>
         </div>
       </StaggerItem>
 
-      {/* Search */}
       <StaggerItem>
-        <div className="relative max-w-md">
-          <Search className="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            placeholder="Search by name, department, or year..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery((e.target as HTMLInputElement).value)}
-            className="pl-9"
-          />
-        </div>
+        <LearnerSearch initialQuery={search} />
       </StaggerItem>
 
-      {/* Learner Cards Grid */}
       <StaggerItem>
-        <div className="grid gap-4 sm:grid-cols-2">
-          {filteredResidents.map((resident, index) => {
-            const scores = learnerScores[resident.id]
-            return (
-              <motion.div
-                key={resident.id}
-                initial={{ opacity: 0, y: 16 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1], delay: index * 0.06 }}
-              >
-                <Card
-                  className="transition-shadow duration-200 hover:shadow-lg hover:shadow-primary/5"
-                >
-                  <CardContent className="pt-1">
+        {residents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-lg border bg-card py-16 text-muted-foreground">
+            <Users className="mb-3 size-10 opacity-40" />
+            <p className="text-sm">
+              {search ? 'No learners match your search.' : 'No residents have been invited yet.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {residents.map((r) => {
+              const yearLabel = r.profile?.yearOfResidency != null ? `PGY-${r.profile.yearOfResidency}` : null
+              const cohort = r.cohortMemberships[0]?.cohort
+              return (
+                <Card key={r.id} className="transition-shadow duration-200 hover:shadow-lg hover:shadow-primary/5">
+                  <CardContent className="pt-6">
                     <div className="flex items-start gap-4">
-                      {/* Avatar */}
                       <Avatar size="lg" className="size-12">
                         <AvatarFallback className="bg-primary/10 text-sm font-semibold text-primary">
-                          {getInitials(resident.name)}
+                          {getInitials(r.name)}
                         </AvatarFallback>
                       </Avatar>
-
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="text-sm font-semibold text-foreground truncate">
-                            {resident.name}
-                          </h3>
-                          <Badge variant="secondary" className="text-[10px] shrink-0">
-                            {resident.yearOfTraining}
-                          </Badge>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="truncate text-sm font-semibold text-foreground">{r.name}</h3>
+                          {yearLabel && (
+                            <Badge variant="secondary" className="shrink-0 text-[10px]">
+                              {yearLabel}
+                            </Badge>
+                          )}
                         </div>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {resident.department}
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {r.profile?.subspecialty ?? 'Subspecialty not set'}
                         </p>
-
-                        {/* 3H Scores */}
-                        {scores && (
-                          <div className="mt-3 flex items-center gap-4">
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
-                                HEAD
-                              </span>
-                              <span className="text-sm font-bold text-blue-500">
-                                {scores.head}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
-                                HEART
-                              </span>
-                              <span className="text-sm font-bold text-rose-500">
-                                {scores.heart}
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <span className="text-[10px] font-medium text-muted-foreground uppercase">
-                                HANDS
-                              </span>
-                              <span className="text-sm font-bold text-green-500">
-                                {scores.hands}
-                              </span>
-                            </div>
-                          </div>
+                        {cohort && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">
+                            Cohort: <span className="font-medium text-foreground">{cohort.name}</span>
+                          </p>
                         )}
 
-                        {/* Last Active + View Profile */}
-                        <div className="mt-3 flex items-center justify-between">
-                          <span className="text-xs text-muted-foreground">
-                            Last Active: {scores?.lastActive ?? 'N/A'}
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                          <div className="rounded-md border bg-muted/30 px-2.5 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Sessions joined</div>
+                            <div className="text-sm font-semibold tabular-nums">{r._count.sessionParticipations}</div>
+                          </div>
+                          <div className="rounded-md border bg-muted/30 px-2.5 py-1.5">
+                            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">Cases completed</div>
+                            <div className="text-sm font-semibold tabular-nums">{r._count.conversations}</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 flex items-center justify-between text-xs text-muted-foreground">
+                          <span>
+                            Last login:{' '}
+                            {r.lastLoginAt
+                              ? new Date(r.lastLoginAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })
+                              : '—'}
                           </span>
-                          <Button variant="outline" size="sm">
-                            <Eye className="size-3.5" />
+                          <span className="inline-flex items-center gap-1 text-muted-foreground/70">
+                            <Eye className="size-3" />
                             View Profile
-                          </Button>
+                          </span>
                         </div>
                       </div>
                     </div>
                   </CardContent>
                 </Card>
-              </motion.div>
-            )
-          })}
-        </div>
-      </StaggerItem>
-
-      {filteredResidents.length === 0 && (
-        <StaggerItem>
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Users className="size-10 mb-3 opacity-40" />
-            <p className="text-sm">No learners match your search.</p>
+              )
+            })}
           </div>
-        </StaggerItem>
-      )}
+        )}
+      </StaggerItem>
     </PageTransition>
   )
 }

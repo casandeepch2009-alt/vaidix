@@ -1,5 +1,5 @@
 import { jsonOk, jsonError, requireAuth, parseBody, handleUnexpected } from '@/server/services/api-helpers';
-import { listCohorts, createCohort } from '@/server/services/cohort-service';
+import { listCohorts, createCohort, CohortServiceError } from '@/server/services/cohort-service';
 import { createCohortSchema } from '@/lib/validation/session';
 import { Role } from '@prisma/client';
 
@@ -28,6 +28,10 @@ export async function POST(req: Request) {
     const cohort = await createCohort(body.data, gate.user.id);
     return jsonOk({ cohort }, { status: 201 });
   } catch (err) {
+    if (err instanceof CohortServiceError) {
+      const status = err.code === 'NOT_FOUND' ? 404 : 400;
+      return jsonError(err.code, err.message, status);
+    }
     return handleUnexpected(err);
   }
 }

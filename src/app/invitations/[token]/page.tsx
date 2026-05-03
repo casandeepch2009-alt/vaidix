@@ -56,6 +56,21 @@ export default function AcceptInvitationPage() {
     })();
   }, [params.token]);
 
+  function validateField(name: 'password' | 'confirmPassword' | 'acceptTerms') {
+    const r = acceptInvitationSchema.safeParse({
+      token: params.token,
+      password,
+      confirmPassword,
+      acceptTerms,
+    });
+    if (r.success) {
+      setFieldErrors((p) => ({ ...p, [name]: '' }));
+      return;
+    }
+    const flat = r.error.flatten().fieldErrors;
+    setFieldErrors((p) => ({ ...p, [name]: flat[name]?.[0] ?? '' }));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFieldErrors({});
@@ -196,7 +211,11 @@ export default function AcceptInvitationPage() {
                 type={showPw ? 'text' : 'password'}
                 label="Create password"
                 value={password}
-                onChange={setPassword}
+                onChange={(v) => {
+                  setPassword(v);
+                  if (fieldErrors.password) setFieldErrors((p) => ({ ...p, password: '' }));
+                }}
+                onBlur={() => validateField('password')}
                 placeholder="At least 8 characters"
                 error={fieldErrors.password}
                 disabled={submitting}
@@ -221,7 +240,11 @@ export default function AcceptInvitationPage() {
               type={showPw ? 'text' : 'password'}
               label="Confirm password"
               value={confirmPassword}
-              onChange={setConfirmPassword}
+              onChange={(v) => {
+                setConfirmPassword(v);
+                if (fieldErrors.confirmPassword) setFieldErrors((p) => ({ ...p, confirmPassword: '' }));
+              }}
+              onBlur={() => validateField('confirmPassword')}
               placeholder="Re-enter password"
               error={fieldErrors.confirmPassword}
               disabled={submitting}
@@ -233,7 +256,11 @@ export default function AcceptInvitationPage() {
               <input
                 type="checkbox"
                 checked={acceptTerms}
-                onChange={(e) => setAcceptTerms(e.target.checked)}
+                onChange={(e) => {
+                  setAcceptTerms(e.target.checked);
+                  if (fieldErrors.acceptTerms) setFieldErrors((p) => ({ ...p, acceptTerms: '' }));
+                }}
+                onBlur={() => validateField('acceptTerms')}
                 className="mt-0.5 size-4 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
               />
               <span>

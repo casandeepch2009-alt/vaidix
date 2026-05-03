@@ -152,25 +152,34 @@ export function AuthInput({
   label,
   value,
   onChange,
+  onBlur,
   placeholder,
   error,
   disabled,
   icon: Icon,
   suffix,
   autoComplete,
+  helpText,
 }: {
   id: string;
   type?: string;
   label: string;
   value: string;
   onChange: (v: string) => void;
+  /** Called on blur with the current value — typically runs single-field
+   *  zod validation so the user sees inline errors on tab-out. */
+  onBlur?: (v: string) => void;
   placeholder?: string;
   error?: string;
   disabled?: boolean;
   icon?: React.ComponentType<{ className?: string }>;
   suffix?: React.ReactNode;
   autoComplete?: string;
+  /** Optional helper text shown beneath the field when there's no error. */
+  helpText?: string;
 }) {
+  const errorId = `${id}-error`;
+  const helpId = `${id}-help`;
   return (
     <div>
       <label htmlFor={id} className="mb-1.5 block text-sm font-medium text-slate-700">
@@ -186,8 +195,11 @@ export function AuthInput({
           autoComplete={autoComplete}
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur ? (e) => onBlur(e.target.value) : undefined}
           placeholder={placeholder}
           disabled={disabled}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : helpText ? helpId : undefined}
           className={`w-full rounded-xl border bg-white py-3 ${Icon ? 'pl-10' : 'pl-3'} ${
             suffix ? 'pr-10' : 'pr-3'
           } text-sm outline-none transition focus:border-teal-500 focus:ring-2 focus:ring-teal-500/20 disabled:opacity-60 ${
@@ -196,7 +208,11 @@ export function AuthInput({
         />
         {suffix && <div className="absolute right-3 top-1/2 -translate-y-1/2">{suffix}</div>}
       </div>
-      {error && <p className="mt-1.5 text-xs text-red-600">{error}</p>}
+      {error ? (
+        <p id={errorId} className="mt-1.5 text-xs text-red-600">{error}</p>
+      ) : helpText ? (
+        <p id={helpId} className="mt-1.5 text-xs text-slate-500">{helpText}</p>
+      ) : null}
     </div>
   );
 }

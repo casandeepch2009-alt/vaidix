@@ -25,6 +25,7 @@ const ROUTE_LABEL: Record<DocumentRoute, string> = {
   REFERENCE: 'Reference',
   CASE_NOTE: 'Case notes',
   PROMO_ASSET: 'Promo asset',
+  PROMO_TEASER_VIDEO: 'Promo teaser video',
   UNCLASSIFIED: 'Unclassified',
 };
 

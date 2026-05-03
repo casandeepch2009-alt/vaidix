@@ -1,9 +1,12 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+// W6 P2 — DB-backed case library. Replaces the prior mock-JSON import with a
+// fetch from /api/cases. The filter state machine and CaseCard rendering are
+// unchanged; only the data source moved.
+
+import { useState, useMemo, useEffect } from 'react'
 import { Search, BookOpen, Filter } from 'lucide-react'
 import { Input } from '@/components/ui/input'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -16,21 +19,85 @@ import { CaseCard } from '@/components/cases/case-card'
 import { BLOOMS_COGNITIVE } from '@/lib/constants'
 import { PageTransition, StaggerItem, motion } from '@/lib/motion'
 import type { ClinicalCase } from '@/lib/types'
-import casesData from '@/mock-data/cases.json'
+
+interface CaseTemplateApi {
+  id: string
+  legacyId: string | null
+  title: string
+  condition: string
+  specialty: string
+  topicSlug: string | null
+  bloomsLevel: number
+  difficulty: 'BEGINNER' | 'INTERMEDIATE' | 'ADVANCED'
+  estimatedMinutes: number
+  description: string
+  patientName: string
+  patientAgeYears: number
+  patientSex: string
+  oslerianPrinciples: string[]
+  tags: string[]
+  imageCount: number
+  isEmergency: boolean
+  completions: number
+}
 
 const difficultyOptions = ['all', 'beginner', 'intermediate', 'advanced'] as const
 
-const specialties = Array.from(
-  new Set((casesData as unknown as ClinicalCase[]).map((c) => c.specialty))
-).sort()
+// Map the DB shape → the legacy ClinicalCase shape that CaseCard already
+// understands. Keeping CaseCard's contract stable means W7+ changes to the
+// list page don't break the card and vice versa.
+function adapt(t: CaseTemplateApi): ClinicalCase {
+  return {
+    id: t.legacyId ?? t.id, // legacyId keeps existing /cases/case-001 URLs working
+    title: t.title,
+    condition: t.condition,
+    specialty: t.specialty,
+    topic: t.topicSlug ?? undefined,
+    bloomsLevel: t.bloomsLevel,
+    bloomsLabel: BLOOMS_COGNITIVE.find((b) => b.level === t.bloomsLevel)?.label ?? '',
+    oslerianPrinciples: t.oslerianPrinciples,
+    patientName: t.patientName,
+    patientAge: String(t.patientAgeYears),
+    patientGender: (t.patientSex === 'Male' || t.patientSex === 'M' ? 'Male' : 'Female') as ClinicalCase['patientGender'],
+    difficulty: t.difficulty.toLowerCase() as ClinicalCase['difficulty'],
+    estimatedMinutes: t.estimatedMinutes,
+    description: t.description,
+    tags: t.tags,
+    imageCount: t.imageCount,
+    completions: t.completions,
+    avgScore: 0, // not denormalized yet — wired in W8 when scoring history lands
+    isEmergency: t.isEmergency,
+  }
+}
 
 export default function CaseLibraryPage() {
+  const [allCases, setAllCases] = useState<ClinicalCase[]>([])
+  const [loading, setLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const [difficultyFilter, setDifficultyFilter] = useState<string>('all')
   const [bloomsFilter, setBloomsFilter] = useState<string>('all')
   const [specialtyFilter, setSpecialtyFilter] = useState<string>('all')
 
-  const allCases = casesData as unknown as ClinicalCase[]
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      const res = await fetch('/api/cases', { credentials: 'include' })
+      const json = await res.json()
+      if (cancelled) return
+      if (json.ok) {
+        setAllCases((json.data.items as CaseTemplateApi[]).map(adapt))
+      }
+      setLoading(false)
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const specialties = useMemo(
+    () => Array.from(new Set(allCases.map((c) => c.specialty))).sort(),
+    [allCases]
+  )
 
   const filteredCases = useMemo(() => {
     return allCases.filter((c) => {
@@ -51,7 +118,6 @@ export default function CaseLibraryPage() {
 
   return (
     <PageTransition className="space-y-6">
-      {/* Page header */}
       <StaggerItem>
         <div>
           <div className="flex items-center gap-2">
@@ -64,7 +130,6 @@ export default function CaseLibraryPage() {
         </div>
       </StaggerItem>
 
-      {/* Search and filter bar */}
       <StaggerItem>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative flex-1">
@@ -119,7 +184,6 @@ export default function CaseLibraryPage() {
         </div>
       </StaggerItem>
 
-      {/* Difficulty pill toggles */}
       <StaggerItem>
         <div className="flex items-center gap-2">
           {difficultyOptions.map((d) => {
@@ -140,25 +204,29 @@ export default function CaseLibraryPage() {
         </div>
       </StaggerItem>
 
-      {/* Case count */}
       <StaggerItem>
         <p className="text-sm text-muted-foreground">
-          Showing{' '}
-          <span className="font-medium text-foreground">{filteredCases.length}</span>{' '}
-          of{' '}
-          <span className="font-medium text-foreground">{allCases.length}</span>{' '}
-          cases
+          {loading
+            ? 'Loading cases…'
+            : (
+              <>
+                Showing{' '}
+                <span className="font-medium text-foreground">{filteredCases.length}</span>{' '}
+                of{' '}
+                <span className="font-medium text-foreground">{allCases.length}</span>{' '}
+                cases
+              </>
+            )}
         </p>
       </StaggerItem>
 
-      {/* Case grid with staggered animation */}
-      {filteredCases.length > 0 ? (
+      {!loading && filteredCases.length > 0 ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {filteredCases.map((caseItem, i) => (
             <CaseCard key={caseItem.id} caseData={caseItem} index={i} />
           ))}
         </div>
-      ) : (
+      ) : !loading ? (
         <motion.div
           initial={{ opacity: 0, scale: 0.95 }}
           animate={{ opacity: 1, scale: 1 }}
@@ -182,7 +250,7 @@ export default function CaseLibraryPage() {
             Clear all filters
           </Button>
         </motion.div>
-      )}
+      ) : null}
     </PageTransition>
   )
 }

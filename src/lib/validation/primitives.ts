@@ -45,3 +45,87 @@ export const mciRegSchema = z
 export const tokenSchema = z.string().min(16).max(256);
 
 export const cuidSchema = z.string().regex(/^c[a-z0-9]{24}$/i, 'Invalid ID');
+
+// ─── Username + identifier (multi-format login) ─────────────────────────────
+// Username: 3-32 chars, lowercase letters/digits/underscore/hyphen. Reserved
+// words can't be picked. Auto-generated from email local-part at invitation
+// accept; operator can override later.
+const RESERVED_USERNAMES = new Set([
+  'admin', 'administrator', 'root', 'system', 'support', 'help',
+  'vaidix', 'lvpei', 'api', 'auth', 'login', 'logout', 'signin', 'signup',
+  'me', 'self', 'null', 'undefined', 'true', 'false',
+]);
+
+export const usernameSchema = z
+  .string()
+  .min(3, 'Username must be at least 3 characters')
+  .max(32, 'Username too long')
+  .regex(/^[a-z0-9._-]+$/, 'Username may only contain lowercase letters, digits, dot, underscore, or hyphen')
+  .refine((v) => !RESERVED_USERNAMES.has(v), 'This username is reserved')
+  .transform((v) => v.trim().toLowerCase());
+
+/** Identifier accepted by the login form: email, mobile, or username. */
+export type IdentifierKind = 'email' | 'mobile' | 'username';
+
+/**
+ * Detect which kind of identifier the user typed. Lenient — does not validate
+ * format strictly; that happens after detection by the kind-specific schema.
+ */
+export function detectIdentifierKind(raw: string): IdentifierKind {
+  const v = raw.trim();
+  if (v.includes('@')) return 'email';
+  // Indian mobile shapes: +91XXXXXXXXXX, 91XXXXXXXXXX, 0XXXXXXXXXX, XXXXXXXXXX (digits/+/-/space only)
+  if (/^[+\d][\d\s-]*$/.test(v) && v.replace(/\D/g, '').length >= 10) return 'mobile';
+  return 'username';
+}
+
+/** Canonicalise a mobile string to '+91XXXXXXXXXX'; returns null if not parseable. */
+export function canonicaliseMobile(raw: string): string | null {
+  const digits = raw.replace(/\D/g, '');
+  // strip leading 91 / 0
+  if (/^91[6-9]\d{9}$/.test(digits)) return '+' + digits;
+  if (/^0[6-9]\d{9}$/.test(digits)) return '+91' + digits.slice(1);
+  if (/^[6-9]\d{9}$/.test(digits)) return '+91' + digits;
+  return null;
+}
+
+/**
+ * Login identifier schema — accepts email | mobile | username, normalises
+ * each into its canonical form. Returns the kind alongside so the auth
+ * service can do the right lookup without re-detecting.
+ */
+export const loginIdentifierSchema = z
+  .string()
+  .min(1, 'Email, mobile, or username is required')
+  .max(254)
+  .transform((raw, ctx) => {
+    const kind = detectIdentifierKind(raw);
+    if (kind === 'email') {
+      const r = emailSchema.safeParse(raw);
+      if (!r.success) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid email address' });
+        return z.NEVER;
+      }
+      return { kind: 'email' as const, value: r.data };
+    }
+    if (kind === 'mobile') {
+      const m = canonicaliseMobile(raw);
+      if (!m) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid Indian mobile number' });
+        return z.NEVER;
+      }
+      return { kind: 'mobile' as const, value: m };
+    }
+    // Username login is case-insensitive — lowercase BEFORE pattern check
+    // so 'AdminUser' resolves to 'adminuser' rather than being rejected.
+    // Note: 'admin'/'root'/etc. (RESERVED_USERNAMES) are still rejected as
+    // identifiers — but only because no real user owns them, so the lookup
+    // would 404 anyway. Reserved-name rejection is mostly a USERNAME CREATION
+    // concern (handled in usernameSchema at invitation accept).
+    const lower = raw.trim().toLowerCase();
+    if (!/^[a-z0-9._-]{3,32}$/.test(lower)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid username format' });
+      return z.NEVER;
+    }
+    return { kind: 'username' as const, value: lower };
+  });

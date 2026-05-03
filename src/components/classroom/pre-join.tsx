@@ -53,10 +53,10 @@ export function PreJoin({
 
         <div className="mt-6 grid grid-cols-1 gap-3 text-sm md:grid-cols-2">
           <InfoRow icon={<CalendarDays className="size-4" />}>
-            {start.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+            {start.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
             {' '}·{' '}
-            {start.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} –{' '}
-            {end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            {start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })} –{' '}
+            {end.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
           </InfoRow>
           <InfoRow icon={<Clock className="size-4" />}>
             {session.status === 'LIVE'

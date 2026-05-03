@@ -201,3 +201,185 @@ export async function changeUserStatus(args: {
 
   return { id: target.id, status: args.newStatus, unchanged: false };
 }
+
+// ----------------------------------------------------------------------------
+// Update profile / identity fields
+// ----------------------------------------------------------------------------
+//
+// Email is intentionally NOT editable here. Changing email mid-session would
+// invalidate every reference to the old address (audit log, invitation log,
+// reset-password flow, ical feed) without a verification round-trip. If the
+// pilot ever needs it, ship a "change email" flow with re-verification first.
+
+export interface UpdateUserDetailsInput {
+  name?: string;
+  mobile?: string | null;
+  username?: string | null;
+  /**
+   * Faculty → Program Director mapping. Only meaningful when target.role is
+   * FACULTY. Service rejects assignment to a non-PD user. `null` clears.
+   * Absent leaves untouched.
+   */
+  programDirectorId?: string | null;
+  profile?: {
+    subspecialty?: string | null;
+    yearOfResidency?: number | null;
+    affiliation?: string | null;
+    bio?: string | null;
+    timezone?: string | null;
+    mciRegNumber?: string | null;
+  };
+}
+
+export class UserAdminError extends Error {
+  constructor(
+    public readonly code: 'NOT_FOUND' | 'CONFLICT' | 'INVALID',
+    message: string
+  ) {
+    super(message);
+  }
+}
+
+export async function updateUserDetails(args: {
+  targetUserId: string;
+  actorId: string;
+  data: UpdateUserDetailsInput;
+}) {
+  const target = await db.user.findFirst({
+    where: { id: args.targetUserId, deletedAt: null },
+    select: { id: true, name: true, mobile: true, username: true, role: true, programDirectorId: true },
+  });
+  if (!target) throw new UserAdminError('NOT_FOUND', 'User not found');
+
+  // Uniqueness pre-check on mobile / username — gives a clean error message
+  // instead of letting Prisma's P2002 bubble up with a cryptic constraint name.
+  if (args.data.mobile && args.data.mobile !== target.mobile) {
+    const taken = await db.user.findFirst({
+      where: { mobile: args.data.mobile, NOT: { id: target.id } },
+      select: { id: true },
+    });
+    if (taken) throw new UserAdminError('CONFLICT', 'Mobile number already in use');
+  }
+  if (args.data.username && args.data.username !== target.username) {
+    const taken = await db.user.findFirst({
+      where: { username: args.data.username, NOT: { id: target.id } },
+      select: { id: true },
+    });
+    if (taken) throw new UserAdminError('CONFLICT', 'Username already taken');
+  }
+
+  // PD link guards: target must currently be FACULTY (or be becoming one in
+  // the same edit, but role transitions go through changeUserRole *before*
+  // this method per the admin modal flow), and the referenced PD must really
+  // be a PROGRAM_DIRECTOR. Both checks live here so a future API consumer
+  // (e.g. SCIM bulk import) can't bypass them via the route layer.
+  let pdChange: { from: string | null; to: string | null } | null = null;
+  if (args.data.programDirectorId !== undefined) {
+    const nextPdId = args.data.programDirectorId;
+    if (nextPdId !== target.programDirectorId) {
+      if (nextPdId) {
+        if (target.role !== Role.FACULTY) {
+          throw new UserAdminError('INVALID', 'Only FACULTY users can be linked to a Program Director');
+        }
+        if (nextPdId === target.id) {
+          throw new UserAdminError('INVALID', 'A faculty member cannot be their own PD');
+        }
+        const pd = await db.user.findFirst({
+          where: { id: nextPdId, deletedAt: null },
+          select: { id: true, role: true },
+        });
+        if (!pd) throw new UserAdminError('NOT_FOUND', 'Program Director user not found');
+        if (pd.role !== Role.PROGRAM_DIRECTOR) {
+          throw new UserAdminError('INVALID', 'Referenced user must have role PROGRAM_DIRECTOR');
+        }
+      }
+      pdChange = { from: target.programDirectorId, to: nextPdId };
+    }
+  }
+
+  const userPatch: Prisma.UserUpdateInput = {};
+  if (args.data.name !== undefined) userPatch.name = args.data.name.trim();
+  if (args.data.mobile !== undefined) userPatch.mobile = args.data.mobile || null;
+  if (args.data.username !== undefined) userPatch.username = args.data.username || null;
+  if (pdChange) {
+    userPatch.programDirector = pdChange.to
+      ? { connect: { id: pdChange.to } }
+      : { disconnect: true };
+  }
+
+  const profilePatch: Prisma.UserProfileUpdateInput = {};
+  const profileCreate: Prisma.UserProfileCreateWithoutUserInput = {};
+  if (args.data.profile) {
+    const p = args.data.profile;
+    if (p.subspecialty !== undefined) {
+      profilePatch.subspecialty = p.subspecialty || null;
+      profileCreate.subspecialty = p.subspecialty || null;
+    }
+    if (p.yearOfResidency !== undefined) {
+      profilePatch.yearOfResidency = p.yearOfResidency;
+      profileCreate.yearOfResidency = p.yearOfResidency;
+    }
+    if (p.affiliation !== undefined) {
+      profilePatch.affiliation = p.affiliation || null;
+      profileCreate.affiliation = p.affiliation || null;
+    }
+    if (p.bio !== undefined) {
+      profilePatch.bio = p.bio || null;
+      profileCreate.bio = p.bio || null;
+    }
+    if (p.timezone !== undefined) {
+      profilePatch.timezone = p.timezone || null;
+      profileCreate.timezone = p.timezone || null;
+    }
+    if (p.mciRegNumber !== undefined) {
+      profilePatch.mciRegNumber = p.mciRegNumber || null;
+      profileCreate.mciRegNumber = p.mciRegNumber || null;
+    }
+  }
+
+  await db.user.update({
+    where: { id: target.id },
+    data: {
+      ...userPatch,
+      ...(args.data.profile
+        ? {
+            profile: {
+              upsert: {
+                create: profileCreate,
+                update: profilePatch,
+              },
+            },
+          }
+        : {}),
+    },
+  });
+
+  await audit({
+    actorId: args.actorId,
+    eventType: AUDIT_EVENTS.USER_UPDATED,
+    entityType: 'user',
+    entityId: target.id,
+    summary: `User details updated`,
+    details: {
+      changedFields: [
+        ...Object.keys(userPatch),
+        ...(args.data.profile ? Object.keys(args.data.profile) : []),
+      ],
+    },
+  });
+
+  if (pdChange) {
+    await audit({
+      actorId: args.actorId,
+      eventType: pdChange.to ? AUDIT_EVENTS.FACULTY_PD_ASSIGNED : AUDIT_EVENTS.FACULTY_PD_CLEARED,
+      entityType: 'user',
+      entityId: target.id,
+      summary: pdChange.to
+        ? `Linked faculty to Program Director`
+        : `Cleared faculty's Program Director link`,
+      details: pdChange,
+    });
+  }
+
+  return { id: target.id };
+}

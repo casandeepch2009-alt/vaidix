@@ -21,6 +21,20 @@ export default function ResetPasswordPage() {
   const [submitted, setSubmitted] = useState(false);
   const [loading, setLoading] = useState(false);
 
+  function validateField(name: 'newPassword' | 'confirmPassword') {
+    const r = resetPasswordSchema.safeParse({
+      token: params.token,
+      newPassword,
+      confirmPassword,
+    });
+    if (r.success) {
+      setFieldErrors((p) => ({ ...p, [name]: '' }));
+      return;
+    }
+    const flat = r.error.flatten().fieldErrors;
+    setFieldErrors((p) => ({ ...p, [name]: flat[name]?.[0] ?? '' }));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setFieldErrors({});
@@ -104,7 +118,11 @@ export default function ResetPasswordPage() {
                 type={showPw ? 'text' : 'password'}
                 label="New password"
                 value={newPassword}
-                onChange={setNewPassword}
+                onChange={(v) => {
+                  setNewPassword(v);
+                  if (fieldErrors.newPassword) setFieldErrors((p) => ({ ...p, newPassword: '' }));
+                }}
+                onBlur={() => validateField('newPassword')}
                 placeholder="Enter new password"
                 error={fieldErrors.newPassword}
                 disabled={loading}
@@ -129,7 +147,11 @@ export default function ResetPasswordPage() {
               type={showPw ? 'text' : 'password'}
               label="Confirm password"
               value={confirmPassword}
-              onChange={setConfirmPassword}
+              onChange={(v) => {
+                setConfirmPassword(v);
+                if (fieldErrors.confirmPassword) setFieldErrors((p) => ({ ...p, confirmPassword: '' }));
+              }}
+              onBlur={() => validateField('confirmPassword')}
               placeholder="Re-enter new password"
               error={fieldErrors.confirmPassword}
               disabled={loading}

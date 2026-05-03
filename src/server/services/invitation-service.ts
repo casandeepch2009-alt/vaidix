@@ -12,10 +12,15 @@ import {
   renderInviteAcceptedAdminEmail,
 } from '@/lib/email-templates';
 import { mintToken } from './tokens';
-import { hashPassword } from './auth-service';
+import {
+  hashPassword,
+  candidateUsernameFromEmail,
+  pickAvailableUsername,
+} from './auth-service';
+import { canonicaliseMobile } from '@/lib/validation/primitives';
 import { audit, AUDIT_EVENTS } from './audit';
 import { InvitationStatus, UserStatus, type Role } from '@prisma/client';
-import type { CreateInvitationInput } from '@/lib/validation/auth';
+import type { CreateInvitationInput, UpdateInvitationInput } from '@/lib/validation/auth';
 
 const TOKEN_LENGTH_BYTES = 32;
 
@@ -117,6 +122,45 @@ async function deliverInvitationEmail(
       success: false,
     });
   }
+}
+
+export async function updateInvitation(
+  invitationId: string,
+  patch: UpdateInvitationInput,
+  actorId: string
+) {
+  const inv = await db.invitation.findUnique({ where: { id: invitationId } });
+  if (!inv) throw new Error('NOT_FOUND');
+  if (inv.status !== InvitationStatus.PENDING) throw new Error('NOT_EDITABLE');
+
+  const data: Record<string, unknown> = {};
+  if (patch.fullName        !== undefined) data.fullName        = patch.fullName;
+  if (patch.mobile          !== undefined) data.mobile          = patch.mobile ?? null;
+  if (patch.mciRegNumber    !== undefined) data.mciRegNumber    = patch.mciRegNumber ?? null;
+  if (patch.role            !== undefined) data.role            = patch.role;
+  if (patch.subspecialty    !== undefined) data.subspecialty    = patch.subspecialty ?? null;
+  if (patch.department      !== undefined) data.department      = patch.department ?? null;
+  if (patch.yearOfResidency !== undefined) data.yearOfResidency = patch.yearOfResidency ?? null;
+  if (patch.moduleOverrides !== undefined) data.moduleOverrides = patch.moduleOverrides as object;
+  if (patch.expiresInHours  !== undefined) {
+    data.expiresAt = new Date(Date.now() + patch.expiresInHours * 3600 * 1000);
+  }
+
+  const updated = await db.invitation.update({
+    where: { id: invitationId },
+    data,
+  });
+
+  await audit({
+    actorId,
+    eventType: AUDIT_EVENTS.INVITATION_UPDATED,
+    entityType: 'invitation',
+    entityId: invitationId,
+    summary: `Updated invitation for ${inv.email}`,
+    details: { changedFields: Object.keys(data) },
+  });
+
+  return updated;
 }
 
 export async function resendInvitation(invitationId: string, inviterName: string) {
@@ -222,29 +266,89 @@ export async function acceptInvitation(
 
   const passwordHash = await hashPassword(password);
 
+  // Multi-identifier login (B-track): canonicalise the invited mobile and
+  // generate a username candidate. Mobile may be null (optional at invite
+  // time); username is always seeded so the user can log in by it from day 1.
+  const canonicalMobile = inv.mobile ? canonicaliseMobile(inv.mobile) : null;
+  let usernameCandidate = await pickAvailableUsername(candidateUsernameFromEmail(inv.email));
+
   const user = await db.$transaction(async (tx) => {
-    const u = await tx.user.create({
-      data: {
-        email: inv.email,
-        name: inv.fullName ?? inv.email.split('@')[0],
-        passwordHash,
-        role: inv.role,
-        status: UserStatus.ACTIVE,
-        emailVerifiedAt: new Date(),
-        profile: {
-          create: {
-            mciRegNumber: inv.mciRegNumber,
-            yearOfResidency: inv.yearOfResidency,
-            subspecialty: inv.subspecialty,
-            affiliation: inv.department,
-            languages: ['en'],
-            timezone: 'Asia/Kolkata',
+    // If the canonicalised mobile collides with another user, drop it from
+    // the new row rather than aborting the whole accept-invitation flow.
+    // Operator can reconcile via /admin/users.
+    let mobileToStore: string | null = canonicalMobile;
+    if (mobileToStore) {
+      const collision = await tx.user.findUnique({
+        where: { mobile: mobileToStore },
+        select: { id: true },
+      });
+      if (collision) mobileToStore = null;
+    }
+
+    let u;
+    try {
+      u = await tx.user.create({
+        data: {
+          email: inv.email,
+          mobile: mobileToStore,
+          username: usernameCandidate,
+          name: inv.fullName ?? inv.email.split('@')[0],
+          passwordHash,
+          role: inv.role,
+          status: UserStatus.ACTIVE,
+          emailVerifiedAt: new Date(),
+          profile: {
+            create: {
+              mciRegNumber: inv.mciRegNumber,
+              yearOfResidency: inv.yearOfResidency,
+              subspecialty: inv.subspecialty,
+              affiliation: inv.department,
+              languages: ['en'],
+              timezone: 'Asia/Kolkata',
+            },
           },
+          preferences: { create: {} },
+          stats: { create: {} },
         },
-        preferences: { create: {} },
-        stats: { create: {} },
-      },
-    });
+      });
+    } catch (err) {
+      // Race-safe retry: if the username we picked got grabbed by a parallel
+      // invitation accept between our pickAvailableUsername() and create(),
+      // the unique constraint fires (Prisma P2002). Retry once with a new
+      // candidate; further collisions are exceedingly unlikely in practice.
+      const e = err as { code?: string; meta?: { target?: string[] } };
+      if (e.code === 'P2002' && (e.meta?.target ?? []).includes('username')) {
+        usernameCandidate = await pickAvailableUsername(
+          candidateUsernameFromEmail(inv.email)
+        );
+        u = await tx.user.create({
+          data: {
+            email: inv.email,
+            mobile: mobileToStore,
+            username: usernameCandidate,
+            name: inv.fullName ?? inv.email.split('@')[0],
+            passwordHash,
+            role: inv.role,
+            status: UserStatus.ACTIVE,
+            emailVerifiedAt: new Date(),
+            profile: {
+              create: {
+                mciRegNumber: inv.mciRegNumber,
+                yearOfResidency: inv.yearOfResidency,
+                subspecialty: inv.subspecialty,
+                affiliation: inv.department,
+                languages: ['en'],
+                timezone: 'Asia/Kolkata',
+              },
+            },
+            preferences: { create: {} },
+            stats: { create: {} },
+          },
+        });
+      } else {
+        throw err;
+      }
+    }
 
     // Apply module overrides from invitation → per-user permissions.
     const overrides = (inv.moduleOverrides as { granted?: string[]; revoked?: string[] } | null) ?? {};

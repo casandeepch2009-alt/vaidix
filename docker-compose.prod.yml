@@ -1,0 +1,205 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Vaidix — Production Docker Compose (app + workers + livekit + nginx)
+# ════════════════════════════════════════════════════════════════════════════
+# HARDENING-PLAN.md item #1
+#
+# Redis and MinIO are managed by SEPARATE compose files now:
+#   docker-compose.redis.yml
+#   docker-compose.minio.yml
+# Bring those up first; they share the external network `vaidix-net`.
+#
+# Run on a single Linux host (Ubuntu 22.04 LTS recommended) with:
+#   - Postgres provisioned externally (system-managed)
+#   - Redis up via docker-compose.redis.yml (hostname: redis)
+#   - MinIO up via docker-compose.minio.yml (hostname: minio)  — or use real S3
+#   - sops + age installed; vaidix.env.enc decrypts to runtime env
+#   - Let's Encrypt (or LVPEI internal CA) certs mounted at /etc/letsencrypt
+#   - All data lives under /var/lib/vaidix-data/* (named volumes below)
+#
+# First-time setup (one-time):
+#   docker network create vaidix-net
+#
+# Usage:
+#   ./scripts/load-env.sh
+#   docker compose -f docker-compose.redis.yml --env-file .env up -d
+#   docker compose -f docker-compose.minio.yml --env-file .env up -d
+#   docker compose -f docker-compose.prod.yml  --env-file .env up -d
+#   docker compose -f docker-compose.prod.yml logs -f --tail=100 [service]
+#   docker compose -f docker-compose.prod.yml down
+# ════════════════════════════════════════════════════════════════════════════
+
+x-restart: &default-restart
+  restart: unless-stopped
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: ${DATABASE_URL}
+  REDIS_URL: ${REDIS_URL}
+  NEXTAUTH_URL: ${NEXTAUTH_URL}
+  NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+  EMAIL_HOST: ${EMAIL_HOST}
+  EMAIL_PORT: ${EMAIL_PORT}
+  EMAIL_USER: ${EMAIL_USER}
+  EMAIL_PASSWORD: ${EMAIL_PASSWORD}
+  EMAIL_FROM: ${EMAIL_FROM}
+  LIVEKIT_URL: ${LIVEKIT_URL}
+  LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+  LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+  S3_ENDPOINT: ${S3_ENDPOINT}
+  S3_BUCKET: ${S3_BUCKET}
+  S3_ACCESS_KEY: ${S3_ACCESS_KEY}
+  S3_SECRET_KEY: ${S3_SECRET_KEY}
+  S3_REGION: ${S3_REGION}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+  TRANSCRIPTION_PROVIDER: ${TRANSCRIPTION_PROVIDER:-self_hosted}
+  SELF_HOSTED_TRANSCRIPTION_URL: ${SELF_HOSTED_TRANSCRIPTION_URL:-}
+  AI_PROVIDER: ${AI_PROVIDER:-gemini}
+  WHATSAPP_API_URL: ${WHATSAPP_API_URL:-}
+  WHATSAPP_API_TOKEN: ${WHATSAPP_API_TOKEN:-}
+  WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+  LIVE_CAPTIONS_INGEST_SECRET: ${LIVE_CAPTIONS_INGEST_SECRET:-}
+  MAX_UPLOAD_SIZE_MB: ${MAX_UPLOAD_SIZE_MB:-500}
+  VAIDIX_DATA_ROOT: /var/lib/vaidix-data
+
+services:
+  # ─── Reverse proxy + TLS termination ─────────────────────────────────────
+  # HARDENING-PLAN item #2. Site configs in ./nginx/sites-enabled/.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vaidix-nginx
+    <<: *default-restart
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/sites-enabled:/etc/nginx/sites-enabled:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - vaidix-nginx-cache:/var/cache/nginx
+    depends_on:
+      - app
+      - livekit
+    networks:
+      - vaidix-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  # ─── Next.js app (web + API) ─────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: vaidix-app:latest
+    container_name: vaidix-app
+    <<: *default-restart
+    environment:
+      <<: *app-env
+    expose:
+      - "3000"
+    networks:
+      - vaidix-net
+    healthcheck:
+      # HARDENING-PLAN item #4
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  # ─── Background workers (BullMQ consumers) ───────────────────────────────
+  workers:
+    image: vaidix-app:latest
+    container_name: vaidix-workers
+    <<: *default-restart
+    command: ["npm", "run", "workers"]
+    environment:
+      <<: *app-env
+    networks:
+      - vaidix-net
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  # ─── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────
+  livekit:
+    image: livekit/livekit-server:v1.8
+    container_name: vaidix-livekit
+    <<: *default-restart
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7881:7881"
+      - "7882:7882/udp"
+      - "50000-50100:50000-50100/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+      - vaidix-livekit-data:/data
+    networks:
+      - vaidix-net
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+
+  # ─── LiveKit Egress (server-side recording) ──────────────────────────────
+  livekit-egress:
+    image: livekit/egress:v1.9
+    container_name: vaidix-livekit-egress
+    <<: *default-restart
+    environment:
+      EGRESS_CONFIG_FILE: /etc/egress.yaml
+    volumes:
+      - ./egress.yaml:/etc/egress.yaml:ro
+      - vaidix-recordings:/output
+    depends_on:
+      - livekit
+    networks:
+      - vaidix-net
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+
+  # ─── coturn (STUN/TURN) ──────────────────────────────────────────────────
+  coturn:
+    image: coturn/coturn:latest
+    container_name: vaidix-coturn
+    <<: *default-restart
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+
+networks:
+  vaidix-net:
+    external: true
+    name: vaidix-net
+
+volumes:
+  vaidix-livekit-data:
+    name: vaidix-livekit-data
+  vaidix-recordings:
+    name: vaidix-recordings
+  vaidix-nginx-cache:
+    name: vaidix-nginx-cache

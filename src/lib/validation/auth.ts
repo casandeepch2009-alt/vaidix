@@ -15,21 +15,83 @@ import {
   mciRegSchema,
   tokenSchema,
   cuidSchema,
+  loginIdentifierSchema,
 } from './primitives';
 import { MODULE_KEYS } from '../modules';
 
 // ─── Login ──────────────────────────────────────────────────────────────────
-export const loginSchema = z.object({
-  email: emailSchema,
-  password: z.string().min(1, 'Password is required').max(128),
-  rememberMe: z.boolean().optional().default(false),
-});
+// `identifier` is the canonical field. `email` is kept as a back-compat alias
+// so existing callers (older test scripts, NextAuth credentials shape, third-
+// party integrations) keep working unchanged. The schema accepts EITHER one
+// — never both — and folds the value into `identifier` after parsing.
+export const loginSchema = z
+  .object({
+    identifier: z.string().min(1, 'Email, mobile, or username is required').max(254).optional(),
+    email: z.string().min(1).max(254).optional(),
+    password: z.string().min(1, 'Password is required').max(128),
+    rememberMe: z.boolean().optional().default(false),
+  })
+  .transform((v, ctx) => {
+    const raw = (v.identifier ?? v.email ?? '').trim();
+    if (!raw) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['identifier'],
+        message: 'Email, mobile, or username is required',
+      });
+      return z.NEVER;
+    }
+    const parsed = loginIdentifierSchema.safeParse(raw);
+    if (!parsed.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['identifier'],
+        message: parsed.error.issues[0]?.message ?? 'Invalid identifier',
+      });
+      return z.NEVER;
+    }
+    return {
+      identifier: parsed.data.value,
+      identifierKind: parsed.data.kind,
+      password: v.password,
+      rememberMe: v.rememberMe ?? false,
+    };
+  });
 export type LoginInput = z.infer<typeof loginSchema>;
 
 // ─── Forgot Password ────────────────────────────────────────────────────────
-export const forgotPasswordSchema = z.object({
-  email: emailSchema,
-});
+// Accepts the same identifier shape as login. The reset link is always
+// emailed to the user's bound email regardless of which identifier they
+// used to initiate the request (no SMS provider in Phase 1).
+export const forgotPasswordSchema = z
+  .object({
+    identifier: z.string().min(1).max(254).optional(),
+    email: z.string().min(1).max(254).optional(),
+  })
+  .transform((v, ctx) => {
+    const raw = (v.identifier ?? v.email ?? '').trim();
+    if (!raw) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['identifier'],
+        message: 'Email, mobile, or username is required',
+      });
+      return z.NEVER;
+    }
+    const parsed = loginIdentifierSchema.safeParse(raw);
+    if (!parsed.success) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['identifier'],
+        message: parsed.error.issues[0]?.message ?? 'Invalid identifier',
+      });
+      return z.NEVER;
+    }
+    return {
+      identifier: parsed.data.value,
+      identifierKind: parsed.data.kind,
+    };
+  });
 export type ForgotPasswordInput = z.infer<typeof forgotPasswordSchema>;
 
 // ─── Reset Password (from emailed token) ────────────────────────────────────
@@ -98,6 +160,28 @@ export const createInvitationSchema = z
     { path: ['yearOfResidency'], message: 'Year of residency required for residents' }
   );
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
+
+// ─── Update Invitation (admin) ──────────────────────────────────────────────
+// Mutates an existing PENDING invitation. Email is NOT editable (it's the
+// stable identity used for token resolution and acceptance dedupe). To "fix"
+// a typo'd email, revoke + re-invite. All other fields can be changed.
+export const updateInvitationSchema = z
+  .object({
+    fullName: fullNameSchema.optional(),
+    mobile: mobileSchema.optional().or(z.literal('').transform(() => undefined)).nullable(),
+    mciRegNumber: mciRegSchema.optional().or(z.literal('').transform(() => undefined)).nullable(),
+    role: z.nativeEnum(Role).optional(),
+    subspecialty: z.string().min(2).max(80).optional().nullable(),
+    department: z.string().min(2).max(80).optional().nullable(),
+    yearOfResidency: z.number().int().min(1).max(5).optional().nullable(),
+    moduleOverrides: moduleOverridesSchema.optional(),
+    expiresInHours: z.number().int().min(1).max(168).optional(),
+  })
+  .refine(
+    (d) => d.role !== Role.RESIDENT || d.yearOfResidency !== undefined,
+    { path: ['yearOfResidency'], message: 'Year of residency required for residents' }
+  );
+export type UpdateInvitationInput = z.infer<typeof updateInvitationSchema>;
 
 // ─── Accept Invitation (public endpoint) ────────────────────────────────────
 export const acceptInvitationSchema = z
