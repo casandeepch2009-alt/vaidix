@@ -20,7 +20,8 @@
 #   docker network create vaidix-net
 #
 # Usage:
-#   ./scripts/load-env.sh
+#   ./scripts/load-env.sh                                   # decrypt sealed env
+#   ./scripts/render-configs.sh                             # render egress.yaml from .tpl
 #   docker compose -f docker-compose.redis.yml --env-file .env up -d
 #   docker compose -f docker-compose.minio.yml --env-file .env up -d
 #   docker compose -f docker-compose.prod.yml  --env-file .env up -d
@@ -142,6 +143,10 @@ services:
     container_name: vaidix-livekit
     <<: *default-restart
     command: --config /etc/livekit.yaml
+    # Redis password injected via Viper env override (verified against
+    # livekit/livekit-server:v1.8). Keeps the password out of livekit.yaml.
+    environment:
+      LIVEKIT_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     ports:
       - "7881:7881"
       - "7882:7882/udp"
@@ -158,6 +163,11 @@ services:
           memory: 4G
 
   # ─── LiveKit Egress (server-side recording) ──────────────────────────────
+  # Egress does NOT honor EGRESS_REDIS_PASSWORD or LIVEKIT_REDIS_PASSWORD env
+  # vars (verified). The redis password must be in egress.yaml. egress.yaml is
+  # gitignored — render it from egress.yaml.tpl by running
+  #     scripts/render-configs.sh
+  # before `docker compose up`. CI / automation should call the same script.
   livekit-egress:
     image: livekit/egress:v1.9
     container_name: vaidix-livekit-egress

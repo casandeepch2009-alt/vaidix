@@ -24,11 +24,10 @@ services:
     # the app — the network alias inside `vaidix-net` is enough.
     ports:
       - "127.0.0.1:6379:6379"
-    # No --requirepass: Redis is bound to vaidix-net (private Docker network)
-    # plus 127.0.0.1 on the host — not externally reachable. Enabling auth
-    # here means also templating the password into livekit.yaml + egress.yaml,
-    # which currently don't read it from env. Revisit at LVPEI go-live with
-    # proper config templating (envsubst at compose-up, or a secrets injector).
+    # Auth is enabled. LiveKit Server reads the password via the
+    # LIVEKIT_REDIS_PASSWORD env var (verified). Egress does not honor any env
+    # override — its password is templated into egress.yaml from
+    # egress.yaml.tpl at deploy time via scripts/render-configs.sh.
     command:
       - redis-server
       - --appendonly
@@ -37,10 +36,12 @@ services:
       - "1gb"
       - --maxmemory-policy
       - "allkeys-lru"
+      - --requirepass
+      - "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}"
     volumes:
       - vaidix-redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5

@@ -52,6 +52,9 @@ appendonly.aof
 .docker-build.log
 *.bak
 
+# Rendered runtime configs (templates committed as .tpl, output gitignored)
+egress.yaml
+
 # tests / e2e / smoke (excluded from the AWS-deploy repo)
 /tests/
 /test-results/

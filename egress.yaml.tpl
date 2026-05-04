@@ -15,6 +15,12 @@ ws_url: ws://192.168.1.7:7880
 
 redis:
   address: redis:6379
+  # Templated from $REDIS_PASSWORD in .env by scripts/render-configs.sh.
+  # Egress doesn't honor EGRESS_REDIS_PASSWORD or LIVEKIT_REDIS_PASSWORD env
+  # overrides (both verified by isolated container test) so the password has
+  # to be in this file at runtime. The rendered `egress.yaml` is gitignored;
+  # only this `.tpl` source is committed.
+  password: ${REDIS_PASSWORD}
 
 # Local file output — BullMQ worker uploads to MinIO after recording finishes
 file_output:
