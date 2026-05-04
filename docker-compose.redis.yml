@@ -34,8 +34,13 @@ services:
       - "yes"
       - --maxmemory
       - "1gb"
+      # noeviction over allkeys-lru: BullMQ jobs (transcribe, transcode, recording
+      # post-processing) and NextAuth sessions live in this Redis. With LRU,
+      # under memory pressure Redis would silently evict pending jobs and active
+      # sessions. noeviction returns an OOM error instead, which surfaces the
+      # problem rather than losing patient-related work.
       - --maxmemory-policy
-      - "allkeys-lru"
+      - "noeviction"
       - --requirepass
       - "${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}"
     volumes:
