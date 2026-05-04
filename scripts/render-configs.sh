@@ -47,7 +47,10 @@ render() {
     exit 1
   fi
   envsubst < "$src" > "$out"
-  chmod 600 "$out"   # contains the redis password
+  # 644 not 600: bind-mounted into containers running as non-root uids
+  # (e.g. egress runs as its own user). 600 owned by host user blocks reads
+  # from inside the container. The host directory should be access-controlled.
+  chmod 644 "$out"
   RENDERED+=("$out")
 }
 

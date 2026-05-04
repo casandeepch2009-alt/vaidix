@@ -14,7 +14,7 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "smoke": "tsx --env-file=.env.local --env-file=.env src/lib/smoke-test.ts",
-    "workers": "tsx --env-file=.env.local --env-file=.env src/server/workers/index.ts",
+    "workers": "tsx src/server/workers/index.ts",
     "e2e:w1": "tsx --env-file=.env.local --env-file=.env scripts/e2e-w1.ts",
     "e2e:w2": "tsx --env-file=.env.local --env-file=.env scripts/e2e-w2.ts",
     "e2e:w4:a": "tsx --env-file=.env.local --env-file=.env scripts/e2e-w4-stream-a.ts",
