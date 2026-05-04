@@ -74,6 +74,10 @@ COPY --from=build --chown=vaidix:vaidix /app/package.json ./package.json
 COPY --from=build --chown=vaidix:vaidix /app/prisma ./prisma
 COPY --from=build --chown=vaidix:vaidix /app/scripts ./scripts
 COPY --from=build --chown=vaidix:vaidix /app/src ./src
+# tsconfig.json is required at runtime by tsx to resolve the `@/*` path alias
+# (used by workers like reminder-worker.ts importing `@/lib/queue`). Without it
+# tsx logs MODULE_NOT_FOUND and the workers container crashloops.
+COPY --from=build --chown=vaidix:vaidix /app/tsconfig.json ./tsconfig.json
 
 USER vaidix
 EXPOSE 3000
