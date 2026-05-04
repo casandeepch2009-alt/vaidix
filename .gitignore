@@ -71,3 +71,4 @@ src/lib/smoke-test.ts
 .idea/
 .vscode/
 Thumbs.db
+.git-push.log
