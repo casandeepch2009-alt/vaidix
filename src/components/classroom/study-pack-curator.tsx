@@ -344,6 +344,28 @@ function PreCasesCurator({ sessionId }: { sessionId: string }) {
     [sessionId, refresh]
   )
 
+  const toggleRequired = useCallback(
+    async (row: PreCaseRow) => {
+      const next = !row.required
+      // Optimistic flip — revert on failure.
+      setItems((prev) =>
+        prev ? prev.map((it) => (it.preCaseId === row.preCaseId ? { ...it, required: next } : it)) : prev
+      )
+      try {
+        await jsonFetch(
+          `/api/classroom/sessions/${sessionId}/pre-cases/${row.preCaseId}`,
+          { method: 'PATCH', body: JSON.stringify({ required: next }) }
+        )
+      } catch (e) {
+        toast.error(`Could not update: ${(e as Error).message}`)
+        setItems((prev) =>
+          prev ? prev.map((it) => (it.preCaseId === row.preCaseId ? { ...it, required: !next } : it)) : prev
+        )
+      }
+    },
+    [sessionId]
+  )
+
   // Suppress search results for templates that are already attached.
   const attachedTemplateIds = new Set(items?.map((i) => i.caseTemplateId) ?? [])
 
@@ -439,6 +461,15 @@ function PreCasesCurator({ sessionId }: { sessionId: string }) {
                 <div className="flex items-center justify-between gap-3 flex-wrap">
                   <p className="font-medium text-sm">{it.title}</p>
                   <div className="flex items-center gap-1.5 shrink-0">
+                    {it.required ? (
+                      <Badge className="text-[10px] bg-rose-500/15 text-rose-600 hover:bg-rose-500/20">
+                        Required
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10px]">
+                        Optional
+                      </Badge>
+                    )}
                     <Badge variant="outline" className="text-[10px] capitalize">
                       {it.difficulty.toLowerCase()}
                     </Badge>
@@ -451,6 +482,16 @@ function PreCasesCurator({ sessionId }: { sessionId: string }) {
                   </div>
                 </div>
                 <p className="mt-0.5 text-xs text-muted-foreground">{it.condition}</p>
+                <label className="mt-2 inline-flex cursor-pointer items-center gap-2 text-xs text-muted-foreground hover:text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={it.required}
+                    onChange={() => void toggleRequired(it)}
+                    className="size-3.5 rounded border-border accent-primary"
+                    data-testid={`curator-precase-required-${it.preCaseId}`}
+                  />
+                  Mark as mandatory pre-class prep
+                </label>
               </div>
               <Button
                 size="sm"

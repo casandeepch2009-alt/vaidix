@@ -10,7 +10,9 @@ export default async function CalendarPage() {
   if (!session?.user) redirect('/login')
 
   const canCreate =
-    session.user.role === Role.PROGRAM_DIRECTOR || session.user.role === Role.ADMIN
+    session.user.role === Role.PROGRAM_DIRECTOR ||
+    session.user.role === Role.ADMIN ||
+    session.user.role === Role.FACULTY
 
   return (
     <div className="space-y-6">

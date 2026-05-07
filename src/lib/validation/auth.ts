@@ -152,6 +152,16 @@ export const createInvitationSchema = z
     subspecialty: z.string().min(2).max(80).optional(),
     department: z.string().min(2).max(80).optional(),
     yearOfResidency: z.number().int().min(1).max(5).optional(),
+    // Optional hierarchy mapping. Service enforces role-vs-target compatibility:
+    //   programDirectorId requires role=FACULTY and ref.role=PROGRAM_DIRECTOR.
+    //   facultyMentorId   requires role=RESIDENT and ref.role=FACULTY.
+    //   cohortId          requires role=RESIDENT.
+    // All ignored (cleared) for any other role to keep payloads honest.
+    programDirectorId: cuidSchema.optional().nullable(),
+    facultyMentorId:   cuidSchema.optional().nullable(),
+    cohortId:          cuidSchema.optional().nullable(),
+    avatarUrl:         z.string().url().max(2048).optional().nullable(),
+    gender:            z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional().nullable(),
     moduleOverrides: moduleOverridesSchema,
     expiresInHours: z.number().int().min(1).max(168).default(48),
   })
@@ -174,6 +184,11 @@ export const updateInvitationSchema = z
     subspecialty: z.string().min(2).max(80).optional().nullable(),
     department: z.string().min(2).max(80).optional().nullable(),
     yearOfResidency: z.number().int().min(1).max(5).optional().nullable(),
+    programDirectorId: cuidSchema.optional().nullable(),
+    facultyMentorId:   cuidSchema.optional().nullable(),
+    cohortId:          cuidSchema.optional().nullable(),
+    avatarUrl:         z.string().url().max(2048).optional().nullable(),
+    gender:            z.enum(['male', 'female', 'other', 'prefer_not_to_say']).optional().nullable(),
     moduleOverrides: moduleOverridesSchema.optional(),
     expiresInHours: z.number().int().min(1).max(168).optional(),
   })

@@ -6,6 +6,8 @@ import { PendingSessionManager } from '@/components/classroom/pending-session-ma
 import { PreConferencePrepBlock } from '@/components/classroom/pre-conference-prep-block'
 import { PreConferenceResidentBlock } from '@/components/classroom/pre-conference-resident-block'
 import type { ObjectiveRow } from '@/components/classroom/objectives-chip-list'
+import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
+import { computePrereqStatus, readPrereqConfig } from '@/server/services/sessions/prereq'
 
 interface StoredObjective { id: string; text: string; blooms: number }
 
@@ -40,11 +42,31 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
       hostId: true,
       proposedBy: true,
       objectives: true,
+      topicId: true,
+      recurrenceRule: true,
+      recurrenceUntil: true,
+      metadata: true,
     },
   })
   if (!s) notFound()
 
-  const [host, proposer] = await Promise.all([
+  // For recurring sessions, the master row's status is often stale (e.g. ENDED
+  // after a prior occurrence finished) even though the series still has future
+  // occurrences. Project to SCHEDULED so the Pre-Conference Prep block renders
+  // for the next occurrence. LIVE wins — an active occurrence right now still
+  // routes to the live room.
+  const now = new Date()
+  const next = s.recurrenceRule
+    ? nextOccurrenceStart(s.scheduledStart, s.recurrenceRule, s.recurrenceUntil, now)
+    : null
+  const effectiveStatus =
+    s.recurrenceRule && next && s.status !== 'LIVE' ? 'SCHEDULED' : s.status
+  const effectiveStart = next ?? s.scheduledStart
+  const effectiveEnd = next
+    ? new Date(next.getTime() + (s.scheduledEnd.getTime() - s.scheduledStart.getTime()))
+    : s.scheduledEnd
+
+  const [host, proposer, topic] = await Promise.all([
     db.user.findUnique({
       where: { id: s.hostId },
       select: { id: true, name: true, email: true, avatarUrl: true },
@@ -53,6 +75,12 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
       where: { id: s.proposedBy },
       select: { id: true, name: true },
     }),
+    s.topicId
+      ? db.topic.findUnique({
+          where: { id: s.topicId },
+          select: { name: true, subspecialty: true },
+        })
+      : Promise.resolve(null),
   ])
 
   // Pending / draft / rejected sessions get the management UI instead of the live room.
@@ -65,8 +93,8 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           description: s.description,
           sessionType: s.sessionType,
           approvalStatus: s.approvalStatus,
-          scheduledStart: s.scheduledStart.toISOString(),
-          scheduledEnd: s.scheduledEnd.toISOString(),
+          scheduledStart: effectiveStart.toISOString(),
+          scheduledEnd: effectiveEnd.toISOString(),
           host: host ?? { id: s.hostId, name: 'Unknown host', email: '' },
         }}
         proposer={proposer}
@@ -87,8 +115,15 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     session.user.role === 'PROGRAM_DIRECTOR' ||
     session.user.role === 'ADMIN'
 
-  const showCuratorBlock = s.status === 'SCHEDULED' && isCurator
-  const showResidentBlock = s.status === 'SCHEDULED' && !isCurator
+  const showCuratorBlock = effectiveStatus === 'SCHEDULED' && isCurator
+  const showResidentBlock = effectiveStatus === 'SCHEDULED' && !isCurator
+
+  // Compute the prereq gate state for non-curators only — host/faculty/PD/admin
+  // bypass the gate so they can always start/manage the room.
+  const prereqStatus = !isCurator
+    ? await computePrereqStatus(s.id, session.user.id)
+    : null
+  const prereqConfig = readPrereqConfig(s.metadata)
 
   // Always read this user's marks — used by both curator + resident blocks
   // (curator sees their own marks too if attending another session as a learner).
@@ -134,6 +169,8 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
             session.user.role === 'ADMIN'
           }
           objectives={objectiveRows}
+          topic={topic}
+          prereqConfig={prereqConfig}
         />
       )}
       {showResidentBlock && (
@@ -143,6 +180,8 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           preQuestionCount={preQuestionCount}
           myPreQuestionCount={myPreQuestionCount}
           objectives={objectiveRows}
+          topic={topic}
+          prereqStatus={prereqStatus}
         />
       )}
       <LiveSession
@@ -151,16 +190,17 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           title: s.title,
           description: s.description,
           sessionType: s.sessionType,
-          status: s.status,
+          status: effectiveStatus,
           approvalStatus: s.approvalStatus,
-          scheduledStart: s.scheduledStart.toISOString(),
-          scheduledEnd: s.scheduledEnd.toISOString(),
+          scheduledStart: effectiveStart.toISOString(),
+          scheduledEnd: effectiveEnd.toISOString(),
           recordingEnabled: s.recordingEnabled,
           consentRequired: s.consentRequired,
           host: host ?? { id: s.hostId, name: 'Unknown host', email: '', avatarUrl: null },
         }}
         currentUser={{ id: session.user.id, name: session.user.name }}
         shareToken={shareToken}
+        prereqStatus={prereqStatus}
       />
     </>
   )

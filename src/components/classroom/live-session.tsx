@@ -22,6 +22,7 @@ import {
 } from 'lucide-react'
 import { WaitingRoom } from './waiting-room'
 import { PreJoin } from './pre-join'
+import type { PrereqStatus } from '@/server/services/sessions/prereq'
 import { ParticipantSidebar } from './participant-sidebar'
 import { ChatPanel } from './chat-panel'
 import { Button } from '@/components/ui/button'
@@ -62,10 +63,12 @@ export function LiveSession({
   session,
   currentUser,
   shareToken,
+  prereqStatus,
 }: {
   session: SessionInfo
   currentUser: { id: string; name: string }
   shareToken?: string
+  prereqStatus?: PrereqStatus | null
 }) {
   const router = useRouter()
   const [state, setState] = useState<JoinState>({ kind: 'IDLE' })
@@ -187,6 +190,7 @@ export function LiveSession({
       onJoin={requestToken}
       loading={state.kind === 'FETCHING'}
       error={state.kind === 'ERROR' ? state.message : null}
+      prereqStatus={prereqStatus ?? null}
     />
   )
 }

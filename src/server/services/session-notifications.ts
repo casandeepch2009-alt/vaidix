@@ -17,7 +17,7 @@ import {
 } from '@/lib/email-templates';
 import { buildSessionIcs, sessionJoinUrl } from './ics-service';
 import { env } from '@/lib/env';
-import { SessionVisibility, UserStatus } from '@prisma/client';
+import { NotificationChannel, SessionVisibility, UserStatus } from '@prisma/client';
 
 const CALENDAR_URL = `${env.NEXTAUTH_URL.replace(/\/$/, '')}/calendar`;
 const APPROVAL_INBOX_URL = `${env.NEXTAUTH_URL.replace(/\/$/, '')}/inbox/approvals`;
@@ -144,6 +144,25 @@ export async function notifySessionProposed(sessionId: string) {
     inviteCount,
   });
 
+  // In-app notification — drives the bell/badge in the header. Email may be
+  // delayed or filtered; this row is the source of truth for the inbox UI.
+  await db.notification.create({
+    data: {
+      userId: session.host.id,
+      channel: NotificationChannel.IN_APP,
+      kind: 'session.proposed',
+      title: `${session.proposer.name} proposed a session for your approval`,
+      body: `${session.title} — ${session.scheduledStart.toLocaleString()}`,
+      payload: {
+        sessionId: session.id,
+        scheduledStart: session.scheduledStart.toISOString(),
+        scheduledEnd: session.scheduledEnd.toISOString(),
+        proposerId: session.proposer.id,
+        approvalUrl: APPROVAL_INBOX_URL,
+      },
+    },
+  });
+
   await safeSend(session.host.email, subject, html);
 }
 
@@ -155,6 +174,21 @@ export async function notifySessionApproved(sessionId: string) {
 
   // Proposer confirmation (skip if proposer == host; the host just accepted)
   if (session.proposer.id !== session.host.id && session.proposer.status === UserStatus.ACTIVE) {
+    await db.notification.create({
+      data: {
+        userId: session.proposer.id,
+        channel: NotificationChannel.IN_APP,
+        kind: 'session.approved',
+        title: `${session.host.name} approved your session`,
+        body: `${session.title} — ${session.scheduledStart.toLocaleString()}`,
+        payload: {
+          sessionId: session.id,
+          scheduledStart: session.scheduledStart.toISOString(),
+          scheduledEnd: session.scheduledEnd.toISOString(),
+        },
+      },
+    });
+
     const { subject, html } = renderSessionApprovedEmail({
       ...shared,
       recipientName: session.proposer.name,

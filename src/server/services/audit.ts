@@ -177,6 +177,7 @@ export const AUDIT_EVENTS = {
   // Pre-Case scaffolding (Feeddback #6A — Pre-Case Scenario Simulations)
   PRE_CASE_ATTACHED: 'pre_case.attached',
   PRE_CASE_DETACHED: 'pre_case.detached',
+  PRE_CASE_UPDATED: 'pre_case.updated',
   PRE_CASE_STARTED: 'pre_case.started',
   PRE_CASE_COMPLETED: 'pre_case.completed',
   // Readiness Predictor (Feeddback #5)

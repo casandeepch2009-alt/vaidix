@@ -151,6 +151,14 @@ export default function InvitationsPage() {
         yearOfResidency: inv.yearOfResidency,
         moduleOverrides: inv.moduleOverrides ?? null,
         expiresAt: inv.expiresAt,
+        programDirectorId: inv.programDirectorId ?? null,
+        programDirector: inv.programDirector ?? null,
+        cohortId: inv.cohortId ?? null,
+        cohort: inv.cohort ?? null,
+        facultyMentorId: inv.facultyMentorId ?? null,
+        facultyMentor: inv.facultyMentor ?? null,
+        avatarUrl: inv.avatarUrl ?? null,
+        gender: inv.gender ?? null,
       });
       setSelectedId(null);
     } catch {

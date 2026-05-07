@@ -14,13 +14,17 @@ interface PageProps {
 export default async function NewSessionPage({ searchParams }: PageProps) {
   const session = await auth()
   if (!session?.user) redirect('/login')
-  if (session.user.role !== Role.PROGRAM_DIRECTOR && session.user.role !== Role.ADMIN) {
+  if (
+    session.user.role !== Role.PROGRAM_DIRECTOR &&
+    session.user.role !== Role.ADMIN &&
+    session.user.role !== Role.FACULTY
+  ) {
     redirect('/calendar')
   }
 
   const params = await searchParams
 
-  const [faculty, cohorts] = await Promise.all([
+  const [faculty, cohorts, topics] = await Promise.all([
     db.user.findMany({
       where: { role: { in: [Role.FACULTY, Role.PROGRAM_DIRECTOR] }, status: 'ACTIVE' },
       select: { id: true, name: true, email: true, role: true },
@@ -30,6 +34,10 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
       where: { status: CohortStatus.ACTIVE, deletedAt: null },
       select: { id: true, name: true, _count: { select: { members: true } } },
       orderBy: { createdAt: 'desc' },
+    }),
+    db.topic.findMany({
+      select: { id: true, name: true, subspecialty: true },
+      orderBy: [{ subspecialty: 'asc' }, { displayOrder: 'asc' }, { name: 'asc' }],
     }),
   ])
 
@@ -59,6 +67,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
           <NewSessionForm
             faculty={faculty}
             cohorts={cohorts.map((c) => ({ id: c.id, name: c.name, memberCount: c._count.members }))}
+            topics={topics}
             defaultStart={params.start}
             defaultEnd={params.end}
             currentUserId={session.user.id}

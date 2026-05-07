@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useState } from 'react'
 import { useRole } from '@/contexts/role-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -203,13 +204,6 @@ function ResidentDashboard() {
     { id: 'm4', title: 'Fundus examination workflow', topic: 'Retina', completedOn: '1 week ago', durationMin: 30 },
   ]
 
-  const upcomingTrainings = [
-    { id: '1', title: 'Grand Rounds: Complex Retinal Detachments', day: 'Today',  time: '8:00 AM',  faculty: 'Dr. Avinash Pathengay', type: 'Grand Rounds', isLive: true,  accent: 'teal' },
-    { id: '2', title: 'Journal Club: Anti-VEGF Advances',          day: 'Apr 11', time: '2:00 PM',  faculty: 'Dr. Subhadra Jalali',  type: 'Journal Club', isLive: false, accent: 'blue' },
-    { id: '3', title: 'Skills Lab: Suturing Techniques',           day: 'Apr 14', time: '10:00 AM', faculty: 'Dr. Rajeev Reddy',     type: 'Skills Lab',   isLive: false, accent: 'amber' },
-    { id: '4', title: 'Case Discussion: Pediatric Strabismus',     day: 'Apr 15', time: '4:00 PM',  faculty: 'Dr. Ramesh Kekunnaya', type: 'Case Disc.',   isLive: false, accent: 'purple' },
-  ]
-
   const stats: Array<{
     label: string
     value: number
@@ -298,7 +292,7 @@ function ResidentDashboard() {
           </Card>
 
           {/* Calendar */}
-          <UpcomingCalendar trainings={upcomingTrainings} />
+          <UpcomingCalendar />
         </div>
       </StaggerItem>
 
@@ -501,7 +495,23 @@ interface Training {
   accent: string
 }
 
-function UpcomingCalendar({ trainings }: { trainings: Training[] }) {
+function UpcomingCalendar() {
+  const [trainings, setTrainings] = useState<Training[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/dashboard/upcoming')
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return
+        if (j?.ok && Array.isArray(j.data?.trainings)) setTrainings(j.data.trainings)
+      })
+      .catch(() => { /* silent — empty state covers it */ })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [])
+
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between pb-3">
@@ -509,9 +519,16 @@ function UpcomingCalendar({ trainings }: { trainings: Training[] }) {
           <Calendar className="size-4 text-teal-600 dark:text-teal-300" />
           Upcoming schedule
         </CardTitle>
-        <span className="text-xs text-muted-foreground">{trainings.length} sessions</span>
+        <span className="text-xs text-muted-foreground">
+          {loading ? 'Loading…' : `${trainings.length} session${trainings.length === 1 ? '' : 's'}`}
+        </span>
       </CardHeader>
       <CardContent className="space-y-2.5">
+        {!loading && trainings.length === 0 && (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            No upcoming sessions in the next 30 days.
+          </p>
+        )}
         {trainings.map((t, i) => (
           <motion.div
             key={t.id}

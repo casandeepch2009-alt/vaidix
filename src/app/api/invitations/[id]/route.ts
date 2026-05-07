@@ -20,6 +20,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
       where: { id },
       include: {
         invitedBy: { select: { id: true, name: true, email: true } },
+        programDirector: { select: { id: true, name: true, email: true, avatarUrl: true } },
+        facultyMentor:   { select: { id: true, name: true, email: true, avatarUrl: true } },
+        cohort:          { select: { id: true, name: true, academicYear: true } },
       },
     });
     if (!inv) return jsonError('NOT_FOUND', 'Invitation not found', 404);
@@ -52,6 +55,9 @@ export async function PATCH(req: Request, ctx: { params: Promise<{ id: string }>
       const code = (err as Error).message;
       if (code === 'NOT_FOUND')   return jsonError('NOT_FOUND',   'Invitation not found', 404);
       if (code === 'NOT_EDITABLE') return jsonError('NOT_EDITABLE', 'Only pending invitations can be edited', 409);
+      if (code === 'INVALID_PD') return jsonError('INVALID', 'Selected user is not a Program Director', 400);
+      if (code === 'INVALID_MENTOR') return jsonError('INVALID', 'Selected user is not a Faculty member', 400);
+      if (code === 'INVALID_COHORT') return jsonError('INVALID', 'Selected cohort no longer exists', 400);
       throw err;
     }
   } catch (err) {

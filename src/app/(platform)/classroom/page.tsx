@@ -1,10 +1,16 @@
 import { redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
-import { Role, SessionApprovalStatus, SessionStatus } from '@prisma/client'
+import { Role, SessionStatus } from '@prisma/client'
 import { ClassroomFeed, type ListedSession } from './session-grid'
-import { buildSessionVisibilityWhere } from '@/server/services/sessions/visibility'
-import { isStaleLive, sweepStaleLiveSessions } from '@/server/services/sessions/auto-end'
+import { buildApprovalGate, buildSessionVisibilityWhere } from '@/server/services/sessions/visibility'
+import {
+  isStaleLive,
+  isStaleScheduled,
+  sweepStaleLiveSessions,
+  sweepStaleScheduledSessions,
+} from '@/server/services/sessions/auto-end'
+import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
 import pearlsData from '@/mock-data/pearls.json'
 
 interface MockPearl { tags: string[] }
@@ -14,12 +20,16 @@ export default async function ClassroomListPage() {
   if (!s?.user) redirect('/login')
 
   const canSchedule =
-    s.user.role === Role.PROGRAM_DIRECTOR || s.user.role === Role.ADMIN
+    s.user.role === Role.PROGRAM_DIRECTOR ||
+    s.user.role === Role.ADMIN ||
+    s.user.role === Role.FACULTY
 
-  // Best-effort recovery of LIVE sessions whose `room_finished` webhook never
-  // fired (LiveKit unreachable, host closed browser without ending, etc.).
-  // Fire-and-forget: throttled internally, must never block the render path.
+  // Best-effort recovery of stuck sessions:
+  //   - LIVE whose `room_finished` webhook never fired
+  //   - SCHEDULED whose host never started but the time window has passed
+  // Fire-and-forget: both throttled internally, must never block the render.
   void sweepStaleLiveSessions()
+  void sweepStaleScheduledSessions()
 
   const now = new Date()
   const nowMs = now.getTime()
@@ -34,13 +44,29 @@ export default async function ClassroomListPage() {
     role: s.user.role,
   })
 
+  const approvalGate = buildApprovalGate({ userId: s.user.id, role: s.user.role })
+
   const sessions = await db.teachingSession.findMany({
     where: {
       deletedAt: null,
-      approvalStatus: SessionApprovalStatus.APPROVED,
-      scheduledEnd: { gt: pastFloor },
-      scheduledStart: { lt: horizon },
-      ...visibility,
+      AND: [
+        approvalGate,
+        visibility,
+        {
+          // Non-recurring sessions: keep the bounded window so we don't drag
+          // in years of single events. Recurring masters bypass the window —
+          // their first occurrence may be ancient but a future one still
+          // belongs in Upcoming, computed via RRULE below.
+          OR: [
+            {
+              recurrenceRule: null,
+              scheduledEnd: { gt: pastFloor },
+              scheduledStart: { lt: horizon },
+            },
+            { recurrenceRule: { not: null } },
+          ],
+        },
+      ],
     },
     include: {
       host: { select: { id: true, name: true } },
@@ -59,37 +85,69 @@ export default async function ClassroomListPage() {
       ? allPearls.filter((p) => p.tags.some((t) => sessionTags.includes(t.toLowerCase()))).length
       : 0
 
+    // For recurring sessions show the next occurrence as the displayed
+    // start/end. The master's stored scheduledStart is the *first* occurrence
+    // and is usually historical for any active series.
+    const isRecurring = !!x.recurrenceRule
+    const durationMs = x.scheduledEnd.getTime() - x.scheduledStart.getTime()
+    const next = isRecurring
+      ? nextOccurrenceStart(x.scheduledStart, x.recurrenceRule!, x.recurrenceUntil, now)
+      : null
+
+    let displayStart = x.scheduledStart
+    let displayEnd = x.scheduledEnd
+    let displayStatus: SessionStatus = x.status
+
+    if (isRecurring) {
+      if (next) {
+        displayStart = next
+        displayEnd = new Date(next.getTime() + durationMs)
+        // The master row's status reflects the most recent occurrence — it
+        // can be ENDED while the series still has future occurrences. Force
+        // SCHEDULED so the series lands in Upcoming. Don't override LIVE: an
+        // active occurrence right now should stay in the Live bucket.
+        if (displayStatus !== SessionStatus.LIVE) {
+          displayStatus = SessionStatus.SCHEDULED
+        }
+      } else {
+        // Recurrence has fully completed — fall through to past bucket.
+        displayStatus = SessionStatus.ENDED
+      }
+    }
+
     return {
       id: x.id,
       title: x.title,
       sessionType: x.sessionType,
-      status: x.status,
-      scheduledStart: x.scheduledStart.toISOString(),
-      scheduledEnd: x.scheduledEnd.toISOString(),
+      status: displayStatus,
+      scheduledStart: displayStart.toISOString(),
+      scheduledEnd: displayEnd.toISOString(),
       host: x.host,
       participantCount: x._count.participants,
       thumbnailUrl: x.recording?.thumbnailUrl ?? null,
       durationSec: x.recording?.durationSec ?? null,
       tags: x.tags,
       pearlCount,
+      isRecurring,
     }
   })
 
-  // Belt-and-suspenders: if a session is marked LIVE but its scheduled end was
-  // long enough ago to be a stuck-LIVE candidate, treat it as past — the
-  // background sweep above will eventually correct the DB. This prevents the
-  // jarring "LIVE" badge from appearing on the very first render after the
-  // bug triggers, when the sweep hasn't yet had a chance to run. The status
-  // is coerced to 'ENDED' on the projected row so VideoCard renders the
-  // recording UI (not the join-live CTA).
-  const projected: ListedSession[] = rows.map((r) =>
-    isStaleLive(
-      { status: r.status as SessionStatus, scheduledEnd: new Date(r.scheduledEnd), actualStart: null },
-      now,
-    )
-      ? { ...r, status: SessionStatus.ENDED }
-      : r,
-  )
+  // Belt-and-suspenders: project stuck statuses to ENDED at read-time so they
+  // land in the past bucket on the very first render, before the background
+  // sweeps above have had a chance to correct the DB.
+  //   - stuck LIVE  → never got room_finished
+  //   - stuck SCHEDULED → host never started, end time has passed
+  const projected: ListedSession[] = rows.map((r) => {
+    const candidate = {
+      status: r.status as SessionStatus,
+      scheduledEnd: new Date(r.scheduledEnd),
+      actualStart: null,
+    }
+    if (isStaleLive(candidate, now) || isStaleScheduled(candidate, now)) {
+      return { ...r, status: SessionStatus.ENDED }
+    }
+    return r
+  })
 
   const live     = projected.filter((r) => r.status === 'LIVE')
   const upcoming = projected.filter((r) => r.status === 'SCHEDULED' && new Date(r.scheduledStart) > now)

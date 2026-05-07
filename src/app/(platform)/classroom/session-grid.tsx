@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Video, Calendar, Clock, Users, Plus, PlayCircle, Radio,
   Search, Share2, Bookmark, Gem, SortDesc, X, Check, ThumbsUp,
-  BookOpen, MessageCircleQuestion,
+  BookOpen, MessageCircleQuestion, RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -25,6 +25,13 @@ export interface ListedSession {
   durationSec: number | null
   tags: string[]
   pearlCount: number
+  isRecurring: boolean
+}
+
+function fmtUpcomingWhen(d: Date) {
+  const date = d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short' })
+  const time = d.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })
+  return `${date} · ${time}`
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -405,7 +412,7 @@ function VideoCard({ session: s, nowMs }: { session: ListedSession; nowMs: numbe
             </p>
           </Link>
           <p className="mt-0.5 text-[12px] text-muted-foreground">{s.host.name}</p>
-          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
             {isPast ? (
               <>
                 <span>{relativeDate(s.scheduledStart)}</span>
@@ -413,9 +420,20 @@ function VideoCard({ session: s, nowMs }: { session: ListedSession; nowMs: numbe
                 <span className="flex items-center gap-0.5"><Users className="size-3" />{s.participantCount} joined</span>
               </>
             ) : (
-              <span className="flex items-center gap-0.5">
-                <Clock className="size-3" />{scheduledMins(s.scheduledStart, s.scheduledEnd)} min
-              </span>
+              <>
+                <span className="flex items-center gap-1 font-semibold text-foreground">
+                  <Calendar className="size-3" />{fmtUpcomingWhen(start)}
+                </span>
+                <span className="opacity-40">·</span>
+                <span className="flex items-center gap-0.5">
+                  <Clock className="size-3" />{scheduledMins(s.scheduledStart, s.scheduledEnd)} min
+                </span>
+                {s.isRecurring && (
+                  <span className="flex items-center gap-0.5 text-primary">
+                    <RefreshCw className="size-3" />Recurring
+                  </span>
+                )}
+              </>
             )}
           </div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">

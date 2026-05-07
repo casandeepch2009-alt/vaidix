@@ -344,7 +344,9 @@ export function StudyPackList({ sessionId }: { sessionId: string }) {
                       <p className="font-medium text-sm">{c.title}</p>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {c.required && (
-                          <Badge variant="secondary" className="text-[10px]">Recommended</Badge>
+                          <Badge className="text-[10px] bg-rose-500/15 text-rose-600 hover:bg-rose-500/20">
+                            Required
+                          </Badge>
                         )}
                         <Badge variant="outline" className="text-[10px] capitalize">
                           {c.difficulty.toLowerCase()}

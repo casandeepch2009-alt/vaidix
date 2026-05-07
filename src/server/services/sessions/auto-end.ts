@@ -34,6 +34,13 @@ import { cancelSessionReminders } from '../reminder-scheduler';
 // off; tight enough that stuck sessions don't linger across a working day.
 const STALE_LIVE_GRACE_MS = 30 * 60 * 1000;
 
+// A SCHEDULED session whose scheduled end has passed by this much without
+// ever transitioning to LIVE is treated as never-happened. Larger grace than
+// LIVE because a session might be "scheduled to start any minute now" right
+// up until the host actually clicks Start; we only want to act once it's
+// clearly past the window.
+const STALE_SCHEDULED_GRACE_MS = 60 * 60 * 1000;
+
 // If anyone joined this recently, treat the session as still live regardless
 // of clock — handles the "session ran 90 min over but is genuinely active"
 // edge case.
@@ -70,6 +77,18 @@ export interface StaleLiveCandidate {
 export function isStaleLive(s: StaleLiveCandidate, now: Date): boolean {
   if (s.status !== SessionStatus.LIVE) return false;
   return now.getTime() - s.scheduledEnd.getTime() > STALE_LIVE_GRACE_MS;
+}
+
+/**
+ * Read-side predicate for SCHEDULED-but-never-started sessions. Mirror of
+ * `isStaleLive` but for the "host never clicked Start" failure mode. A
+ * SCHEDULED session whose scheduledEnd is well past should be projected as
+ * ENDED so it falls into the past bucket instead of vanishing (it's not
+ * upcoming because start < now, not past because status != ENDED).
+ */
+export function isStaleScheduled(s: StaleLiveCandidate, now: Date): boolean {
+  if (s.status !== SessionStatus.SCHEDULED) return false;
+  return now.getTime() - s.scheduledEnd.getTime() > STALE_SCHEDULED_GRACE_MS;
 }
 
 /**
@@ -183,6 +202,91 @@ async function doSweep(): Promise<number> {
     return ended;
   } catch (err) {
     console.error('[stale-live-sweep] sweep failed:', err);
+    return 0;
+  }
+}
+
+let lastScheduledSweepAt = 0;
+let inflightScheduled: Promise<number> | null = null;
+
+/**
+ * Find SCHEDULED sessions whose `scheduledEnd` is well past and flip them to
+ * ENDED. Mirror of `sweepStaleLiveSessions` for the "host never started"
+ * failure mode — without this, a forgotten/missed session sits in SCHEDULED
+ * forever, invisible in both Upcoming (start < now) and Past (status != ENDED).
+ *
+ * actualStart is left null and actualEnd stamped as scheduledEnd, so anyone
+ * computing "sessions that actually happened" can filter on `actualStart != null`.
+ */
+export async function sweepStaleScheduledSessions(): Promise<number> {
+  const now = Date.now();
+  if (inflightScheduled) return inflightScheduled;
+  if (now - lastScheduledSweepAt < SWEEP_MIN_INTERVAL_MS) return 0;
+  lastScheduledSweepAt = now;
+
+  inflightScheduled = doScheduledSweep().finally(() => {
+    inflightScheduled = null;
+  });
+  return inflightScheduled;
+}
+
+async function doScheduledSweep(): Promise<number> {
+  const now = new Date();
+  const staleCutoff = new Date(now.getTime() - STALE_SCHEDULED_GRACE_MS);
+
+  try {
+    const candidates = await db.teachingSession.findMany({
+      where: {
+        status: SessionStatus.SCHEDULED,
+        deletedAt: null,
+        scheduledEnd: { lt: staleCutoff },
+      },
+      select: { id: true, title: true, scheduledEnd: true },
+    });
+    if (candidates.length === 0) return 0;
+
+    let ended = 0;
+    for (const s of candidates) {
+      try {
+        const update = await db.teachingSession.updateMany({
+          where: { id: s.id, status: SessionStatus.SCHEDULED },
+          data: {
+            status: SessionStatus.ENDED,
+            // actualStart stays null — clear signal the session never started.
+            actualEnd: s.scheduledEnd,
+          },
+        });
+        if (update.count === 0) continue;
+        ended += 1;
+
+        await Promise.allSettled([
+          audit({
+            actorId: null,
+            eventType: 'SESSION_AUTO_ENDED',
+            entityType: 'teaching_session',
+            entityId: s.id,
+            summary: `Auto-ended stale SCHEDULED session "${s.title}" (never started)`,
+            details: { reason: 'stale_scheduled', scheduledEnd: s.scheduledEnd.toISOString() },
+          }),
+          sessionAudit({
+            sessionId: s.id,
+            eventType: SESSION_AUDIT.SESSION_ENDED,
+            actorId: null,
+            details: { reason: 'stale_scheduled_sweep' },
+          }),
+          cancelSessionReminders(s.id),
+        ]);
+      } catch (err) {
+        console.error('[stale-scheduled-sweep] failed to end session', s.id, err);
+      }
+    }
+
+    if (ended > 0) {
+      console.warn(`[stale-scheduled-sweep] auto-ended ${ended} stuck SCHEDULED session(s)`);
+    }
+    return ended;
+  } catch (err) {
+    console.error('[stale-scheduled-sweep] sweep failed:', err);
     return 0;
   }
 }

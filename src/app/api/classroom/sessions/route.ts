@@ -46,8 +46,12 @@ export async function POST(req: Request) {
     if (!gate.ok) return gate.response;
     const { user } = gate;
 
-    if (user.role !== Role.PROGRAM_DIRECTOR && user.role !== Role.ADMIN) {
-      return jsonError('FORBIDDEN', 'Only Program Directors can schedule sessions', 403);
+    if (
+      user.role !== Role.PROGRAM_DIRECTOR &&
+      user.role !== Role.ADMIN &&
+      user.role !== Role.FACULTY
+    ) {
+      return jsonError('FORBIDDEN', 'Only Faculty, Program Directors, and Admins can schedule sessions', 403);
     }
 
     const body = await parseBody(req, createSessionSchema);

@@ -10,7 +10,7 @@
 
 import { useState } from 'react'
 import { motion } from 'framer-motion'
-import { ClipboardList, BookOpen, Activity, Sparkles, Target } from 'lucide-react'
+import { ClipboardList, BookOpen, Activity, Sparkles, Target, ShieldCheck } from 'lucide-react'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { StudyPackCurator } from './study-pack-curator'
@@ -18,15 +18,20 @@ import { ReadinessPanel } from './readiness-panel'
 import { TeaserVideoButton } from './teaser-video-button'
 import { ObjectivesChipList, type ObjectiveRow } from './objectives-chip-list'
 import { ObjectivesCurator } from './objectives-curator'
+import type { PrereqConfig } from '@/lib/validation/session'
 
 export function PreConferencePrepBlock({
   sessionId,
   canCurate,
   objectives = [],
+  topic,
+  prereqConfig,
 }: {
   sessionId: string
   canCurate: boolean
   objectives?: ObjectiveRow[]
+  topic?: { name: string; subspecialty: string | null } | null
+  prereqConfig?: PrereqConfig | null
 }) {
   const [tab, setTab] = useState<'objectives' | 'pack' | 'readiness' | 'teaser'>('objectives')
   return (
@@ -37,11 +42,23 @@ export function PreConferencePrepBlock({
       className="mx-auto mt-6 mb-6 w-full max-w-5xl overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
       data-testid="pre-conference-panels"
     >
-      <div className="border-b border-border px-6 py-3 flex items-center gap-2">
+      <div className="border-b border-border px-6 py-3 flex flex-wrap items-center gap-2">
         <ClipboardList className="size-4 text-primary" />
         <span className="text-xs font-bold uppercase tracking-wider text-foreground">
           Pre-Conference Prep
         </span>
+        {prereqConfig && prereqConfig.mode !== 'NONE' && (
+          <PrereqBadge config={prereqConfig} />
+        )}
+        {topic && (
+          <span className="ml-auto inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-semibold text-primary">
+            <BookOpen className="size-3" />
+            {topic.name}
+            {topic.subspecialty && (
+              <span className="font-normal text-primary/70">· {topic.subspecialty}</span>
+            )}
+          </span>
+        )}
       </div>
       {objectives.length > 0 && (
         <div className="border-b border-border px-6 py-4">
@@ -109,5 +126,29 @@ export function PreConferencePrepBlock({
         </Tabs>
       </div>
     </motion.div>
+  )
+}
+
+function PrereqBadge({ config }: { config: PrereqConfig }) {
+  const enabled = [
+    config.requirePreQuestions ? `pre-Qs ≥ ${config.minPreQuestions}` : null,
+    config.requireStudyPack ? 'study pack' : null,
+    config.requireReadinessAck ? 'readiness' : null,
+  ].filter(Boolean)
+  const cls =
+    config.mode === 'MANDATORY'
+      ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+      : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300'
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ${cls}`}
+      data-testid="curator-prereq-badge"
+    >
+      <ShieldCheck className="size-3" />
+      Gate: {config.mode === 'MANDATORY' ? 'Required' : 'Show only'}
+      {enabled.length > 0 && (
+        <span className="font-normal opacity-80">· {enabled.join(', ')}</span>
+      )}
+    </span>
   )
 }

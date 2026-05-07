@@ -94,8 +94,14 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
   const start = new Date(input.scheduledStart);
   const end = new Date(input.scheduledEnd);
 
-  // Only PD / ADMIN may propose; host must be FACULTY, PD, or ADMIN.
-  if (proposerRole !== Role.PROGRAM_DIRECTOR && proposerRole !== Role.ADMIN) {
+  // FACULTY / PD / ADMIN may propose; host must be FACULTY, PD, or ADMIN.
+  // Faculty proposing for themselves auto-approves below; faculty proposing
+  // for another faculty goes to PENDING_FACULTY for the host to approve.
+  if (
+    proposerRole !== Role.FACULTY &&
+    proposerRole !== Role.PROGRAM_DIRECTOR &&
+    proposerRole !== Role.ADMIN
+  ) {
     throw new Error('FORBIDDEN_PROPOSER_ROLE');
   }
 
@@ -152,6 +158,9 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
         topicId: input.topicId ?? null,
         tags: input.tags,
         objectives: normaliseObjectives(input.objectives) ?? Prisma.JsonNull,
+        // Prereq config lives under metadata.prereq so we don't add columns
+        // for a feature that isn't queried from SQL.
+        metadata: input.prereq ? { prereq: input.prereq } : Prisma.JsonNull,
       },
     });
 
@@ -759,7 +768,7 @@ export async function updateSession(
 ) {
   const session = await db.teachingSession.findUnique({
     where: { id: sessionId },
-    select: { hostId: true, proposedBy: true, title: true },
+    select: { hostId: true, proposedBy: true, title: true, metadata: true },
   });
   if (!session) throw new Error('SESSION_NOT_FOUND');
   if (
@@ -783,6 +792,18 @@ export async function updateSession(
       : { objectives: normalised as unknown as Prisma.InputJsonValue };
   }
 
+  // Merge prereq config into existing metadata so we don't clobber unrelated keys.
+  let metadataPatch: { metadata: Prisma.InputJsonValue } | Record<string, never> = {};
+  if (input.prereq !== undefined) {
+    const existing =
+      session.metadata && typeof session.metadata === 'object' && !Array.isArray(session.metadata)
+        ? (session.metadata as Record<string, unknown>)
+        : {};
+    metadataPatch = {
+      metadata: { ...existing, prereq: input.prereq } as unknown as Prisma.InputJsonValue,
+    };
+  }
+
   const updated = await db.teachingSession.update({
     where: { id: sessionId },
     data: {
@@ -793,6 +814,7 @@ export async function updateSession(
       consentRequired: input.consentRequired ?? undefined,
       tags: input.tags ?? undefined,
       ...objectivesPatch,
+      ...metadataPatch,
     },
   });
   await audit({

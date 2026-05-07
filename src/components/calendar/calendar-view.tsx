@@ -5,7 +5,7 @@ import { Calendar, dateFnsLocalizer, Views, type View, type SlotInfo } from 'rea
 import {
   format, parse, startOfWeek, getDay, startOfMonth, endOfMonth,
   addMonths, addWeeks, addDays, setMonth, setYear, formatDistanceToNow, isFuture,
-  differenceInMinutes, isToday as dateFnsIsToday,
+  differenceInMinutes, isToday as dateFnsIsToday, startOfDay,
 } from 'date-fns'
 import { enUS } from 'date-fns/locale'
 import { useRouter } from 'next/navigation'
@@ -483,27 +483,36 @@ function DateGroupHeader({ date, count }: { date: Date; count: number }) {
   )
 }
 
+type AgendaMode = 'upcoming' | 'past'
+
 function SessionsFeed({
   events,
+  mode,
   onSelect,
   canCreate,
   activityMap,
 }: {
   events: CalEvent[]
+  mode: AgendaMode
   onSelect: (e: CalEvent) => void
   canCreate: boolean
   activityMap: Record<string, SessionActivitySummary>
 }) {
   const grouped = useMemo(() => {
+    const todayStart = startOfDay(new Date())
+    const filtered = events.filter((e) =>
+      mode === 'upcoming' ? e.start >= todayStart : e.start < todayStart
+    )
+    const sorted = [...filtered].sort((a, b) => a.start.getTime() - b.start.getTime())
     const map = new Map<string, CalEvent[]>()
-    const sorted = [...events].sort((a, b) => a.start.getTime() - b.start.getTime())
     for (const e of sorted) {
       const key = format(e.start, 'yyyy-MM-dd')
       if (!map.has(key)) map.set(key, [])
       map.get(key)!.push(e)
     }
-    return [...map.entries()]
-  }, [events])
+    const entries = [...map.entries()]
+    return mode === 'past' ? entries.reverse() : entries
+  }, [events, mode])
 
   if (grouped.length === 0) {
     return (
@@ -512,9 +521,15 @@ function SessionsFeed({
           <Video className="size-7 text-muted-foreground/50" />
         </div>
         <div>
-          <p className="text-sm font-semibold text-foreground">No sessions this period</p>
+          <p className="text-sm font-semibold text-foreground">
+            {mode === 'upcoming' ? 'No upcoming sessions' : 'No past sessions'}
+          </p>
           <p className="mt-1 text-xs text-muted-foreground">
-            {canCreate ? 'Switch to Month view and click a date to schedule one.' : 'Sessions scheduled by faculty will appear here.'}
+            {mode === 'upcoming'
+              ? canCreate
+                ? 'Switch to Month view and click a date to schedule one.'
+                : 'Sessions scheduled by faculty will appear here.'
+              : 'Once a session ends, it will appear here.'}
           </p>
         </div>
       </div>
@@ -559,6 +574,7 @@ export function CalendarView({ canCreate, userRole }: CalendarViewProps) {
   const [date, setDate]                 = useState<Date>(new Date())
   const [selectedEvent, setSelectedEvent] = useState<CalEvent | null>(null)
   const [activityMap, setActivityMap]   = useState<Record<string, SessionActivitySummary>>({})
+  const [agendaMode, setAgendaMode]     = useState<AgendaMode>('upcoming')
 
   const isOrganizer = userRole ? ORGANIZER_ROLES.includes(userRole) : false
 
@@ -780,12 +796,31 @@ export function CalendarView({ canCreate, userRole }: CalendarViewProps) {
           {/* Sessions feed (agenda/list view) */}
           {view === Views.AGENDA ? (
             !loading && (
-              <SessionsFeed
-                events={events}
-                onSelect={setSelectedEvent}
-                canCreate={canCreate}
-                activityMap={activityMap}
-              />
+              <>
+                <div className="mb-3 inline-flex rounded-lg border border-border bg-muted/30 p-0.5">
+                  {(['upcoming', 'past'] as AgendaMode[]).map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setAgendaMode(m)}
+                      className={cn(
+                        'rounded-md px-3 py-1 text-xs font-semibold capitalize transition',
+                        agendaMode === m
+                          ? 'bg-card text-foreground shadow-sm'
+                          : 'text-muted-foreground hover:text-foreground'
+                      )}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+                <SessionsFeed
+                  events={events}
+                  mode={agendaMode}
+                  onSelect={setSelectedEvent}
+                  canCreate={canCreate}
+                  activityMap={activityMap}
+                />
+              </>
             )
           ) : (
             <>

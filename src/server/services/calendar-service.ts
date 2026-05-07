@@ -5,7 +5,7 @@
 
 import { RRule, rrulestr } from 'rrule';
 import { db } from '@/lib/db';
-import { buildSessionVisibilityWhere } from './sessions/visibility';
+import { buildApprovalGate, buildSessionVisibilityWhere } from './sessions/visibility';
 import {
   SessionApprovalStatus,
   SessionStatus,
@@ -41,16 +41,16 @@ export interface CalendarEvent {
 // the calendar to approve them); other roles see APPROVED only.
 // ----------------------------------------------------------------------------
 async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: Date) {
-  const isPrivileged = role === Role.ADMIN || role === Role.PROGRAM_DIRECTOR;
   const visibility = await buildSessionVisibilityWhere({ userId, role });
+  const approvalGate = buildApprovalGate({ userId, role });
 
   // Compose under `AND` so the two independent OR-clauses (time-window vs.
   // visibility) don't collide on a shared top-level `OR` key.
   return {
     deletedAt: null,
     scheduledStart: { lt: to },
-    ...(isPrivileged ? {} : { approvalStatus: SessionApprovalStatus.APPROVED }),
     AND: [
+      approvalGate,
       // Single sessions must overlap [from, to]; recurring masters may start
       // earlier but still have occurrences in-window (filtered in JS below).
       { OR: [{ scheduledEnd: { gt: from } }, { recurrenceRule: { not: null } }] },

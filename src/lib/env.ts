@@ -134,6 +134,16 @@ if (env.NODE_ENV === 'production' && !isBuildPhase && !gateDisabled) {
     violations.push("TRANSCRIPTION_PROVIDER=self_hosted requires SELF_HOSTED_TRANSCRIPTION_URL.");
   }
 
+  // Gate 6: NEXTAUTH_URL must not be localhost in production. Invitation,
+  // password-reset, and welcome emails embed this URL; if it points to
+  // localhost, recipients get unclickable links pointing back to the dev box.
+  if (/(?:^|\/\/)(?:localhost|127\.0\.0\.1)/i.test(env.NEXTAUTH_URL)) {
+    violations.push(
+      `NEXTAUTH_URL=${env.NEXTAUTH_URL} points to localhost in production. ` +
+      `Email links would be broken. Set NEXTAUTH_URL to the public URL of the deployment (e.g. https://vaidix.lvpei.org).`
+    );
+  }
+
   if (violations.length > 0) {
     console.error('❌ Production env gate failed. Refusing to boot:');
     for (const v of violations) console.error(`  • ${v}`);

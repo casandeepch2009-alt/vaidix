@@ -23,10 +23,17 @@ import {
   Sparkles,
   Loader2,
   AlertCircle,
+  UserMinus,
+  Network,
+  Camera,
+  Trash2,
+  Users2,
 } from 'lucide-react';
+import { useRef } from 'react';
 import { Role } from '@prisma/client';
 import { MODULES, CATEGORY_LABELS, defaultModulesForRole, type ModuleDef, type ModuleCategory } from '@/lib/modules';
 import { createInvitationSchema, updateInvitationSchema } from '@/lib/validation/auth';
+import { UserPicker, type PickableUser } from '@/components/user-picker';
 
 export interface InviteModalEditData {
   id: string;
@@ -40,6 +47,22 @@ export interface InviteModalEditData {
   yearOfResidency: number | null;
   moduleOverrides: { granted?: string[]; revoked?: string[] } | null;
   expiresAt: string;
+  programDirectorId: string | null;
+  programDirector: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+  cohortId: string | null;
+  cohort: { id: string; name: string; academicYear: string | null } | null;
+  facultyMentorId: string | null;
+  facultyMentor: { id: string; name: string; email: string; avatarUrl: string | null } | null;
+  avatarUrl: string | null;
+  gender: string | null;
+}
+
+type Gender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
+
+interface CohortLite {
+  id: string;
+  name: string;
+  academicYear: string | null;
 }
 
 type Step = 1 | 2 | 3;
@@ -107,12 +130,44 @@ function InviteModalBody({ onClose, onCreated, edit }: {
   const [email,         setEmail]         = useState(edit?.email ?? '');
   const [mobile,        setMobile]        = useState(edit?.mobile ?? '');
   const [mciRegNumber,  setMciRegNumber]  = useState(edit?.mciRegNumber ?? '');
+  const [gender,        setGender]        = useState<Gender | ''>((edit?.gender as Gender | null) ?? '');
+  const [avatarUrl,     setAvatarUrl]     = useState<string | null>(edit?.avatarUrl ?? null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const avatarInputRef = useRef<HTMLInputElement | null>(null);
 
   const [role,           setRoleState]      = useState<Role | null>(edit?.role ?? null);
   const [subspecialty,   setSubspecialty]   = useState(edit?.subspecialty ?? '');
   const [department,     setDepartment]     = useState(edit?.department ?? '');
   const [yearOfResidency, setYearOfResidency] = useState<number | ''>(edit?.yearOfResidency ?? 1);
   const [expiresInHours, setExpiresInHours]  = useState(edit ? hoursUntil(edit.expiresAt) : 48);
+
+  // Hierarchy mapping pickers (Step 2). Server enforces role-vs-mapping
+  // compatibility, so the UI only needs to show the right picker per role.
+  const [pdPick, setPdPick] = useState<PickableUser[]>(
+    edit?.programDirector
+      ? [{
+          id: edit.programDirector.id,
+          name: edit.programDirector.name,
+          email: edit.programDirector.email,
+          role: Role.PROGRAM_DIRECTOR,
+          avatarUrl: edit.programDirector.avatarUrl,
+        }]
+      : []
+  );
+  const [mentorPick, setMentorPick] = useState<PickableUser[]>(
+    edit?.facultyMentor
+      ? [{
+          id: edit.facultyMentor.id,
+          name: edit.facultyMentor.name,
+          email: edit.facultyMentor.email,
+          role: Role.FACULTY,
+          avatarUrl: edit.facultyMentor.avatarUrl,
+        }]
+      : []
+  );
+  const [cohortId, setCohortId] = useState<string | null>(edit?.cohortId ?? null);
+  const [cohorts, setCohorts] = useState<CohortLite[]>([]);
+  const [cohortsLoaded, setCohortsLoaded] = useState(false);
 
   const [moduleMap, setModuleMap] = useState<Record<string, boolean>>(
     () => (edit ? deriveModuleMapFromEdit(edit) : emptyModuleMap())
@@ -176,7 +231,78 @@ function InviteModalBody({ onClose, onCreated, edit }: {
   function setRole(next: Role) {
     setRoleState(next);
     setModuleMap(defaultModuleMap(next));
+    // Drop mappings that no longer apply to the new role; the server would
+    // strip them anyway but clearing here keeps the picker UI honest.
+    if (next !== Role.FACULTY) setPdPick([]);
+    if (next !== Role.RESIDENT) {
+      setCohortId(null);
+      setMentorPick([]);
+    }
   }
+
+  // Avatar upload via the generic /api/admin/avatar presign route. We commit
+  // the URL to the Invitation row only when "Send invitation" is clicked, so
+  // the admin can still cancel without leaving a half-applied photo.
+  async function handleAvatarFile(file: File) {
+    setFormError(null);
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      setFormError('Please choose a JPEG, PNG, or WebP image.');
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setFormError('Image must be 5 MB or smaller.');
+      return;
+    }
+    setAvatarUploading(true);
+    try {
+      const presignRes = await fetch('/api/admin/avatar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contentType: file.type, sizeBytes: file.size }),
+      });
+      const presignBody = await presignRes.json();
+      if (!presignRes.ok) {
+        setFormError(presignBody?.error?.message ?? 'Could not start upload');
+        return;
+      }
+      const { uploadUrl, avatarUrl: newUrl } = presignBody.data as { uploadUrl: string; avatarUrl: string };
+      const putRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type },
+        body: file,
+      });
+      if (!putRes.ok) {
+        setFormError('Upload failed. Please try again.');
+        return;
+      }
+      setAvatarUrl(newUrl);
+    } catch (e) {
+      setFormError(e instanceof Error ? e.message : 'Upload failed');
+    } finally {
+      setAvatarUploading(false);
+    }
+  }
+
+  // Lazy-load active cohorts the first time the user lands on a RESIDENT
+  // invite. Re-fetch on subsequent visits is cheap but unnecessary; the list
+  // doesn't change often during a single invite session.
+  useEffect(() => {
+    if (role !== Role.RESIDENT || cohortsLoaded) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/cohorts');
+        const body = await res.json();
+        if (cancelled || !body.ok) return;
+        const list = (body.data?.cohorts ?? []) as Array<{ id: string; name: string; academicYear: string | null }>;
+        setCohorts(list.map((c) => ({ id: c.id, name: c.name, academicYear: c.academicYear })));
+        setCohortsLoaded(true);
+      } catch {
+        // Non-fatal: admin can still send the invite without a cohort.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [role, cohortsLoaded]);
 
   function step1Valid(): boolean {
     const errs: Record<string, string> = {};
@@ -225,6 +351,11 @@ function InviteModalBody({ onClose, onCreated, edit }: {
       subspecialty:    subspecialty.trim() || undefined,
       department:      department.trim() || undefined,
       yearOfResidency: role === Role.RESIDENT && typeof yearOfResidency === 'number' ? yearOfResidency : undefined,
+      programDirectorId: role === Role.FACULTY  ? (pdPick[0]?.id ?? null)     : null,
+      facultyMentorId:   role === Role.RESIDENT ? (mentorPick[0]?.id ?? null) : null,
+      cohortId:          role === Role.RESIDENT ? (cohortId ?? null)          : null,
+      avatarUrl:         avatarUrl ?? null,
+      gender:            (gender as Gender | '') || null,
       moduleOverrides: { granted, revoked },
       expiresInHours,
     };
@@ -471,6 +602,13 @@ function InviteModalBody({ onClose, onCreated, edit }: {
                     fullName={fullName} email={email} mobile={mobile} mciRegNumber={mciRegNumber} errors={fieldErrors}
                     emailLocked={isEdit}
                     emailCheck={emailCheck}
+                    avatarUrl={avatarUrl}
+                    avatarUploading={avatarUploading}
+                    avatarInputRef={avatarInputRef}
+                    onAvatarFile={handleAvatarFile}
+                    onAvatarClear={() => setAvatarUrl(null)}
+                    gender={gender}
+                    onGenderChange={(v) => setGender(v)}
                     onChange={(patch) => {
                       if ('fullName'     in patch) setFullName(patch.fullName!);
                       if ('email'        in patch) setEmail(patch.email!);
@@ -487,6 +625,9 @@ function InviteModalBody({ onClose, onCreated, edit }: {
                     yearOfResidency={yearOfResidency} expiresInHours={expiresInHours} errors={fieldErrors}
                     onRoleChange={setRole} onSubspecialtyChange={setSubspecialty}
                     onDepartmentChange={setDepartment} onYearChange={setYearOfResidency} onExpiryChange={setExpiresInHours}
+                    pdPick={pdPick} onPdChange={setPdPick}
+                    mentorPick={mentorPick} onMentorChange={setMentorPick}
+                    cohortId={cohortId} cohorts={cohorts} onCohortChange={setCohortId}
                   />
                 </motion.div>
               )}
@@ -567,11 +708,23 @@ type EmailCheckState =
   | { state: 'available' }
   | { state: 'taken'; reason: 'USER_EXISTS' | 'PENDING_INVITE'; message: string };
 
-function Step1({ fullName, email, mobile, mciRegNumber, errors, emailLocked, emailCheck, onChange }: {
+function Step1({
+  fullName, email, mobile, mciRegNumber, errors, emailLocked, emailCheck,
+  avatarUrl, avatarUploading, avatarInputRef, onAvatarFile, onAvatarClear,
+  gender, onGenderChange,
+  onChange,
+}: {
   fullName: string; email: string; mobile: string; mciRegNumber: string;
   errors: Record<string, string>;
   emailLocked?: boolean;
   emailCheck?: EmailCheckState;
+  avatarUrl: string | null;
+  avatarUploading: boolean;
+  avatarInputRef: React.RefObject<HTMLInputElement | null>;
+  onAvatarFile: (file: File) => void | Promise<void>;
+  onAvatarClear: () => void;
+  gender: Gender | '';
+  onGenderChange: (v: Gender | '') => void;
   onChange: (patch: Partial<{ fullName: string; email: string; mobile: string; mciRegNumber: string }>) => void;
 }) {
   const emailFormatValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -593,6 +746,68 @@ function Step1({ fullName, email, mobile, mciRegNumber, errors, emailLocked, ema
 
   return (
     <div className="space-y-5">
+      {/* Avatar — uploaded directly to S3 via presign, committed on Send */}
+      <div>
+        <div className="mb-1.5 flex items-center gap-1.5">
+          <Camera className="size-3.5 text-muted-foreground" />
+          <label className="text-sm font-semibold text-foreground">Profile photo</label>
+          <span className="ml-auto text-xs text-muted-foreground">Optional</span>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="relative size-20 shrink-0 overflow-hidden rounded-2xl border-2 border-input bg-muted/40">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt={fullName || 'avatar'} className="size-full object-cover" />
+            ) : (
+              <div className="flex size-full items-center justify-center text-lg font-bold text-muted-foreground">
+                {getInitials(fullName) || '?'}
+              </div>
+            )}
+            {avatarUploading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-background/70">
+                <Loader2 className="size-5 animate-spin text-primary" />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-1 flex-col gap-1.5">
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onAvatarFile(f);
+                e.target.value = '';
+              }}
+            />
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={avatarUploading}
+                onClick={() => avatarInputRef.current?.click()}
+                className="flex items-center gap-1.5 rounded-xl border-2 border-input bg-card px-3 py-1.5 text-xs font-bold text-foreground transition hover:border-primary/40 hover:bg-accent disabled:opacity-50"
+              >
+                <Camera className="size-3.5" />
+                {avatarUrl ? 'Replace photo' : 'Upload photo'}
+              </button>
+              {avatarUrl && (
+                <button
+                  type="button"
+                  disabled={avatarUploading}
+                  onClick={onAvatarClear}
+                  className="flex items-center gap-1.5 rounded-xl border-2 border-input bg-card px-3 py-1.5 text-xs font-bold text-foreground transition hover:border-destructive/40 hover:bg-destructive/5 hover:text-destructive disabled:opacity-50"
+                >
+                  <Trash2 className="size-3.5" />
+                  Remove
+                </button>
+              )}
+            </div>
+            <p className="text-[11px] text-muted-foreground">JPEG, PNG, or WebP. Up to 5 MB.</p>
+          </div>
+        </div>
+      </div>
+
       <Field label="Full name" icon={UserCircle} required error={errors.fullName} valid={nameValid && fullName.length > 0}>
         <FancyInput value={fullName} onChange={(v) => onChange({ fullName: v })} placeholder="Dr. Priya Nair" />
       </Field>
@@ -622,17 +837,33 @@ function Step1({ fullName, email, mobile, mciRegNumber, errors, emailLocked, ema
         <Field label="MCI registration" icon={IdCard} hint="Optional">
           <FancyInput value={mciRegNumber} onChange={(v) => onChange({ mciRegNumber: v })} placeholder="TSMC-12345" />
         </Field>
+        <Field label="Gender" hint="Optional">
+          <FancySelect value={gender} onChange={(v) => onGenderChange((v as Gender) || '')}>
+            <option value="">Prefer not to say</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_to_say">Prefer not to say</option>
+          </FancySelect>
+        </Field>
       </div>
     </div>
   );
 }
 
 // ─── Step 2 ───────────────────────────────────────────────────────────────────
-function Step2({ role, subspecialty, department, yearOfResidency, expiresInHours, errors, onRoleChange, onSubspecialtyChange, onDepartmentChange, onYearChange, onExpiryChange }: {
+function Step2({
+  role, subspecialty, department, yearOfResidency, expiresInHours, errors,
+  onRoleChange, onSubspecialtyChange, onDepartmentChange, onYearChange, onExpiryChange,
+  pdPick, onPdChange, mentorPick, onMentorChange, cohortId, cohorts, onCohortChange,
+}: {
   role: Role | null; subspecialty: string; department: string; yearOfResidency: number | ''; expiresInHours: number;
   errors: Record<string, string>;
   onRoleChange: (r: Role) => void; onSubspecialtyChange: (v: string) => void; onDepartmentChange: (v: string) => void;
   onYearChange: (v: number | '') => void; onExpiryChange: (v: number) => void;
+  pdPick: PickableUser[]; onPdChange: (v: PickableUser[]) => void;
+  mentorPick: PickableUser[]; onMentorChange: (v: PickableUser[]) => void;
+  cohortId: string | null; cohorts: CohortLite[]; onCohortChange: (v: string | null) => void;
 }) {
   return (
     <div className="space-y-6">
@@ -675,6 +906,78 @@ function Step2({ role, subspecialty, department, yearOfResidency, expiresInHours
           })}
         </div>
       </div>
+
+      {/* Hierarchy mapping — role-conditional pickers */}
+      {role === Role.FACULTY && (
+        <div>
+          <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+            <Network className="size-3" /> Reports to (Program Director)
+          </p>
+          {pdPick.length > 0 ? (
+            <PickedChip
+              user={pdPick[0]}
+              onClear={() => onPdChange([])}
+              accent="teal"
+            />
+          ) : (
+            <UserPicker
+              single
+              role={Role.PROGRAM_DIRECTOR}
+              selected={pdPick}
+              onChange={onPdChange}
+              placeholder="Search program directors…"
+            />
+          )}
+          <p className="mt-1.5 text-[11px] text-muted-foreground">
+            Optional. Applied automatically when the invitee accepts.
+          </p>
+        </div>
+      )}
+
+      {role === Role.RESIDENT && (
+        <div className="space-y-5">
+          <div>
+            <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              <Network className="size-3" /> Faculty mentor
+            </p>
+            {mentorPick.length > 0 ? (
+              <PickedChip
+                user={mentorPick[0]}
+                onClear={() => onMentorChange([])}
+                accent="blue"
+              />
+            ) : (
+              <UserPicker
+                single
+                role={Role.FACULTY}
+                selected={mentorPick}
+                onChange={onMentorChange}
+                placeholder="Search faculty…"
+              />
+            )}
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Optional. Direct mentor for this resident, independent of cohort.
+            </p>
+          </div>
+
+          <div>
+            <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+              <Users2 className="size-3" /> Cohort assignment
+            </p>
+            <FancySelect value={cohortId ?? ''} onChange={(v) => onCohortChange(v || null)}>
+              <option value="">No cohort (assign later)</option>
+              {cohorts.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}{c.academicYear ? ` · ${c.academicYear}` : ''}
+                </option>
+              ))}
+            </FancySelect>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">
+              Optional. Applied automatically when the invitee accepts.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <Field label="Subspecialty">
@@ -903,4 +1206,31 @@ function EmailCheckBanner({ check }: { check: EmailCheckState }) {
 
 function humanRole(role: string): string {
   return role.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function PickedChip({ user, onClear, accent }: {
+  user: PickableUser;
+  onClear: () => void;
+  accent: 'teal' | 'blue';
+}) {
+  const ring = accent === 'teal' ? 'bg-teal-500/10 text-teal-700' : 'bg-blue-500/10 text-blue-700';
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2">
+      <div className={`flex size-8 shrink-0 items-center justify-center rounded-full text-xs font-bold ${ring}`}>
+        {user.name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')}
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{user.name}</div>
+        <div className="truncate text-xs text-muted-foreground">{user.email}</div>
+      </div>
+      <button
+        type="button"
+        onClick={onClear}
+        className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
+        aria-label="Clear selection"
+      >
+        <UserMinus className="size-4" />
+      </button>
+    </div>
+  );
 }

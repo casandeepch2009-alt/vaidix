@@ -376,6 +376,11 @@ model User {
   /// SET NULL so a PD's removal cleanly orphans their faculty without
   /// blocking the deletion.
   programDirectorId String?
+  /// Optional Faculty mentor uplink for RESIDENT users. Service layer
+  /// enforces target.role=RESIDENT and ref.role=FACULTY. Independent of
+  /// cohort membership — a resident may have a mentor outside their cohort.
+  /// ON DELETE SET NULL.
+  facultyMentorId  String?
   deletedAt        DateTime?
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
@@ -387,6 +392,8 @@ model User {
   accounts                AuthAccount[]
   roleHistory             UserRoleHistory[]
   invitationsSent         Invitation[]             @relation("InvitedBy")
+  invitationsAsPD         Invitation[]             @relation("InvitationPD")
+  invitationsAsMentor     Invitation[]             @relation("InvitationMentor")
   passwordResets          PasswordResetToken[]
   cases                   Case[]
   journalEntries          JournalEntry[]
@@ -403,6 +410,8 @@ model User {
   cohortMemberships       CohortMember[]           @relation("CohortMembership")
   programDirector         User?                    @relation("FacultyToPD", fields: [programDirectorId], references: [id], onDelete: SetNull)
   facultyMembers          User[]                   @relation("FacultyToPD")
+  facultyMentor           User?                    @relation("ResidentToFaculty", fields: [facultyMentorId], references: [id], onDelete: SetNull)
+  mentees                 User[]                   @relation("ResidentToFaculty")
   sessionInvites          SessionInvite[]          @relation("SessionInviteUser")
   sessionAdmissions       SessionAdmission[]       @relation("SessionAdmissionUser")
   admissionDecisions      SessionAdmission[]       @relation("SessionAdmissionDecider")
@@ -455,6 +464,7 @@ model User {
   @@index([role])
   @@index([status])
   @@index([programDirectorId])
+  @@index([facultyMentorId])
   @@map("users")
 }
 
@@ -516,6 +526,20 @@ model Invitation {
   department      String?
   yearOfResidency Int?
   moduleOverrides Json?
+  /// Optional Program Director uplink applied on accept when role=FACULTY.
+  /// Service layer enforces ref.role=PROGRAM_DIRECTOR. ON DELETE SET NULL so
+  /// removing a PD doesn't cascade-revoke pending faculty invites.
+  programDirectorId String?
+  /// Optional Faculty mentor uplink applied on accept when role=RESIDENT.
+  /// Service enforces ref.role=FACULTY. ON DELETE SET NULL.
+  facultyMentorId String?
+  /// Optional cohort assignment applied on accept when role=RESIDENT.
+  /// Becomes a CohortMember row at acceptance. ON DELETE SET NULL.
+  cohortId        String?
+  /// Optional pre-set profile photo. Carried over to User.avatarUrl on accept.
+  avatarUrl       String?
+  /// Optional gender pre-fill. Carried over to UserProfile.gender on accept.
+  gender          String?
   token           String           @unique
   status          InvitationStatus @default(PENDING)
   invitedById     String
@@ -530,11 +554,17 @@ model Invitation {
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
-  invitedBy User @relation("InvitedBy", fields: [invitedById], references: [id])
+  invitedBy        User    @relation("InvitedBy", fields: [invitedById], references: [id])
+  programDirector  User?   @relation("InvitationPD", fields: [programDirectorId], references: [id], onDelete: SetNull)
+  facultyMentor    User?   @relation("InvitationMentor", fields: [facultyMentorId], references: [id], onDelete: SetNull)
+  cohort           Cohort? @relation("InvitationCohort", fields: [cohortId], references: [id], onDelete: SetNull)
 
   @@index([email])
   @@index([status])
   @@index([token])
+  @@index([programDirectorId])
+  @@index([facultyMentorId])
+  @@index([cohortId])
   @@map("invitations")
 }
 
@@ -1386,10 +1416,11 @@ model Cohort {
   updatedAt    DateTime     @updatedAt
   deletedAt    DateTime?
 
-  creator  User              @relation("CohortCreator", fields: [createdBy], references: [id])
-  faculty  User?             @relation("CohortFaculty", fields: [facultyId], references: [id], onDelete: SetNull)
-  members  CohortMember[]
-  sessions TeachingSession[]
+  creator     User              @relation("CohortCreator", fields: [createdBy], references: [id])
+  faculty     User?             @relation("CohortFaculty", fields: [facultyId], references: [id], onDelete: SetNull)
+  members     CohortMember[]
+  sessions    TeachingSession[]
+  invitations Invitation[]      @relation("InvitationCohort")
 
   @@index([status])
   @@index([createdBy])
@@ -2014,6 +2045,10 @@ model UserProfile {
   subspecialty    String?
   affiliation     String?
   bio             String?  @db.Text
+  /// Free-form gender string; use enum-like values from the UI ('male',
+  /// 'female', 'other', 'prefer_not_to_say'). Kept as String to allow future
+  /// inclusivity additions without a schema migration.
+  gender          String?
   languages       String[]
   timezone        String?  @default("Asia/Kolkata")
   createdAt       DateTime @default(now())

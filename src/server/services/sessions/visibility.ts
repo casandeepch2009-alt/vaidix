@@ -8,7 +8,7 @@
 // covered by pre-questions e2e tests so drift would surface immediately.
 
 import { db } from '@/lib/db';
-import { Role, SessionVisibility, type Prisma } from '@prisma/client';
+import { Role, SessionApprovalStatus, SessionVisibility, type Prisma } from '@prisma/client';
 import { getUserCohortIds } from '../cohort-service';
 
 export interface SessionVisibilityActor {
@@ -51,6 +51,32 @@ export async function buildSessionVisibilityWhere(
   }
 
   return { OR: visibilityOptions };
+}
+
+/**
+ * Build the approval-status gate for session listings.
+ *
+ *   - ADMIN / PROGRAM_DIRECTOR — `{}` (see all approval states; they need
+ *     drafts + pending visible to act on them).
+ *   - Everyone else — APPROVED only, OR sessions where they are the host or
+ *     proposer (so users see their own pending sessions and can act on them).
+ *
+ * Returns `{}` (a no-op fragment) for privileged roles so callers can
+ * unconditionally compose under `AND`. Always compose under `AND`, never
+ * spread at the top level — non-privileged returns an `OR` key that will
+ * collide with other top-level OR clauses (e.g. visibility, time-window).
+ */
+export function buildApprovalGate(actor: SessionVisibilityActor): Prisma.TeachingSessionWhereInput {
+  if (actor.role === Role.ADMIN || actor.role === Role.PROGRAM_DIRECTOR) {
+    return {};
+  }
+  return {
+    OR: [
+      { approvalStatus: SessionApprovalStatus.APPROVED },
+      { hostId: actor.userId },
+      { proposedBy: actor.userId },
+    ],
+  };
 }
 
 /**

@@ -28,10 +28,10 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
     const user = await getUser(id);
     if (!user) return jsonError('NOT_FOUND', 'User not found', 404);
 
-    // Profile + mobile/username + program-director are needed by the edit
-    // modal but live on separate models (UserProfile) / unselected columns.
-    // One extra query each, both indexed by PK.
-    const [profile, identity] = await Promise.all([
+    // Profile + mobile/username + program-director + cohorts are needed by the
+    // edit modal but live on separate models (UserProfile / CohortMember) or
+    // unselected columns. One extra query each, all indexed.
+    const [profile, identity, memberships] = await Promise.all([
       db.userProfile.findUnique({
         where: { userId: id },
         select: {
@@ -41,6 +41,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
           bio: true,
           timezone: true,
           mciRegNumber: true,
+          gender: true,
           languages: true,
         },
       }),
@@ -50,9 +51,19 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
           mobile: true,
           username: true,
           programDirectorId: true,
+          facultyMentorId: true,
           programDirector: {
             select: { id: true, name: true, email: true, avatarUrl: true },
           },
+          facultyMentor: {
+            select: { id: true, name: true, email: true, avatarUrl: true },
+          },
+        },
+      }),
+      db.cohortMember.findMany({
+        where: { userId: id },
+        select: {
+          cohort: { select: { id: true, name: true, academicYear: true } },
         },
       }),
     ]);
@@ -65,6 +76,9 @@ export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> 
         username: identity?.username ?? null,
         programDirectorId: identity?.programDirectorId ?? null,
         programDirector: identity?.programDirector ?? null,
+        facultyMentorId: identity?.facultyMentorId ?? null,
+        facultyMentor: identity?.facultyMentor ?? null,
+        cohorts: memberships.map((m) => m.cohort).filter(Boolean),
       },
     });
   } catch (err) {
@@ -80,6 +94,7 @@ const profileUpdateSchema = z
     bio: z.string().trim().max(2000).nullable().optional(),
     timezone: z.string().trim().max(64).nullable().optional(),
     mciRegNumber: z.string().trim().max(40).nullable().optional(),
+    gender: z.enum(['male', 'female', 'other', 'prefer_not_to_say']).nullable().optional(),
   })
   .strict();
 
@@ -91,6 +106,17 @@ const updateBodySchema = z
     // Faculty → PD link. Service layer enforces target.role === FACULTY and
     // ref.role === PROGRAM_DIRECTOR. null clears; absent leaves untouched.
     programDirectorId: cuidSchema.nullable().optional(),
+    // Resident → faculty mentor link. Service enforces target.role === RESIDENT
+    // and ref.role === FACULTY. null clears; absent leaves untouched.
+    facultyMentorId: cuidSchema.nullable().optional(),
+    // Avatar URL produced by the avatar presign route; the route is the only
+    // sanctioned producer (validates content-type + size) so we accept any
+    // string here without re-validating shape.
+    avatarUrl: z.string().url().max(2048).nullable().optional(),
+    // Resident → cohort assignment. Service replaces the user's current
+    // cohort memberships with this single cohort. null clears all memberships.
+    // Absent leaves untouched. Service enforces target.role === RESIDENT.
+    cohortId: cuidSchema.nullable().optional(),
     profile: profileUpdateSchema.optional(),
   })
   .strict();

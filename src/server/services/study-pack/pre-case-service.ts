@@ -96,6 +96,39 @@ export interface DetachPreCaseInput {
   actor: PreCaseActor;
 }
 
+export interface UpdatePreCaseInput {
+  sessionId: string;
+  preCaseId: string;
+  required?: boolean;
+  rank?: number;
+  actor: PreCaseActor;
+}
+
+/**
+ * Update a SessionPreCase's curator-controlled fields. Currently surfaces
+ * `required` (mandatory vs optional) and `rank` (display order). Idempotent —
+ * a no-op input simply returns the row's current state.
+ */
+export async function updatePreCase(input: UpdatePreCaseInput): Promise<void> {
+  if (!(await userIsHostOrPrivileged(input.actor, input.sessionId))) {
+    throw new PreCaseAccessError(
+      'FORBIDDEN',
+      'Only host / PD / admin can update pre-cases'
+    );
+  }
+  const row = await db.sessionPreCase.findFirst({
+    where: { id: input.preCaseId, sessionId: input.sessionId },
+    select: { id: true },
+  });
+  if (!row) throw new PreCaseAccessError('NOT_FOUND', 'Pre-case not found for this session');
+
+  const data: { required?: boolean; rank?: number } = {};
+  if (typeof input.required === 'boolean') data.required = input.required;
+  if (typeof input.rank === 'number') data.rank = input.rank;
+  if (Object.keys(data).length === 0) return;
+  await db.sessionPreCase.update({ where: { id: row.id }, data });
+}
+
 export async function detachPreCase(input: DetachPreCaseInput): Promise<void> {
   if (!(await userIsHostOrPrivileged(input.actor, input.sessionId))) {
     throw new PreCaseAccessError(

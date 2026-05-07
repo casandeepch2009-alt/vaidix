@@ -6,7 +6,9 @@ import { RRule, Frequency, Weekday } from 'rrule'
 import {
   Link2, Copy, Check, Loader2, Calendar as CalendarIcon,
   Globe, UsersRound, UserCheck, Lock, Repeat, Sparkles, AlertCircle,
+  ShieldCheck, MessageCircleQuestion, BookOpen, Target,
 } from 'lucide-react'
+import type { PrereqConfig } from '@/lib/validation/session'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -35,9 +37,16 @@ interface Cohort {
   memberCount: number
 }
 
+interface Topic {
+  id: string
+  name: string
+  subspecialty: string | null
+}
+
 interface Props {
   faculty: Faculty[]
   cohorts: Cohort[]
+  topics: Topic[]
   defaultStart?: string
   defaultEnd?: string
   currentUserId: string
@@ -95,13 +104,14 @@ function humanRole(r: string): string {
   return r.replace(/_/g, ' ').toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-export function NewSessionForm({ faculty, cohorts, defaultStart, defaultEnd, currentUserId }: Props) {
+export function NewSessionForm({ faculty, cohorts, topics, defaultStart, defaultEnd, currentUserId }: Props) {
   const router = useRouter()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [objectives, setObjectives] = useState<ObjectiveDraft[]>([])
   const [sessionType, setSessionType] = useState<SessionType>('LECTURE')
+  const [topicId, setTopicId] = useState('')
   const [hostId, setHostId] = useState(faculty[0]?.id ?? '')
   const [start, setStart] = useState(toLocalInput(defaultStart) || '')
   const [end, setEnd] = useState(toLocalInput(defaultEnd) || '')
@@ -120,6 +130,14 @@ export function NewSessionForm({ faculty, cohorts, defaultStart, defaultEnd, cur
   const [freq, setFreq] = useState<'WEEKLY' | 'DAILY' | 'MONTHLY'>('WEEKLY')
   const [byDays, setByDays] = useState<Set<string>>(new Set(['MO']))
   const [count, setCount] = useState(8)
+
+  // Prerequisites — gate the Join button on resident prep work. Stored under
+  // metadata.prereq (no schema change). NONE = legacy behaviour.
+  const [prereqMode, setPrereqMode] = useState<PrereqConfig['mode']>('NONE')
+  const [requirePreQuestions, setRequirePreQuestions] = useState(false)
+  const [minPreQuestions, setMinPreQuestions] = useState(1)
+  const [requireStudyPack, setRequireStudyPack] = useState(false)
+  const [requireReadinessAck, setRequireReadinessAck] = useState(false)
 
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -154,6 +172,7 @@ export function NewSessionForm({ faculty, cohorts, defaultStart, defaultEnd, cur
         title,
         description: description || undefined,
         sessionType,
+        topicId: topicId || undefined,
         hostId,
         scheduledStart: new Date(start).toISOString(),
         scheduledEnd: new Date(end).toISOString(),
@@ -169,6 +188,16 @@ export function NewSessionForm({ faculty, cohorts, defaultStart, defaultEnd, cur
           objectives.length > 0
             ? objectives.filter((o) => o.text.trim().length >= 3)
             : undefined,
+        prereq:
+          prereqMode === 'NONE'
+            ? undefined
+            : {
+                mode: prereqMode,
+                requirePreQuestions,
+                minPreQuestions,
+                requireStudyPack,
+                requireReadinessAck,
+              },
       }
       const res = await fetch('/api/classroom/sessions', {
         method: 'POST',
@@ -305,6 +334,48 @@ export function NewSessionForm({ faculty, cohorts, defaultStart, defaultEnd, cur
               </p>
             )}
           </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label>Topic</Label>
+          <Select value={topicId || 'none'} onValueChange={(v) => setTopicId(v === 'none' ? '' : (v ?? ''))}>
+            <SelectTrigger className="w-full rounded-xl border-2 py-2.5">
+              <SelectValue placeholder="No topic">
+                {(v) => {
+                  if (!v || v === 'none') return <span className="text-muted-foreground">No topic</span>
+                  const t = topics.find((x) => x.id === v)
+                  if (!t) return <span className="text-muted-foreground">No topic</span>
+                  return (
+                    <span className="flex items-center gap-2">
+                      <span className="font-medium">{t.name}</span>
+                      {t.subspecialty && (
+                        <span className="text-xs text-muted-foreground">· {t.subspecialty}</span>
+                      )}
+                    </span>
+                  )
+                }}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">
+                <span className="text-muted-foreground">No topic</span>
+              </SelectItem>
+              {topics.map((t) => (
+                <SelectItem key={t.id} value={t.id}>
+                  <span className="flex items-center gap-2">
+                    <span className="font-medium">{t.name}</span>
+                    {t.subspecialty && (
+                      <span className="text-xs text-muted-foreground">· {t.subspecialty}</span>
+                    )}
+                  </span>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Linking a topic helps residents find this session under the topic library and
+            connects it to related cases, pearls, and atlas images.
+          </p>
         </div>
 
         <div className="space-y-2">
@@ -514,6 +585,126 @@ export function NewSessionForm({ faculty, cohorts, defaultStart, defaultEnd, cur
                 <AlertCircle className="size-3.5" /> At least one invitee is required.
               </p>
             )}
+          </div>
+        )}
+      </Section>
+
+      {/* ── Section 3.5: Prerequisites ── */}
+      <Section
+        title="Prerequisites"
+        subtitle="Optional gate — make residents finish prep before they can join"
+        icon={ShieldCheck}
+      >
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+          {([
+            { v: 'NONE',      label: 'No gate',     desc: 'Anyone can join when the room opens' },
+            { v: 'OPTIONAL',  label: 'Show only',   desc: 'Display progress but don’t block joining' },
+            { v: 'MANDATORY', label: 'Required',    desc: 'Block Join until checks pass' },
+          ] as Array<{ v: PrereqConfig['mode']; label: string; desc: string }>).map((m) => {
+            const selected = prereqMode === m.v
+            return (
+              <label
+                key={m.v}
+                className={`flex cursor-pointer flex-col gap-1 rounded-xl border-2 p-3 transition ${
+                  selected
+                    ? 'border-primary bg-primary/5 shadow-sm'
+                    : 'border-input hover:border-primary/40 hover:bg-accent/40'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="prereqMode"
+                  value={m.v}
+                  checked={selected}
+                  onChange={() => setPrereqMode(m.v)}
+                  className="sr-only"
+                />
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold">{m.label}</span>
+                  {selected && <Check className="size-4 text-primary" />}
+                </div>
+                <p className="text-xs text-muted-foreground">{m.desc}</p>
+              </label>
+            )
+          })}
+        </div>
+
+        {prereqMode !== 'NONE' && (
+          <div className="space-y-3 rounded-xl border-2 border-primary/20 bg-primary/5 p-3">
+            <p className="text-xs font-semibold text-foreground">
+              Pick which prep work counts. Skip all checks and the gate becomes a no-op.
+            </p>
+
+            <label className="flex items-start gap-2.5 rounded-lg border-2 border-input bg-card p-3 transition hover:border-primary/40">
+              <input
+                type="checkbox"
+                checked={requirePreQuestions}
+                onChange={(e) => setRequirePreQuestions(e.target.checked)}
+                className="mt-0.5 size-4 rounded border-border accent-primary"
+              />
+              <MessageCircleQuestion className="mt-0.5 size-4 text-primary" />
+              <div className="flex-1">
+                <span className="text-sm font-semibold text-foreground">Pre-questions submitted</span>
+                <p className="text-xs text-muted-foreground">
+                  Resident must submit at least N pre-questions for the host to triage.
+                </p>
+                {requirePreQuestions && (
+                  <div className="mt-2 flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">Minimum:</span>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={minPreQuestions}
+                      onChange={(e) => setMinPreQuestions(Math.max(1, Number(e.target.value) || 1))}
+                      className="w-20 rounded-lg border-2 px-2 py-1 text-sm"
+                    />
+                  </div>
+                )}
+              </div>
+            </label>
+
+            <label className="flex items-start gap-2.5 rounded-lg border-2 border-input bg-card p-3 transition hover:border-primary/40">
+              <input
+                type="checkbox"
+                checked={requireStudyPack}
+                onChange={(e) => setRequireStudyPack(e.target.checked)}
+                className="mt-0.5 size-4 rounded border-border accent-primary"
+              />
+              <BookOpen className="mt-0.5 size-4 text-primary" />
+              <div className="flex-1">
+                <span className="text-sm font-semibold text-foreground">Study pack opened</span>
+                <p className="text-xs text-muted-foreground">
+                  Every pre-session document and pre-case must be opened at least once.
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-2.5 rounded-lg border-2 border-input bg-card p-3 transition hover:border-primary/40">
+              <input
+                type="checkbox"
+                checked={requireReadinessAck}
+                onChange={(e) => setRequireReadinessAck(e.target.checked)}
+                className="mt-0.5 size-4 rounded border-border accent-primary"
+              />
+              <Target className="mt-0.5 size-4 text-primary" />
+              <div className="flex-1">
+                <span className="text-sm font-semibold text-foreground">Readiness self-marked</span>
+                <p className="text-xs text-muted-foreground">
+                  Every learning objective must have a self-mark (Yes / Partly / No).
+                </p>
+              </div>
+            </label>
+
+            {prereqMode === 'MANDATORY' &&
+              !requirePreQuestions &&
+              !requireStudyPack &&
+              !requireReadinessAck && (
+                <p className="flex items-center gap-1.5 text-xs text-amber-600">
+                  <AlertCircle className="size-3.5" />
+                  Pick at least one check, otherwise &ldquo;Required&rdquo; is the same as &ldquo;No gate&rdquo;.
+                </p>
+              )}
           </div>
         )}
       </Section>

@@ -112,6 +112,9 @@ export async function POST(req: Request) {
       const code = (err as Error).message;
       if (code === 'USER_EXISTS') return jsonError('USER_EXISTS', 'A user with this email already exists', 409);
       if (code === 'PENDING_INVITE_EXISTS') return jsonError('DUPLICATE', 'A pending invitation already exists for this email', 409);
+      if (code === 'INVALID_PD') return jsonError('INVALID', 'Selected user is not a Program Director', 400);
+      if (code === 'INVALID_MENTOR') return jsonError('INVALID', 'Selected user is not a Faculty member', 400);
+      if (code === 'INVALID_COHORT') return jsonError('INVALID', 'Selected cohort no longer exists', 400);
       throw err;
     }
   } catch (err) {

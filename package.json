@@ -11,6 +11,7 @@
     "db:seed": "prisma db seed",
     "db:seed:demo": "tsx --env-file=.env.local --env-file=.env prisma/seed.demo.ts",
     "db:cleanup-test-users": "tsx --env-file=.env.local --env-file=.env scripts/cleanup-test-users.ts",
+    "db:cleanup-demo": "tsx --env-file=.env prisma/cleanup-demo.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma migrate reset",
     "smoke": "tsx --env-file=.env.local --env-file=.env src/lib/smoke-test.ts",

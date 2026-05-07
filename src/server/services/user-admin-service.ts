@@ -221,6 +221,24 @@ export interface UpdateUserDetailsInput {
    * Absent leaves untouched.
    */
   programDirectorId?: string | null;
+  /**
+   * Resident → Faculty mentor mapping. Only meaningful when target.role is
+   * RESIDENT. Service rejects assignment to a non-FACULTY user. `null` clears.
+   * Independent of cohort membership.
+   */
+  facultyMentorId?: string | null;
+  /**
+   * Profile photo URL. Produced by the avatar presign route. `null` clears.
+   * Absent leaves untouched.
+   */
+  avatarUrl?: string | null;
+  /**
+   * Resident cohort assignment. Replaces current memberships with this single
+   * cohort (so the resident can only be in one cohort at a time via the admin
+   * UI; bulk membership stays in the cohort drawer). null clears all
+   * memberships. Service rejects this when target.role !== RESIDENT.
+   */
+  cohortId?: string | null;
   profile?: {
     subspecialty?: string | null;
     yearOfResidency?: number | null;
@@ -228,6 +246,7 @@ export interface UpdateUserDetailsInput {
     bio?: string | null;
     timezone?: string | null;
     mciRegNumber?: string | null;
+    gender?: string | null;
   };
 }
 
@@ -247,7 +266,10 @@ export async function updateUserDetails(args: {
 }) {
   const target = await db.user.findFirst({
     where: { id: args.targetUserId, deletedAt: null },
-    select: { id: true, name: true, mobile: true, username: true, role: true, programDirectorId: true },
+    select: {
+      id: true, name: true, mobile: true, username: true, role: true,
+      programDirectorId: true, facultyMentorId: true, avatarUrl: true,
+    },
   });
   if (!target) throw new UserAdminError('NOT_FOUND', 'User not found');
 
@@ -297,14 +319,72 @@ export async function updateUserDetails(args: {
     }
   }
 
+  // Faculty mentor link guards (parallel to PD): target must be RESIDENT,
+  // ref must be FACULTY, no self-loops.
+  let mentorChange: { from: string | null; to: string | null } | null = null;
+  if (args.data.facultyMentorId !== undefined) {
+    const nextMentorId = args.data.facultyMentorId;
+    if (nextMentorId !== target.facultyMentorId) {
+      if (nextMentorId) {
+        if (target.role !== Role.RESIDENT) {
+          throw new UserAdminError('INVALID', 'Only RESIDENT users can be linked to a Faculty mentor');
+        }
+        if (nextMentorId === target.id) {
+          throw new UserAdminError('INVALID', 'A user cannot mentor themselves');
+        }
+        const mentor = await db.user.findFirst({
+          where: { id: nextMentorId, deletedAt: null },
+          select: { id: true, role: true },
+        });
+        if (!mentor) throw new UserAdminError('NOT_FOUND', 'Faculty mentor user not found');
+        if (mentor.role !== Role.FACULTY) {
+          throw new UserAdminError('INVALID', 'Referenced user must have role FACULTY');
+        }
+      }
+      mentorChange = { from: target.facultyMentorId, to: nextMentorId };
+    }
+  }
+
   const userPatch: Prisma.UserUpdateInput = {};
   if (args.data.name !== undefined) userPatch.name = args.data.name.trim();
   if (args.data.mobile !== undefined) userPatch.mobile = args.data.mobile || null;
   if (args.data.username !== undefined) userPatch.username = args.data.username || null;
+  if (args.data.avatarUrl !== undefined) userPatch.avatarUrl = args.data.avatarUrl || null;
   if (pdChange) {
     userPatch.programDirector = pdChange.to
       ? { connect: { id: pdChange.to } }
       : { disconnect: true };
+  }
+  if (mentorChange) {
+    userPatch.facultyMentor = mentorChange.to
+      ? { connect: { id: mentorChange.to } }
+      : { disconnect: true };
+  }
+
+  // Cohort membership reconcile (resident-only). Done in the same transaction
+  // as the user update so a partial failure leaves no orphaned membership rows.
+  let cohortChange: { from: string[]; to: string | null } | null = null;
+  if (args.data.cohortId !== undefined) {
+    // Assigning a cohort requires RESIDENT. Clearing (null) is allowed for
+    // any role — leaves no orphaned membership when the resident is promoted.
+    if (args.data.cohortId) {
+      if (target.role !== Role.RESIDENT) {
+        throw new UserAdminError('INVALID', 'Only RESIDENT users can be assigned to a cohort here');
+      }
+      const cohort = await db.cohort.findFirst({
+        where: { id: args.data.cohortId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!cohort) throw new UserAdminError('NOT_FOUND', 'Cohort not found');
+    }
+    const current = await db.cohortMember.findMany({
+      where: { userId: target.id },
+      select: { cohortId: true },
+    });
+    cohortChange = {
+      from: current.map((m) => m.cohortId),
+      to: args.data.cohortId,
+    };
   }
 
   const profilePatch: Prisma.UserProfileUpdateInput = {};
@@ -335,23 +415,43 @@ export async function updateUserDetails(args: {
       profilePatch.mciRegNumber = p.mciRegNumber || null;
       profileCreate.mciRegNumber = p.mciRegNumber || null;
     }
+    if (p.gender !== undefined) {
+      profilePatch.gender = p.gender || null;
+      profileCreate.gender = p.gender || null;
+    }
   }
 
-  await db.user.update({
-    where: { id: target.id },
-    data: {
-      ...userPatch,
-      ...(args.data.profile
-        ? {
-            profile: {
-              upsert: {
-                create: profileCreate,
-                update: profilePatch,
+  await db.$transaction(async (tx) => {
+    await tx.user.update({
+      where: { id: target.id },
+      data: {
+        ...userPatch,
+        ...(args.data.profile
+          ? {
+              profile: {
+                upsert: {
+                  create: profileCreate,
+                  update: profilePatch,
+                },
               },
-            },
-          }
-        : {}),
-    },
+            }
+          : {}),
+      },
+    });
+
+    if (cohortChange) {
+      // Replace any existing memberships with the single new one (or none).
+      await tx.cohortMember.deleteMany({ where: { userId: target.id } });
+      if (cohortChange.to) {
+        await tx.cohortMember.create({
+          data: {
+            cohortId: cohortChange.to,
+            userId: target.id,
+            addedBy: args.actorId,
+          },
+        });
+      }
+    }
   });
 
   await audit({
@@ -364,7 +464,9 @@ export async function updateUserDetails(args: {
       changedFields: [
         ...Object.keys(userPatch),
         ...(args.data.profile ? Object.keys(args.data.profile) : []),
+        ...(cohortChange ? ['cohortMembership'] : []),
       ],
+      ...(cohortChange ? { cohortChange } : {}),
     },
   });
 

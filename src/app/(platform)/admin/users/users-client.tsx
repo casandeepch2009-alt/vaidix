@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { Users, Search, UserPlus, Pencil, UserX, UserCheck, Loader2 } from 'lucide-react'
 import { Role, UserStatus } from '@prisma/client'
@@ -50,6 +50,13 @@ export function UsersClient({ initialUsers, currentUserId }: Props) {
   const [inviteOpen, setInviteOpen] = useState(false)
   const [editing, setEditing] = useState<AdminUserRow | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [toast, setToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null)
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 3500)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const filteredUsers = useMemo(() => {
     if (!searchQuery) return initialUsers
@@ -220,6 +227,7 @@ export function UsersClient({ initialUsers, currentUserId }: Props) {
         onClose={() => setInviteOpen(false)}
         onCreated={() => {
           setInviteOpen(false)
+          setToast({ kind: 'success', msg: 'Invitation sent' })
           router.refresh()
         }}
       />
@@ -231,9 +239,22 @@ export function UsersClient({ initialUsers, currentUserId }: Props) {
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
+            setToast({ kind: 'success', msg: 'User updated' })
             router.refresh()
           }}
         />
+      )}
+
+      {toast && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className={`fixed bottom-6 right-6 z-60 rounded-xl px-4 py-3 text-sm font-medium shadow-lg ${
+            toast.kind === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'
+          }`}
+        >
+          {toast.msg}
+        </motion.div>
       )}
     </PageTransition>
   )

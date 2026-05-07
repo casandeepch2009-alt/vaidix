@@ -3,12 +3,27 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Run: npx prisma db seed
 // Idempotent: safe to re-run. Uses upsert where possible.
-// Loads: super-admin (Sandeep) + reference data (topics, pearls, atlas, courses)
+//
+// Two profiles:
+//   SEED_DEMO=true (or NODE_ENV !== 'production')
+//     Full demo dataset — admin + 4 demo users (resident/faculty/PD/external),
+//     role mappings, pearls, atlas images, case templates, sample courses.
+//     Used for local dev and staging.
+//
+//   default in production
+//     PRODUCTION-SAFE seed — only the irreducible minimum required for the
+//     app to function: 4 levels, 16 topics, 1 admin user, retention policies,
+//     feature flags. NO demo users, NO mock content.
 
 import { PrismaClient, Role, UserStatus } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
+
+// Demo content gate. Production deploys must boot WITHOUT this flag set, so
+// patient-facing instances never accumulate mock pearls / atlas / cases.
+const SEED_DEMO =
+  process.env.SEED_DEMO === 'true' || process.env.NODE_ENV !== 'production';
 
 const prisma = new PrismaClient();
 
@@ -114,17 +129,18 @@ async function main() {
   console.log(`   ✓ ${TOPICS.length} topics`);
 
   // ─── 3. USERS ─────────────────────────────────────────────────────────────
-  console.log('👥 Seeding Users...');
+  console.log(`👥 Seeding Users... (profile: ${SEED_DEMO ? 'DEMO' : 'PRODUCTION'})`);
 
-  const demoUsers = [
-    {
-      email:       'sandeep@vaidix.local',
-      mobile:      '+919876543210',
-      name:        'Sandeep',
-      role:        Role.ADMIN,
-      hash:        passwordHash,
-      affiliation: 'Vaidix Platform',
-    },
+  const adminUser = {
+    email:       'sandeep@vaidix.local',
+    mobile:      '+919876543210',
+    name:        'Sandeep',
+    role:        Role.ADMIN,
+    hash:        passwordHash,
+    affiliation: 'Vaidix Platform',
+  };
+
+  const demoNonAdminUsers = [
     {
       email:       'arjun.mehta@vaidix.local',
       mobile:      '+919876543211',
@@ -159,7 +175,11 @@ async function main() {
     },
   ];
 
-  for (const u of demoUsers) {
+  // Admin always seeded so the platform is reachable. Non-admin demo users
+  // skipped in production so the deployment starts empty.
+  const usersToSeed = SEED_DEMO ? [adminUser, ...demoNonAdminUsers] : [adminUser];
+
+  for (const u of usersToSeed) {
     await prisma.user.upsert({
       where: { email: u.email },
       update: { mobile: u.mobile, passwordHash: u.hash },
@@ -186,105 +206,111 @@ async function main() {
   }
 
   // ─── 4. ROLE MAPPINGS (Faculty → PD, Cohort → Faculty mentor) ─────────────
-  // Demonstrates the dynamic mapping fields added in 20260501120000:
-  //   * Meera (FACULTY) reports to Rajeev (PD).
-  //   * One cohort "PGY-1 Residents 2026–27" with Meera as mentor and Arjun
-  //     as a member. Idempotent via createdBy + name uniqueness check.
-  console.log('🪢 Seeding mappings (faculty↔PD, cohort↔mentor)...');
-  const sandeep = await prisma.user.findUnique({ where: { email: 'sandeep@vaidix.local' } });
-  const rajeev  = await prisma.user.findUnique({ where: { email: 'rajeev.nair@vaidix.local' } });
-  const meera   = await prisma.user.findUnique({ where: { email: 'meera.krishnan@vaidix.local' } });
-  const arjun   = await prisma.user.findUnique({ where: { email: 'arjun.mehta@vaidix.local' } });
+  // Demo-only — references the demo users seeded above. Production deploys
+  // skip this entirely; admins wire mappings via /admin/users + /admin/cohorts.
+  if (SEED_DEMO) {
+    console.log('🪢 Seeding mappings (faculty↔PD, cohort↔mentor)...');
+    const sandeep = await prisma.user.findUnique({ where: { email: 'sandeep@vaidix.local' } });
+    const rajeev  = await prisma.user.findUnique({ where: { email: 'rajeev.nair@vaidix.local' } });
+    const meera   = await prisma.user.findUnique({ where: { email: 'meera.krishnan@vaidix.local' } });
+    const arjun   = await prisma.user.findUnique({ where: { email: 'arjun.mehta@vaidix.local' } });
 
-  if (meera && rajeev && meera.programDirectorId !== rajeev.id) {
-    await prisma.user.update({
-      where: { id: meera.id },
-      data:  { programDirectorId: rajeev.id },
-    });
-    console.log(`   ✓ Meera → reports to Rajeev (PD)`);
+    if (meera && rajeev && meera.programDirectorId !== rajeev.id) {
+      await prisma.user.update({
+        where: { id: meera.id },
+        data:  { programDirectorId: rajeev.id },
+      });
+      console.log(`   ✓ Meera → reports to Rajeev (PD)`);
+    }
+
+    if (sandeep && meera && arjun) {
+      const cohortName = 'PGY-1 Residents 2026–27';
+      const existing = await prisma.cohort.findFirst({
+        where: { name: cohortName, deletedAt: null },
+        select: { id: true, facultyId: true },
+      });
+      const cohort = existing
+        ? await prisma.cohort.update({
+            where: { id: existing.id },
+            data:  { facultyId: meera.id },
+          })
+        : await prisma.cohort.create({
+            data: {
+              name:         cohortName,
+              description:  'Demo cohort wired up by seed: PGY-1 ophthalmology residents.',
+              academicYear: '2026–27',
+              createdBy:    sandeep.id,
+              facultyId:    meera.id,
+            },
+          });
+      await prisma.cohortMember.upsert({
+        where:  { cohortId_userId: { cohortId: cohort.id, userId: arjun.id } },
+        create: { cohortId: cohort.id, userId: arjun.id, addedBy: sandeep.id },
+        update: {},
+      });
+      console.log(`   ✓ Cohort "${cohortName}" — mentor: Meera, member: Arjun`);
+    }
   }
 
-  if (sandeep && meera && arjun) {
-    const cohortName = 'PGY-1 Residents 2026–27';
-    const existing = await prisma.cohort.findFirst({
-      where: { name: cohortName, deletedAt: null },
-      select: { id: true, facultyId: true },
-    });
-    const cohort = existing
-      ? await prisma.cohort.update({
-          where: { id: existing.id },
-          data:  { facultyId: meera.id },
-        })
-      : await prisma.cohort.create({
-          data: {
-            name:         cohortName,
-            description:  'Demo cohort wired up by seed: PGY-1 ophthalmology residents.',
-            academicYear: '2026–27',
-            createdBy:    sandeep.id,
-            facultyId:    meera.id,
-          },
-        });
-    await prisma.cohortMember.upsert({
-      where:  { cohortId_userId: { cohortId: cohort.id, userId: arjun.id } },
-      create: { cohortId: cohort.id, userId: arjun.id, addedBy: sandeep.id },
-      update: {},
-    });
-    console.log(`   ✓ Cohort "${cohortName}" — mentor: Meera, member: Arjun`);
-  }
-
-  // ─── 5. PEARLS ────────────────────────────────────────────────────────────
-  console.log('💎 Seeding Pearls...');
+  // ─── 5. PEARLS (demo-only — mock content from src/mock-data/pearls.json) ─
   const topics = await prisma.topic.findMany();
   const topicBySlug = new Map(topics.map((t) => [t.slug, t]));
-  const mockPearls = loadJson<PearlSeed[]>('pearls.json');
-  let pearlCount = 0;
-  for (const p of mockPearls) {
-    const topic = (p.topic ? topicBySlug.get(p.topic) : undefined) ?? topicBySlug.get('retina')!;
-    await prisma.pearl.upsert({
-      where: { id: p.id },
-      update: {},
-      create: {
-        id: p.id,
-        title: p.question?.slice(0, 200) ?? 'Pearl',
-        body: `${p.question}\n\n${p.answer}\n\n${p.mechanism ?? ''}`,
-        topicId: topic.id,
-        sourceType: 'manual',
-        extractedByAi: false,
-        approved: true,
-      },
-    });
-    pearlCount++;
-  }
-  console.log(`   ✓ ${pearlCount} pearls`);
 
-  // ─── 6. ATLAS IMAGES ──────────────────────────────────────────────────────
-  console.log('🖼️  Seeding Atlas Images...');
-  const mockSigns = loadJson<AtlasSeed[]>('signs-atlas.json');
-  let atlasCount = 0;
-  for (const s of mockSigns) {
-    const topic = (s.topic ? topicBySlug.get(s.topic) : undefined) ?? topicBySlug.get('retina')!;
-    await prisma.atlasImage.upsert({
-      where: { id: s.id },
-      update: {},
-      create: {
-        id: s.id,
-        title: s.name,
-        description: s.description,
-        imageUrl: s.imageUrl ?? `/atlas/${s.id}.jpg`,
-        caption: s.mechanism,
-        topicId: topic.id,
-        modality: s.modality ?? 'CLINICAL',
-      },
-    });
-    atlasCount++;
+  if (SEED_DEMO) {
+    console.log('💎 Seeding Pearls...');
+    const mockPearls = loadJson<PearlSeed[]>('pearls.json');
+    let pearlCount = 0;
+    for (const p of mockPearls) {
+      const topic = (p.topic ? topicBySlug.get(p.topic) : undefined) ?? topicBySlug.get('retina')!;
+      await prisma.pearl.upsert({
+        where: { id: p.id },
+        update: {},
+        create: {
+          id: p.id,
+          title: p.question?.slice(0, 200) ?? 'Pearl',
+          body: `${p.question}\n\n${p.answer}\n\n${p.mechanism ?? ''}`,
+          topicId: topic.id,
+          sourceType: 'manual',
+          extractedByAi: false,
+          approved: true,
+        },
+      });
+      pearlCount++;
+    }
+    console.log(`   ✓ ${pearlCount} pearls`);
   }
-  console.log(`   ✓ ${atlasCount} atlas images`);
 
-  // ─── 7. CASE TEMPLATES (W6 P2 — library of clinical cases) ───────────────
-  console.log('📚 Seeding Case Templates...');
-  const mockCases = loadJson<CaseTemplateSeed[]>('cases.json');
-  let templateCount = 0;
-  for (const c of mockCases) {
+  // ─── 6. ATLAS IMAGES (demo-only) ─────────────────────────────────────────
+  if (SEED_DEMO) {
+    console.log('🖼️  Seeding Atlas Images...');
+    const mockSigns = loadJson<AtlasSeed[]>('signs-atlas.json');
+    let atlasCount = 0;
+    for (const s of mockSigns) {
+      const topic = (s.topic ? topicBySlug.get(s.topic) : undefined) ?? topicBySlug.get('retina')!;
+      await prisma.atlasImage.upsert({
+        where: { id: s.id },
+        update: {},
+        create: {
+          id: s.id,
+          title: s.name,
+          description: s.description,
+          imageUrl: s.imageUrl ?? `/atlas/${s.id}.jpg`,
+          caption: s.mechanism,
+          topicId: topic.id,
+          modality: s.modality ?? 'CLINICAL',
+        },
+      });
+      atlasCount++;
+    }
+    console.log(`   ✓ ${atlasCount} atlas images`);
+  }
+
+  // ─── 7. CASE TEMPLATES (demo-only — library of clinical cases) ───────────
+  if (SEED_DEMO) {
+    console.log('📚 Seeding Case Templates...');
+    const mockCases = loadJson<CaseTemplateSeed[]>('cases.json');
+    let templateCount = 0;
+    for (const c of mockCases) {
     const topic = c.topic ? topicBySlug.get(c.topic) : undefined;
     const ageYears = typeof c.patientAge === 'number'
       ? c.patientAge
@@ -335,31 +361,34 @@ async function main() {
       },
     });
     templateCount++;
+    }
+    console.log(`   ✓ ${templateCount} case templates`);
   }
-  console.log(`   ✓ ${templateCount} case templates`);
 
-  // ─── 8. SAMPLE COURSES (for W7+ but useful to have) ───────────────────────
-  console.log('🎓 Seeding Sample Courses...');
-  const sampleCourses = [
-    { slug: 'empathy-basics', title: 'Clinical Empathy Fundamentals', track: 'HEART' as const },
-    { slug: 'diff-dx-anterior', title: 'Differential Diagnosis — Anterior Segment', track: 'HEAD' as const },
-    { slug: 'slit-lamp-mastery', title: 'Slit-Lamp Examination Mastery', track: 'HANDS' as const },
-  ];
-  for (const c of sampleCourses) {
-    await prisma.course.upsert({
-      where: { slug: c.slug },
-      update: {},
-      create: {
-        slug: c.slug,
-        title: c.title,
-        description: `LVPEI-accredited training course: ${c.title}`,
-        track: c.track,
-        format: 'MIXED',
-        estimatedMinutes: 120,
-      },
-    });
+  // ─── 8. SAMPLE COURSES (demo-only) ──────────────────────────────────────
+  if (SEED_DEMO) {
+    console.log('🎓 Seeding Sample Courses...');
+    const sampleCourses = [
+      { slug: 'empathy-basics', title: 'Clinical Empathy Fundamentals', track: 'HEART' as const },
+      { slug: 'diff-dx-anterior', title: 'Differential Diagnosis — Anterior Segment', track: 'HEAD' as const },
+      { slug: 'slit-lamp-mastery', title: 'Slit-Lamp Examination Mastery', track: 'HANDS' as const },
+    ];
+    for (const c of sampleCourses) {
+      await prisma.course.upsert({
+        where: { slug: c.slug },
+        update: {},
+        create: {
+          slug: c.slug,
+          title: c.title,
+          description: `LVPEI-accredited training course: ${c.title}`,
+          track: c.track,
+          format: 'MIXED',
+          estimatedMinutes: 120,
+        },
+      });
+    }
+    console.log(`   ✓ ${sampleCourses.length} courses`);
   }
-  console.log(`   ✓ ${sampleCourses.length} courses`);
 
   // ─── 9. RETENTION POLICIES (DPDPA defaults) ───────────────────────────────
   console.log('⚖️  Seeding Retention Policies...');
@@ -399,13 +428,19 @@ async function main() {
   console.log(`   ✓ ${flags.length} feature flags`);
 
   console.log('\n✅ Seed complete.\n');
-  console.log('📝 Demo credentials (password: 12345678 except Sandeep):');
-  console.log('   9876543210  Sandeep           [ADMIN]            pw: Vaidix@2026!');
-  console.log('   9876543211  Arjun Mehta        [RESIDENT]');
-  console.log('   9876543212  Dr. Meera Krishnan [FACULTY]');
-  console.log('   9876543213  Dr. Rajeev Nair    [PROGRAM_DIRECTOR]');
-  console.log('   9876543214  Priya Sharma        [EXTERNAL_LEARNER]');
-  console.log('');
+  if (SEED_DEMO) {
+    console.log('📝 Demo credentials (password: 12345678 except Sandeep):');
+    console.log('   9876543210  Sandeep           [ADMIN]            pw: Vaidix@2026!');
+    console.log('   9876543211  Arjun Mehta        [RESIDENT]');
+    console.log('   9876543212  Dr. Meera Krishnan [FACULTY]');
+    console.log('   9876543213  Dr. Rajeev Nair    [PROGRAM_DIRECTOR]');
+    console.log('   9876543214  Priya Sharma        [EXTERNAL_LEARNER]');
+    console.log('');
+  } else {
+    console.log('🛡️  PRODUCTION seed: only admin (sandeep@vaidix.local) was created.');
+    console.log('   All other users must be invited via /admin/invitations.');
+    console.log('');
+  }
 }
 
 main()

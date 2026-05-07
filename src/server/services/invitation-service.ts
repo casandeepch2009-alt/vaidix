@@ -29,6 +29,47 @@ interface CreateArgs extends CreateInvitationInput {
   invitedByName: string;
 }
 
+// Validates that a hierarchy mapping is compatible with the invited role and
+// that the referenced rows exist. Returns the cleaned (role-applicable) IDs.
+// Throws Error('INVALID_PD') / Error('INVALID_COHORT') on bad references.
+async function resolveMapping(args: {
+  role: Role;
+  programDirectorId: string | null;
+  facultyMentorId: string | null;
+  cohortId: string | null;
+}): Promise<{
+  programDirectorId: string | null;
+  facultyMentorId: string | null;
+  cohortId: string | null;
+}> {
+  const pdId     = args.role === 'FACULTY'  ? args.programDirectorId : null;
+  const mentorId = args.role === 'RESIDENT' ? args.facultyMentorId   : null;
+  const cohortId = args.role === 'RESIDENT' ? args.cohortId          : null;
+
+  if (pdId) {
+    const pd = await db.user.findFirst({
+      where: { id: pdId, deletedAt: null },
+      select: { id: true, role: true },
+    });
+    if (!pd || pd.role !== 'PROGRAM_DIRECTOR') throw new Error('INVALID_PD');
+  }
+  if (mentorId) {
+    const m = await db.user.findFirst({
+      where: { id: mentorId, deletedAt: null },
+      select: { id: true, role: true },
+    });
+    if (!m || m.role !== 'FACULTY') throw new Error('INVALID_MENTOR');
+  }
+  if (cohortId) {
+    const c = await db.cohort.findFirst({
+      where: { id: cohortId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!c) throw new Error('INVALID_COHORT');
+  }
+  return { programDirectorId: pdId, facultyMentorId: mentorId, cohortId };
+}
+
 export async function createInvitation(args: CreateArgs) {
   const existingUser = await db.user.findUnique({
     where: { email: args.email },
@@ -46,6 +87,16 @@ export async function createInvitation(args: CreateArgs) {
     throw new Error('PENDING_INVITE_EXISTS');
   }
 
+  // Validate hierarchy mapping against role. Mappings are silently dropped
+  // for non-applicable roles (e.g. cohortId on a FACULTY invite) so the UI
+  // can send everything it has without a separate per-role payload shape.
+  const { programDirectorId, facultyMentorId, cohortId } = await resolveMapping({
+    role: args.role,
+    programDirectorId: args.programDirectorId ?? null,
+    facultyMentorId:   args.facultyMentorId ?? null,
+    cohortId:          args.cohortId ?? null,
+  });
+
   const token = mintToken(TOKEN_LENGTH_BYTES);
   const expiresAt = new Date(Date.now() + args.expiresInHours * 3600 * 1000);
 
@@ -59,6 +110,11 @@ export async function createInvitation(args: CreateArgs) {
       subspecialty: args.subspecialty ?? null,
       department: args.department ?? null,
       yearOfResidency: args.yearOfResidency ?? null,
+      programDirectorId,
+      facultyMentorId,
+      cohortId,
+      avatarUrl: args.avatarUrl ?? null,
+      gender: args.gender ?? null,
       moduleOverrides: args.moduleOverrides as object,
       token,
       status: InvitationStatus.PENDING,
@@ -144,6 +200,37 @@ export async function updateInvitation(
   if (patch.moduleOverrides !== undefined) data.moduleOverrides = patch.moduleOverrides as object;
   if (patch.expiresInHours  !== undefined) {
     data.expiresAt = new Date(Date.now() + patch.expiresInHours * 3600 * 1000);
+  }
+  if (patch.avatarUrl !== undefined) data.avatarUrl = patch.avatarUrl ?? null;
+  if (patch.gender    !== undefined) data.gender    = patch.gender ?? null;
+
+  // Mappings: re-validate against the (possibly new) role. If the role is
+  // changing, we re-resolve from the PATCH role; otherwise the stored role.
+  if (
+    patch.programDirectorId !== undefined ||
+    patch.facultyMentorId !== undefined ||
+    patch.cohortId !== undefined ||
+    patch.role !== undefined
+  ) {
+    const effectiveRole = patch.role ?? inv.role;
+    const resolved = await resolveMapping({
+      role: effectiveRole,
+      programDirectorId:
+        patch.programDirectorId !== undefined
+          ? (patch.programDirectorId ?? null)
+          : inv.programDirectorId,
+      facultyMentorId:
+        patch.facultyMentorId !== undefined
+          ? (patch.facultyMentorId ?? null)
+          : inv.facultyMentorId,
+      cohortId:
+        patch.cohortId !== undefined
+          ? (patch.cohortId ?? null)
+          : inv.cohortId,
+    });
+    data.programDirectorId = resolved.programDirectorId;
+    data.facultyMentorId   = resolved.facultyMentorId;
+    data.cohortId          = resolved.cohortId;
   }
 
   const updated = await db.invitation.update({
@@ -285,32 +372,44 @@ export async function acceptInvitation(
       if (collision) mobileToStore = null;
     }
 
+    // Hierarchy mapping baked into the User row at creation. Only the field
+    // that's role-applicable lands here:
+    //   - FACULTY  → programDirectorId
+    //   - RESIDENT → facultyMentorId
+    // Cohort assignment is a separate join row inserted below.
+    const programDirectorIdToApply = inv.role === 'FACULTY'  ? inv.programDirectorId : null;
+    const facultyMentorIdToApply   = inv.role === 'RESIDENT' ? inv.facultyMentorId   : null;
+
+    const userCreateData = {
+      email: inv.email,
+      mobile: mobileToStore,
+      username: usernameCandidate,
+      name: inv.fullName ?? inv.email.split('@')[0],
+      passwordHash,
+      role: inv.role,
+      status: UserStatus.ACTIVE,
+      emailVerifiedAt: new Date(),
+      avatarUrl: inv.avatarUrl,
+      programDirectorId: programDirectorIdToApply,
+      facultyMentorId: facultyMentorIdToApply,
+      profile: {
+        create: {
+          mciRegNumber: inv.mciRegNumber,
+          yearOfResidency: inv.yearOfResidency,
+          subspecialty: inv.subspecialty,
+          affiliation: inv.department,
+          gender: inv.gender,
+          languages: ['en'],
+          timezone: 'Asia/Kolkata',
+        },
+      },
+      preferences: { create: {} },
+      stats: { create: {} },
+    };
+
     let u;
     try {
-      u = await tx.user.create({
-        data: {
-          email: inv.email,
-          mobile: mobileToStore,
-          username: usernameCandidate,
-          name: inv.fullName ?? inv.email.split('@')[0],
-          passwordHash,
-          role: inv.role,
-          status: UserStatus.ACTIVE,
-          emailVerifiedAt: new Date(),
-          profile: {
-            create: {
-              mciRegNumber: inv.mciRegNumber,
-              yearOfResidency: inv.yearOfResidency,
-              subspecialty: inv.subspecialty,
-              affiliation: inv.department,
-              languages: ['en'],
-              timezone: 'Asia/Kolkata',
-            },
-          },
-          preferences: { create: {} },
-          stats: { create: {} },
-        },
-      });
+      u = await tx.user.create({ data: userCreateData });
     } catch (err) {
       // Race-safe retry: if the username we picked got grabbed by a parallel
       // invitation accept between our pickAvailableUsername() and create(),
@@ -322,31 +421,29 @@ export async function acceptInvitation(
           candidateUsernameFromEmail(inv.email)
         );
         u = await tx.user.create({
-          data: {
-            email: inv.email,
-            mobile: mobileToStore,
-            username: usernameCandidate,
-            name: inv.fullName ?? inv.email.split('@')[0],
-            passwordHash,
-            role: inv.role,
-            status: UserStatus.ACTIVE,
-            emailVerifiedAt: new Date(),
-            profile: {
-              create: {
-                mciRegNumber: inv.mciRegNumber,
-                yearOfResidency: inv.yearOfResidency,
-                subspecialty: inv.subspecialty,
-                affiliation: inv.department,
-                languages: ['en'],
-                timezone: 'Asia/Kolkata',
-              },
-            },
-            preferences: { create: {} },
-            stats: { create: {} },
-          },
+          data: { ...userCreateData, username: usernameCandidate },
         });
       } else {
         throw err;
+      }
+    }
+
+    // Cohort assignment for residents. Skipped silently if the cohort got
+    // archived/deleted between invite and accept (the FK is SET NULL but
+    // we double-check the pointer to avoid a stale CohortMember insert).
+    if (inv.role === 'RESIDENT' && inv.cohortId) {
+      const cohort = await tx.cohort.findFirst({
+        where: { id: inv.cohortId, deletedAt: null },
+        select: { id: true },
+      });
+      if (cohort) {
+        await tx.cohortMember.create({
+          data: {
+            cohortId: cohort.id,
+            userId: u.id,
+            addedBy: inv.invitedById,
+          },
+        });
       }
     }
 

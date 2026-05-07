@@ -45,6 +45,28 @@ export const objectiveAchievementSchema = z.object({
 });
 export type ObjectiveAchievementInput = z.infer<typeof objectiveAchievementSchema>;
 
+// Prerequisite gate — controls whether residents must complete prep work before
+// the "Join now" button unlocks. Stored under TeachingSession.metadata.prereq
+// (existing JSON field) so we don't add columns for a feature that isn't
+// queried from SQL. `mode = NONE` is default and matches legacy behaviour.
+export const PREREQ_MODES = ['NONE', 'OPTIONAL', 'MANDATORY'] as const;
+export const prereqConfigSchema = z.object({
+  mode: z.enum(PREREQ_MODES).default('NONE'),
+  requirePreQuestions: z.boolean().default(false),
+  minPreQuestions: z.number().int().min(1).max(20).default(1),
+  requireStudyPack: z.boolean().default(false),
+  requireReadinessAck: z.boolean().default(false),
+});
+export type PrereqConfig = z.infer<typeof prereqConfigSchema>;
+
+export const DEFAULT_PREREQ_CONFIG: PrereqConfig = {
+  mode: 'NONE',
+  requirePreQuestions: false,
+  minPreQuestions: 1,
+  requireStudyPack: false,
+  requireReadinessAck: false,
+};
+
 export const createSessionSchema = z
   .object({
     title: z.string().min(3).max(200),
@@ -64,6 +86,7 @@ export const createSessionSchema = z
     topicId: cuidSchema.optional(),
     tags: z.array(z.string().min(1).max(50)).max(20).default([]),
     objectives: objectivesArraySchema,
+    prereq: prereqConfigSchema.optional(),
   })
   .refine((v) => new Date(v.scheduledEnd) > new Date(v.scheduledStart), {
     message: 'scheduledEnd must be after scheduledStart',
@@ -109,6 +132,7 @@ export const updateSessionSchema = z.object({
   consentRequired: z.boolean().optional(),
   tags: z.array(z.string().min(1).max(50)).max(20).optional(),
   objectives: objectivesArraySchema,
+  prereq: prereqConfigSchema.optional(),
 });
 
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;

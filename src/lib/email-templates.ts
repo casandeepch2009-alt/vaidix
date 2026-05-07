@@ -70,6 +70,17 @@ function detailRow(label: string, value: string): string {
   </tr>`;
 }
 
+// Derives the canonical login URL from the accept-invitation URL. Used inline
+// in the invitation email so the recipient knows where to log in *after*
+// setting their password.
+function loginUrlFromAccept(acceptUrl: string): string {
+  try {
+    return new URL('/login', acceptUrl).toString();
+  } catch {
+    return `${BRAND.appUrl}/login`;
+  }
+}
+
 // ════════════════════════════════════════════════════════════════════════════
 // 1. INVITATION — sent when admin invites a new user
 // ════════════════════════════════════════════════════════════════════════════
@@ -105,6 +116,12 @@ export function renderInvitationEmail(v: InvitationEmailVars): { subject: string
     <div style="background:#F0FDFA;border-left:4px solid #0D9488;padding:16px 20px;border-radius:10px;margin-bottom:24px;">
       <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#0F766E;font-weight:700;margin-bottom:8px;">Your Invitation</div>
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">${details}</table>
+    </div>
+    <div style="background:#EFF6FF;border:1px solid #BFDBFE;border-radius:10px;padding:14px 18px;font-size:13px;color:#1E40AF;line-height:1.65;margin-bottom:20px;">
+      <div style="font-weight:700;margin-bottom:6px;">🔐 How to log in</div>
+      <div style="margin-bottom:4px;"><strong>Step 1.</strong> Click the button below to accept the invitation.</div>
+      <div style="margin-bottom:4px;"><strong>Step 2.</strong> On the page that opens, choose your own password.</div>
+      <div><strong>Step 3.</strong> From then on, log in at <a href="${escapeHtml(loginUrlFromAccept(v.acceptUrl))}" style="color:#1D4ED8;text-decoration:underline;">${escapeHtml(loginUrlFromAccept(v.acceptUrl))}</a> using <strong>${escapeHtml(v.invitedEmail)}</strong> and the password you just set.</div>
     </div>
     ${button('Accept Invitation & Set Password', v.acceptUrl)}
     <div style="text-align:center;font-size:12px;color:#94A3B8;margin-bottom:20px;">Or copy this link:<br><span style="color:#475569;word-break:break-all;">${v.acceptUrl}</span></div>
