@@ -16,6 +16,7 @@ import {
   fail,
   summarize,
   cleanupTestSessions,
+  TEST_PROGRAM_ID,
 } from './e2e-w4-helpers';
 
 const PREFIX = 'facaudit';
@@ -66,6 +67,7 @@ async function main() {
       maxParticipants: 50,
       recordingEnabled: true,
       consentRequired: false,
+      programId: TEST_PROGRAM_ID,
     },
     select: { id: true },
   });

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useRole } from '@/contexts/role-context'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -16,6 +16,7 @@ import {
   AnimatedRing,
   HoverCard,
   PulseDot,
+  Shimmer,
   motion,
 } from '@/lib/motion'
 import {
@@ -57,6 +58,69 @@ import {
   Trophy,
 } from 'lucide-react'
 import Link from 'next/link'
+
+// ---------------------------------------------------------------------------
+// Shared dashboard data hook — fetches /api/dashboard/me once per page load.
+// The endpoint returns a discriminated union keyed by role; each role panel
+// narrows on `snap.role` and unpacks `snap.data`.
+// ---------------------------------------------------------------------------
+
+interface ResidentSnap {
+  role: 'RESIDENT'
+  data: {
+    stats: { coursesInProgress: number; modulesCompleted: number; hoursThisMonth: number; dayStreak: number; casesThisMonth: number }
+    myCourses: Array<{ id: string; title: string; href: string; module: string; progress: number; modulesDone: number; modulesTotal: number; lastStudied: string; accent: string }>
+    completedModules: Array<{ id: string; title: string; topic: string; completedOn: string; durationMin: number }>
+  }
+}
+interface FacultySnap {
+  role: 'FACULTY'
+  data: {
+    stats: { activeLearners: number; casesAuthored: number; assessmentsThisWeek: number; avgCohortScore: number }
+    cohortLearners: Array<{ id: string; name: string; head: number; heart: number; hands: number; lastActive: string }>
+    recentConversations: Array<{ id: string; learner: string; caseTitle: string; summary: string; date: string; headScore: number | null; heartScore: number | null }>
+  }
+}
+interface PdSnap {
+  role: 'PROGRAM_DIRECTOR'
+  data: {
+    stats: { totalResidents: number; onTrack: number; attention: number; milestonesDue: number }
+    epaMatrix: { residents: Array<{ residentId: string; residentName: string; levels: Record<string, number> }>; epaLabels: Array<{ code: string; label: string }> }
+    upcomingMilestones: Array<{ name: string; milestone: string; date: string; status: 'on_track' | 'attention' }>
+    accreditation: { documentationCompletenessPct: number; epaPct: number; facultyEvalPct: number; caseLogsPct: number } | null
+  }
+}
+interface AdminSnap {
+  role: 'ADMIN'
+  data: {
+    stats: { totalUsers: number; activeCases: number; storage: string | null; uptime: string | null }
+    recentActivity: Array<{ id: string; action: string; details: string; time: string; success: boolean; actor: string }>
+  }
+}
+interface ExternalSnap { role: 'EXTERNAL_LEARNER'; data: Record<string, never> }
+
+type DashboardSnap = ResidentSnap | FacultySnap | PdSnap | AdminSnap | ExternalSnap
+
+function useDashboardSnap<T extends DashboardSnap['role']>(forRole: T) {
+  type Narrowed = Extract<DashboardSnap, { role: T }>
+  const [snap, setSnap] = useState<Narrowed['data'] | null>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/dashboard/me')
+      .then((r) => r.json())
+      .then((j) => {
+        if (cancelled) return
+        if (j?.ok && j.data?.role === forRole) setSnap(j.data.data as Narrowed['data'])
+      })
+      .catch(() => { /* silent — empty state covers it */ })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
+  }, [forRole])
+
+  return { snap, loading }
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -159,63 +223,20 @@ function GreetingBanner({
 function ResidentDashboard() {
   const { currentUser } = useRole()
   const firstName = currentUser.name.replace(/^Dr\.\s+/, '').split(' ')[0]
+  const { snap, loading } = useDashboardSnap('RESIDENT')
 
-  // My active courses — what the student is currently studying
-  const myCourses = [
-    {
-      id: 'retina',
-      title: 'Retina & Vitreoretinal',
-      module: 'Module 4 of 6 · Diabetic Retinopathy',
-      progress: 65,
-      modulesDone: 3,
-      modulesTotal: 6,
-      lastStudied: '2 hours ago',
-      accent: 'rose',
-      href: '/topics/retina',
-    },
-    {
-      id: 'uvea',
-      title: 'Uvea & Uveitis',
-      module: 'Module 2 of 5 · Anterior uveitis',
-      progress: 41,
-      modulesDone: 1,
-      modulesTotal: 5,
-      lastStudied: 'Yesterday',
-      accent: 'orange',
-      href: '/topics/uvea',
-    },
-    {
-      id: 'glaucoma',
-      title: 'Glaucoma',
-      module: 'Module 1 of 5 · Primary open-angle',
-      progress: 28,
-      modulesDone: 0,
-      modulesTotal: 5,
-      lastStudied: '3 days ago',
-      accent: 'blue',
-      href: '/topics/glaucoma',
-    },
-  ]
+  const myCourses = snap?.myCourses ?? []
+  const completedModules = snap?.completedModules ?? []
 
-  const completedModules = [
-    { id: 'm1', title: 'Wet AMD — diagnosis & anti-VEGF', topic: 'Retina', completedOn: 'Yesterday', durationMin: 24 },
-    { id: 'm2', title: 'Anterior uveitis basics', topic: 'Uvea', completedOn: '3 days ago', durationMin: 18 },
-    { id: 'm3', title: 'IOP measurement techniques', topic: 'Glaucoma', completedOn: '5 days ago', durationMin: 22 },
-    { id: 'm4', title: 'Fundus examination workflow', topic: 'Retina', completedOn: '1 week ago', durationMin: 30 },
-  ]
-
-  const stats: Array<{
-    label: string
-    value: number
-    icon: React.ElementType
-    accent: 'teal' | 'emerald' | 'blue' | 'orange'
-    trend: string
-  }> = [
-    { label: 'Courses in progress', value: 3,  icon: BookOpen,     accent: 'teal',    trend: '+1 this month' },
-    { label: 'Modules completed',   value: 12, icon: CheckCircle2, accent: 'emerald', trend: '+4 this week'  },
-    { label: 'Hours this month',    value: 28, icon: Clock,        accent: 'blue',    trend: '6h this week'  },
-    { label: 'Day streak',          value: 5,  icon: Flame,        accent: 'orange',  trend: 'Keep it going' },
-  ]
+  const stats = useMemo<Array<{ label: string; value: number; icon: React.ElementType; accent: 'teal' | 'emerald' | 'blue' | 'orange'; trend: string }>>(() => {
+    const s = snap?.stats
+    return [
+      { label: 'Courses in progress', value: s?.coursesInProgress ?? 0, icon: BookOpen,     accent: 'teal',    trend: s?.coursesInProgress ? `${s.coursesInProgress} active` : 'None enrolled yet' },
+      { label: 'Modules completed',   value: s?.modulesCompleted  ?? 0, icon: CheckCircle2, accent: 'emerald', trend: s?.modulesCompleted ? 'Keep it up'    : 'Complete your first' },
+      { label: 'Hours this month',    value: s?.hoursThisMonth    ?? 0, icon: Clock,        accent: 'blue',    trend: s?.casesThisMonth ? `${s.casesThisMonth} case${s.casesThisMonth === 1 ? '' : 's'} this month` : 'No cases this month' },
+      { label: 'Day streak',          value: s?.dayStreak         ?? 0, icon: Flame,        accent: 'orange',  trend: (s?.dayStreak ?? 0) > 0 ? 'Keep it going' : 'Start your streak' },
+    ]
+  }, [snap])
 
   return (
     <PageTransition className="space-y-6">
@@ -251,6 +272,22 @@ function ResidentDashboard() {
               </Link>
             </CardHeader>
             <CardContent className="space-y-3">
+              {loading && myCourses.length === 0 && (
+                <>
+                  <Shimmer className="h-20 w-full" />
+                  <Shimmer className="h-20 w-full" />
+                </>
+              )}
+              {!loading && myCourses.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-border p-6 text-center">
+                  <BookOpen className="mx-auto size-6 text-muted-foreground/40" />
+                  <p className="mt-2 text-sm font-medium text-foreground">No courses enrolled yet</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Browse the catalog to enrol in a course.</p>
+                  <Link href="/topics" className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline dark:text-teal-300">
+                    Browse topics <ArrowRight className="size-3" />
+                  </Link>
+                </div>
+              )}
               {myCourses.map((c, i) => (
                 <Link key={c.id} href={c.href}>
                   <motion.div
@@ -307,6 +344,12 @@ function ResidentDashboard() {
             <span className="text-xs text-muted-foreground">{completedModules.length} this week</span>
           </CardHeader>
           <CardContent>
+            {loading && completedModules.length === 0 && (
+              <Shimmer className="h-16 w-full" />
+            )}
+            {!loading && completedModules.length === 0 && (
+              <p className="py-6 text-center text-xs text-muted-foreground">No completed modules yet — finish a course to see it here.</p>
+            )}
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {completedModules.map((m, i) => (
                 <motion.div
@@ -611,20 +654,11 @@ function accentGradient(accent: string): string {
 
 function FacultyDashboard() {
   const { currentUser } = useRole()
+  const { snap, loading } = useDashboardSnap('FACULTY')
 
-  const cohortLearners = [
-    { name: 'Dr. Ananya Krishnan', head: 78, heart: 82, hands: 71, lastActive: '2 hours ago' },
-    { name: 'Dr. Priya Sharma', head: 85, heart: 79, hands: 88, lastActive: '1 day ago' },
-    { name: 'Dr. Rahul Menon', head: 72, heart: 91, hands: 68, lastActive: '3 hours ago' },
-    { name: 'Dr. Deepika Nair', head: 81, heart: 76, hands: 74, lastActive: '5 hours ago' },
-    { name: 'Dr. Vikram Patel', head: 69, heart: 73, hands: 82, lastActive: '1 day ago' },
-  ]
-
-  const recentConversations = [
-    { id: '1', learner: 'Dr. Ananya Krishnan', caseTitle: 'Diabetic Retinopathy - Stage IV', summary: 'Strong diagnostic reasoning but missed two differentials. Empathy score excellent.', date: 'Apr 1', headScore: 75, heartScore: 88 },
-    { id: '2', learner: 'Dr. Rahul Menon', caseTitle: 'Acute Angle-Closure Glaucoma', summary: 'Good history-taking. Needs improvement in explaining treatment options to patient.', date: 'Mar 31', headScore: 80, heartScore: 65 },
-    { id: '3', learner: 'Dr. Deepika Nair', caseTitle: 'Pediatric Amblyopia', summary: 'Excellent parent communication. Strong diagnostic accuracy with appropriate investigations.', date: 'Mar 30', headScore: 82, heartScore: 90 },
-  ]
+  const cohortLearners = snap?.cohortLearners ?? []
+  const recentConversations = snap?.recentConversations ?? []
+  const facultyStats = snap?.stats
 
   const facultySubtitle = currentUser.department
     ? `${currentUser.designation} · ${currentUser.department}`
@@ -639,10 +673,10 @@ function FacultyDashboard() {
       <StaggerItem>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {[
-            { title: 'Active Learners', value: 10, icon: Users, color: 'text-teal-600', bg: 'bg-teal-500/10' },
-            { title: 'Cases Authored', value: 8, icon: FileText, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-            { title: 'Pending Assessments', value: 5, icon: ClipboardCheck, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { title: 'Avg Cohort Score', value: 76, icon: BarChart3, color: 'text-purple-500', bg: 'bg-purple-500/10' },
+            { title: 'Active Learners',      value: facultyStats?.activeLearners      ?? 0, icon: Users,           color: 'text-teal-600',   bg: 'bg-teal-500/10' },
+            { title: 'Cases Authored',       value: facultyStats?.casesAuthored       ?? 0, icon: FileText,        color: 'text-blue-500',   bg: 'bg-blue-500/10' },
+            { title: 'Assessments / 7d',     value: facultyStats?.assessmentsThisWeek ?? 0, icon: ClipboardCheck,  color: 'text-amber-500',  bg: 'bg-amber-500/10' },
+            { title: 'Avg Cohort Score',     value: facultyStats?.avgCohortScore      ?? 0, icon: BarChart3,       color: 'text-purple-500', bg: 'bg-purple-500/10' },
           ].map((s) => (
             <HoverCard key={s.title}>
               <Card className="overflow-hidden">
@@ -677,9 +711,13 @@ function FacultyDashboard() {
                 <span className="text-right">Last Active</span>
               </div>
               <Separator />
+              {loading && cohortLearners.length === 0 && <Shimmer className="h-12 w-full" />}
+              {!loading && cohortLearners.length === 0 && (
+                <p className="py-6 text-center text-xs text-muted-foreground">No mentees assigned yet — add residents to your cohort to see them here.</p>
+              )}
               {cohortLearners.map((l, i) => (
                 <motion.div
-                  key={l.name}
+                  key={l.id}
                   initial={{ opacity: 0, x: -10 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.3 + i * 0.06 }}
@@ -718,6 +756,10 @@ function FacultyDashboard() {
             <CardTitle className="flex items-center gap-2 text-base"><MessageSquare className="size-4 text-primary" />Recent AI Conversations</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {loading && recentConversations.length === 0 && <Shimmer className="h-16 w-full" />}
+            {!loading && recentConversations.length === 0 && (
+              <p className="py-6 text-center text-xs text-muted-foreground">No recent AI conversations from your mentees.</p>
+            )}
             {recentConversations.map((c, i) => (
               <motion.div
                 key={c.id}
@@ -736,11 +778,13 @@ function FacultyDashboard() {
                     <span className="text-xs text-muted-foreground">{c.date}</span>
                   </div>
                   <p className="text-xs font-medium text-primary">{c.caseTitle}</p>
-                  <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{c.summary}</p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px]">HEAD {c.headScore}</Badge>
-                    <Badge variant="secondary" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[10px]">HEART {c.heartScore}</Badge>
-                  </div>
+                  {c.summary && <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{c.summary}</p>}
+                  {(c.headScore !== null || c.heartScore !== null) && (
+                    <div className="mt-2 flex items-center gap-2">
+                      {c.headScore !== null && <Badge variant="secondary" className="bg-blue-500/10 text-blue-600 dark:text-blue-400 text-[10px]">HEAD {c.headScore}</Badge>}
+                      {c.heartScore !== null && <Badge variant="secondary" className="bg-rose-500/10 text-rose-600 dark:text-rose-400 text-[10px]">HEART {c.heartScore}</Badge>}
+                    </div>
+                  )}
                 </div>
                 <ChevronRight className="mt-1 size-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
               </motion.div>
@@ -780,10 +824,12 @@ function FacultyDashboard() {
 
 function ProgramDirectorDashboard() {
   const { currentUser } = useRole()
+  const { snap, loading } = useDashboardSnap('PROGRAM_DIRECTOR')
 
-  const epaResidents = ['A. Krishnan', 'P. Sharma', 'R. Menon', 'D. Nair', 'V. Patel']
-  const epaLabels = ['EPA 1: History', 'EPA 2: Exam', 'EPA 3: Dx', 'EPA 4: Mx', 'EPA 5: Procedure']
-  const epaData = [[4, 3, 4, 3, 2], [5, 4, 4, 4, 3], [3, 3, 3, 2, 2], [4, 4, 3, 3, 3], [3, 2, 3, 2, 1]]
+  const epaMatrix = snap?.epaMatrix
+  const upcomingMilestones = snap?.upcomingMilestones ?? []
+  const accreditation = snap?.accreditation
+  const pdStats = snap?.stats
 
   const entrustmentColors: Record<number, string> = {
     1: 'bg-red-500/80 text-white',
@@ -791,13 +837,8 @@ function ProgramDirectorDashboard() {
     3: 'bg-amber-400/80 text-amber-900',
     4: 'bg-emerald-400/80 text-emerald-900',
     5: 'bg-emerald-600/90 text-white',
+    0: 'bg-muted text-muted-foreground',
   }
-
-  const upcomingMilestones = [
-    { name: 'Dr. Ananya Krishnan', milestone: 'EPA 5 Level 3 Assessment', date: 'Apr 15, 2026', status: 'on_track' as const },
-    { name: 'Dr. Rahul Menon', milestone: 'Mid-year Competency Review', date: 'Apr 20, 2026', status: 'attention' as const },
-    { name: 'Dr. Priya Sharma', milestone: 'Final EPA Portfolio', date: 'May 1, 2026', status: 'on_track' as const },
-  ]
 
   const statusBadge = { on_track: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400', attention: 'bg-amber-500/10 text-amber-600 dark:text-amber-400' }
 
@@ -812,10 +853,10 @@ function ProgramDirectorDashboard() {
       <StaggerItem>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {[
-            { title: 'Total Residents', value: 10, icon: Users, color: 'text-teal-600', bg: 'bg-teal-500/10' },
-            { title: 'On Track', value: 7, icon: Star, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
-            { title: 'Needs Attention', value: 2, icon: AlertTriangle, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { title: 'Milestones Due', value: 3, icon: Milestone, color: 'text-purple-500', bg: 'bg-purple-500/10' },
+            { title: 'Total Residents', value: pdStats?.totalResidents ?? 0, icon: Users,          color: 'text-teal-600',    bg: 'bg-teal-500/10' },
+            { title: 'On Track',        value: pdStats?.onTrack        ?? 0, icon: Star,           color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { title: 'Needs Attention', value: pdStats?.attention      ?? 0, icon: AlertTriangle,  color: 'text-amber-500',   bg: 'bg-amber-500/10' },
+            { title: 'Milestones Due',  value: pdStats?.milestonesDue  ?? 0, icon: Milestone,      color: 'text-purple-500',  bg: 'bg-purple-500/10' },
           ].map((s) => (
             <HoverCard key={s.title}>
               <Card className="overflow-hidden">
@@ -839,33 +880,42 @@ function ProgramDirectorDashboard() {
         <Card>
           <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><BarChart3 className="size-4 text-primary" />EPA Entrustment Overview</CardTitle></CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr>
-                    <th className="pb-3 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Resident</th>
-                    {epaLabels.map((l) => (<th key={l} className="pb-3 text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{l}</th>))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {epaResidents.map((resident, ri) => (
-                    <tr key={resident}>
-                      <td className="py-1.5 pr-4 text-sm font-medium text-foreground">{resident}</td>
-                      {epaData[ri].map((level, ci) => (
-                        <td key={ci} className="p-1 text-center">
-                          <motion.div
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            transition={{ delay: 0.3 + ri * 0.05 + ci * 0.03, type: 'spring', stiffness: 300 }}
-                            className={cn('mx-auto flex size-9 items-center justify-center rounded-lg text-xs font-bold', entrustmentColors[level])}
-                          >{level}</motion.div>
-                        </td>
-                      ))}
+            {loading ? (
+              <Shimmer className="h-32 w-full" />
+            ) : !epaMatrix || epaMatrix.residents.length === 0 || epaMatrix.epaLabels.length === 0 ? (
+              <p className="py-6 text-center text-xs text-muted-foreground">No EPA records yet — assessments populate this matrix as they&apos;re recorded.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full border-collapse text-sm">
+                  <thead>
+                    <tr>
+                      <th className="pb-3 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Resident</th>
+                      {epaMatrix.epaLabels.map((l) => (<th key={l.code} className="pb-3 text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{l.label}</th>))}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {epaMatrix.residents.map((r, ri) => (
+                      <tr key={r.residentId}>
+                        <td className="py-1.5 pr-4 text-sm font-medium text-foreground">{r.residentName}</td>
+                        {epaMatrix.epaLabels.map((l, ci) => {
+                          const level = r.levels[l.code] ?? 0
+                          return (
+                            <td key={l.code} className="p-1 text-center">
+                              <motion.div
+                                initial={{ scale: 0 }}
+                                animate={{ scale: 1 }}
+                                transition={{ delay: 0.3 + ri * 0.05 + ci * 0.03, type: 'spring', stiffness: 300 }}
+                                className={cn('mx-auto flex size-9 items-center justify-center rounded-lg text-xs font-bold', entrustmentColors[level])}
+                              >{level === 0 ? '—' : level}</motion.div>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
             <div className="mt-4 flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
               <span className="font-medium">Entrustment:</span>
               {[1, 2, 3, 4, 5].map((lvl) => (<div key={lvl} className="flex items-center gap-1"><div className={cn('size-4 rounded', entrustmentColors[lvl])} /><span>{lvl}</span></div>))}
@@ -880,6 +930,10 @@ function ProgramDirectorDashboard() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Milestone className="size-4 text-primary" />Upcoming Milestones</CardTitle></CardHeader>
             <CardContent className="space-y-2">
+              {loading && upcomingMilestones.length === 0 && <Shimmer className="h-12 w-full" />}
+              {!loading && upcomingMilestones.length === 0 && (
+                <p className="py-4 text-center text-xs text-muted-foreground">No upcoming milestones tracked yet.</p>
+              )}
               {upcomingMilestones.map((m, i) => (
                 <motion.div key={m.name} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 + i * 0.08 }} className="flex items-center gap-3 rounded-lg p-2 transition-colors hover:bg-muted/40">
                   <Avatar className="size-8"><AvatarFallback className="bg-primary/10 text-[10px] font-semibold text-primary">{getInitials(m.name)}</AvatarFallback></Avatar>
@@ -899,27 +953,39 @@ function ProgramDirectorDashboard() {
           <Card>
             <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Shield className="size-4 text-primary" />Accreditation Status</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <div>
-                <div className="mb-2 flex items-center justify-between">
-                  <span className="text-sm font-medium text-foreground">Documentation Completeness</span>
-                  <span className="text-sm font-bold tabular-nums text-primary">78%</span>
+              {loading ? (
+                <Shimmer className="h-24 w-full" />
+              ) : !accreditation ? (
+                <div className="rounded-2xl border border-dashed border-border p-6 text-center">
+                  <Shield className="mx-auto size-6 text-muted-foreground/40" />
+                  <p className="mt-2 text-sm font-medium text-foreground">Accreditation tracking not yet configured</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Documentation, EPA, and faculty-evaluation rates will populate once the accreditation module ships.</p>
                 </div>
-                <AnimatedBar value={78} barClassName="bg-linear-to-r from-primary to-teal-400" className="h-3" />
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                {[
-                  { label: 'EPA', value: 85, good: true },
-                  { label: 'Faculty Eval', value: 72, good: false },
-                  { label: 'Case Logs', value: 68, good: false },
-                ].map((item) => (
-                  <div key={item.label} className="rounded-xl border border-border/50 bg-muted/30 p-3 text-center">
-                    <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{item.label}</p>
-                    <p className={cn('mt-1 text-xl font-bold tabular-nums', item.good ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')}>
-                      <AnimatedCounter value={item.value} suffix="%" />
-                    </p>
+              ) : (
+                <>
+                  <div>
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-medium text-foreground">Documentation Completeness</span>
+                      <span className="text-sm font-bold tabular-nums text-primary">{accreditation.documentationCompletenessPct}%</span>
+                    </div>
+                    <AnimatedBar value={accreditation.documentationCompletenessPct} barClassName="bg-linear-to-r from-primary to-teal-400" className="h-3" />
                   </div>
-                ))}
-              </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: 'EPA',          value: accreditation.epaPct,         good: accreditation.epaPct         >= 80 },
+                      { label: 'Faculty Eval', value: accreditation.facultyEvalPct, good: accreditation.facultyEvalPct >= 80 },
+                      { label: 'Case Logs',    value: accreditation.caseLogsPct,    good: accreditation.caseLogsPct    >= 80 },
+                    ].map((item) => (
+                      <div key={item.label} className="rounded-xl border border-border/50 bg-muted/30 p-3 text-center">
+                        <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{item.label}</p>
+                        <p className={cn('mt-1 text-xl font-bold tabular-nums', item.good ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400')}>
+                          <AnimatedCounter value={item.value} suffix="%" />
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -934,14 +1000,19 @@ function ProgramDirectorDashboard() {
 
 function AdminDashboard() {
   const { currentUser } = useRole()
+  const { snap, loading } = useDashboardSnap('ADMIN')
 
-  const recentActivity = [
-    { id: '1', action: 'New user registered', details: 'Dr. Meera Reddy added as Resident', time: '10 min ago', icon: UserPlus },
-    { id: '2', action: 'Case published', details: '"Advanced Keratoconus" by Dr. Pathengay', time: '2 hours ago', icon: FileText },
-    { id: '3', action: 'Knowledge base updated', details: '3 new clinical guidelines imported', time: '5 hours ago', icon: Database },
-    { id: '4', action: 'System backup completed', details: 'Full backup successful (2.4 GB)', time: '12 hours ago', icon: HardDrive },
-    { id: '5', action: 'Role updated', details: 'Dr. Jalali promoted to Program Director', time: '1 day ago', icon: Shield },
-  ]
+  // Map audit eventType prefixes to icons. Unknown types fall back to Activity.
+  const iconForAction = (eventType: string): React.ElementType => {
+    if (eventType.startsWith('user.'))                                    return UserPlus
+    if (eventType.startsWith('case.') || eventType.startsWith('document.')) return FileText
+    if (eventType.startsWith('pearl.') || eventType.includes('knowledge'))  return Database
+    if (eventType.startsWith('role.'))                                    return Shield
+    if (eventType.startsWith('system.') || eventType.includes('backup'))   return HardDrive
+    return Activity
+  }
+  const recentActivity = (snap?.recentActivity ?? []).map((a) => ({ ...a, icon: iconForAction(a.action) }))
+  const adminStats = snap?.stats
 
   const adminSubtitle = currentUser.department
     ? `${currentUser.designation} · ${currentUser.department}`
@@ -954,10 +1025,10 @@ function AdminDashboard() {
       <StaggerItem>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {[
-            { title: 'Total Users', value: 15, icon: Users, color: 'text-teal-600', bg: 'bg-teal-500/10' },
-            { title: 'Active Cases', value: 15, icon: BookOpen, color: 'text-blue-500', bg: 'bg-blue-500/10' },
-            { title: 'Storage', value: '2.4 GB', icon: HardDrive, color: 'text-amber-500', bg: 'bg-amber-500/10' },
-            { title: 'Uptime', value: '99.9%', icon: Wifi, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
+            { title: 'Total Users',  value: adminStats?.totalUsers  ?? 0,         icon: Users,    color: 'text-teal-600',    bg: 'bg-teal-500/10' },
+            { title: 'Active Cases', value: adminStats?.activeCases ?? 0,         icon: BookOpen, color: 'text-blue-500',    bg: 'bg-blue-500/10' },
+            { title: 'Storage',      value: adminStats?.storage     ?? '—',       icon: HardDrive,color: 'text-amber-500',   bg: 'bg-amber-500/10' },
+            { title: 'Uptime',       value: adminStats?.uptime      ?? '—',       icon: Wifi,     color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
           ].map((s) => (
             <HoverCard key={s.title}>
               <Card className="overflow-hidden">
@@ -980,13 +1051,19 @@ function AdminDashboard() {
         <Card>
           <CardHeader className="pb-3"><CardTitle className="flex items-center gap-2 text-base"><Activity className="size-4 text-primary" />Recent Activity</CardTitle></CardHeader>
           <CardContent className="space-y-1">
+            {loading && recentActivity.length === 0 && <Shimmer className="h-12 w-full" />}
+            {!loading && recentActivity.length === 0 && (
+              <p className="py-6 text-center text-xs text-muted-foreground">No recent activity recorded.</p>
+            )}
             {recentActivity.map((a, i) => (
               <motion.div key={a.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + i * 0.06 }}>
                 <div className="flex items-center gap-4 rounded-lg px-1 py-2.5 transition-colors hover:bg-muted/40">
-                  <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted"><a.icon className="size-4 text-muted-foreground" /></div>
+                  <div className={cn('flex size-9 shrink-0 items-center justify-center rounded-lg', a.success ? 'bg-muted' : 'bg-rose-500/10')}>
+                    <a.icon className={cn('size-4', a.success ? 'text-muted-foreground' : 'text-rose-500')} />
+                  </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-foreground">{a.action}</p>
-                    <p className="truncate text-xs text-muted-foreground">{a.details}</p>
+                    <p className="truncate text-xs text-muted-foreground">{a.details}{a.actor && a.actor !== 'system' ? ` · by ${a.actor}` : ''}</p>
                   </div>
                   <span className="shrink-0 text-xs text-muted-foreground">{a.time}</span>
                 </div>

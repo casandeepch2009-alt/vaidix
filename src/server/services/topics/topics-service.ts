@@ -35,9 +35,16 @@ export class TopicError extends Error {
   }
 }
 
-export async function listTopics(opts: { subspecialty?: string } = {}): Promise<TopicSummary[]> {
+export async function listTopics(opts: {
+  programId: string;
+  subspecialty?: string;
+}): Promise<TopicSummary[]> {
+  // W6.11 — Topic curriculum is per-program; never list across tenants.
   const rows = await db.topic.findMany({
-    where: opts.subspecialty ? { subspecialty: opts.subspecialty } : undefined,
+    where: {
+      programId: opts.programId,
+      ...(opts.subspecialty ? { subspecialty: opts.subspecialty } : {}),
+    },
     orderBy: [{ subspecialty: 'asc' }, { displayOrder: 'asc' }, { name: 'asc' }],
     include: {
       _count: { select: { cases: true, pearls: true, atlasImages: true, courses: true } },
@@ -60,9 +67,14 @@ export async function listTopics(opts: { subspecialty?: string } = {}): Promise<
   }));
 }
 
-export async function getTopic(idOrSlug: string): Promise<TopicDetail> {
+export async function getTopic(idOrSlug: string, programId: string): Promise<TopicDetail> {
+  // W6.11 — slug is unique-within-program post-migration, so the OR-by-slug
+  // path requires the programId to disambiguate the same slug across tenants.
   const topic = await db.topic.findFirst({
-    where: { OR: [{ id: idOrSlug }, { slug: idOrSlug }] },
+    where: {
+      programId,
+      OR: [{ id: idOrSlug }, { slug: idOrSlug }],
+    },
     include: {
       parent: { select: { id: true, name: true, slug: true } },
       children: {

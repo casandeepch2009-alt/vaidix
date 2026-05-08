@@ -19,6 +19,15 @@ export default async function ClassroomListPage() {
   const s = await auth()
   if (!s?.user) redirect('/login')
 
+  // W6.11 — read activeProgramId live from the DB so a switcher change is
+  // reflected without re-auth.
+  const userRow = await db.user.findUnique({
+    where: { id: s.user.id },
+    select: { activeProgramId: true },
+  })
+  const activeProgramId = userRow?.activeProgramId ?? s.user.activeProgramId
+  if (!activeProgramId) redirect('/dashboard')
+
   const canSchedule =
     s.user.role === Role.PROGRAM_DIRECTOR ||
     s.user.role === Role.ADMIN ||
@@ -42,12 +51,15 @@ export default async function ClassroomListPage() {
   const visibility = await buildSessionVisibilityWhere({
     userId: s.user.id,
     role: s.user.role,
+    activeProgramId,
   })
 
-  const approvalGate = buildApprovalGate({ userId: s.user.id, role: s.user.role })
+  const approvalGate = buildApprovalGate({ userId: s.user.id, role: s.user.role, activeProgramId })
 
   const sessions = await db.teachingSession.findMany({
     where: {
+      // W6.11 — never list sessions outside the user's active program.
+      programId: activeProgramId,
       deletedAt: null,
       AND: [
         approvalGate,

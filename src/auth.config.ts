@@ -7,6 +7,7 @@
 
 import type { NextAuthConfig } from 'next-auth';
 import type { Role } from '@prisma/client';
+import type { SessionProgramMembership } from '@/types/next-auth';
 
 export const authConfig: NextAuthConfig = {
   pages: {
@@ -18,12 +19,34 @@ export const authConfig: NextAuthConfig = {
     maxAge: 60 * 60 * 8, // 8 hours
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id;
         token.role = (user as unknown as { role: Role }).role;
         token.passwordVersion = (user as unknown as { passwordVersion: number }).passwordVersion;
+        // W6.11: hydrate programs[] + activeProgramId from the authorize()
+        // payload at sign-in. After this they live in the JWT for the
+        // session lifetime; only the switcher mutates activeProgramId via
+        // the `update` trigger below.
+        token.programs = (user as unknown as { programs?: SessionProgramMembership[] }).programs ?? [];
+        token.activeProgramId =
+          (user as unknown as { activeProgramId?: string | null }).activeProgramId ?? null;
       }
+
+      // W6.11: program switcher path. Client calls `update({ activeProgramId })`
+      // after the POST /api/me/active-program endpoint succeeds. We only allow
+      // switching to a program already in token.programs — the server endpoint
+      // is the authoritative gate; this is a defense-in-depth.
+      if (trigger === 'update' && session && typeof session === 'object') {
+        const next = (session as { activeProgramId?: unknown }).activeProgramId;
+        if (typeof next === 'string') {
+          const allowed = (token.programs as SessionProgramMembership[] | undefined)?.some(
+            (p) => p.programId === next,
+          );
+          if (allowed) token.activeProgramId = next;
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
@@ -33,6 +56,8 @@ export const authConfig: NextAuthConfig = {
         // Required by requireAuth() for the per-request passwordVersion
         // re-check (HARDENING-PLAN item #13).
         session.user.passwordVersion = (token.passwordVersion as number) ?? 0;
+        session.user.programs = (token.programs as SessionProgramMembership[] | undefined) ?? [];
+        session.user.activeProgramId = (token.activeProgramId as string | null | undefined) ?? null;
       }
       return session;
     },

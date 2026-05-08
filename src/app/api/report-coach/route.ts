@@ -30,7 +30,7 @@ const SYSTEM_PROMPT = `You are a senior ophthalmology consultant at LV Prasad Ey
 
 YOUR TONE:
 - Warm but honest. Like a respected senior, not a textbook.
-- First-person from the resident's perspective in greetings ("Hey Dr. Ananya...")
+- Address the resident by their first name (provided in the RESIDENT field of the user message). Example format: "Hey Dr. [FirstName]..." — always use the actual name, never a placeholder.
 - Plain English. Indian clinical context.
 - Never condescending. Never crushing. But never sugar-coating either.
 - Read it aloud — does it sound like a real teacher? If not, rewrite.
@@ -169,7 +169,7 @@ export async function POST(req: NextRequest) {
 
     const userPrompt = `
 TOPIC: ${body.topicLabel}
-RESIDENT: ${body.residentName ?? 'Doctor'}
+RESIDENT NAME (use this name in your greeting, not any example name): ${body.residentName ?? 'Doctor'}
 QUESTIONS ANSWERED: ${body.items.length}
 
 For each question below, you have: the prompt, the audience the resident was speaking to, the learner's actual answer, and the score they received.

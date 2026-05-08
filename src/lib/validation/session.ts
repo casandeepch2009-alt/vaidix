@@ -131,6 +131,8 @@ export const updateSessionSchema = z.object({
   recordingEnabled: z.boolean().optional(),
   consentRequired: z.boolean().optional(),
   tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+  // null clears the topic; absent leaves it untouched.
+  topicId: cuidSchema.nullable().optional(),
   objectives: objectivesArraySchema,
   prereq: prereqConfigSchema.optional(),
 });

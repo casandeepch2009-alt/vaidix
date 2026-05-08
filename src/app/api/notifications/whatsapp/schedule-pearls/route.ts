@@ -36,8 +36,18 @@ export async function POST(req: Request) {
   }
 
   try {
+    // W6.11 — only let the actor schedule pearls from a program they are
+    // active in. Prevents a Cornea Fellowship faculty from scheduling MS
+    // Ophthalmology pearls to MS residents.
+    const u = await db.user.findUnique({
+      where: { id: auth.user.id },
+      select: { activeProgramId: true },
+    });
+    if (!u?.activeProgramId) {
+      return jsonError('NO_ACTIVE_PROGRAM', 'No active program', 409);
+    }
     const pearls = await db.pearl.findMany({
-      where: { id: { in: body.data.pearlIds } },
+      where: { id: { in: body.data.pearlIds }, programId: u.activeProgramId },
       select: { id: true, title: true, body: true },
     });
     if (pearls.length === 0) return jsonError('NOT_FOUND', 'No matching pearls', 404);

@@ -14,22 +14,42 @@ import { getUserCohortIds } from '../cohort-service';
 export interface SessionVisibilityActor {
   userId: string;
   role: Role;
+  /**
+   * W6.11 — actor's currently active program. Optional for backwards-compat
+   * during the W6.11 rollout: the listing entry-point routes (classroom,
+   * calendar, dashboard upcoming) MUST pass it so admins/PDs are scoped to
+   * their active tenant; deeper paths (visibility checks on a known sessionId)
+   * tolerate omission since the session id is the security boundary there.
+   *
+   * Once every caller passes it (Phase-2 audit), the optional marker drops.
+   */
+  activeProgramId?: string;
+}
+
+/**
+ * W6.11 — build the program-scoping fragment. Returns an empty fragment if
+ * the actor has no active program (defensive — should not happen in
+ * authenticated requests because requireAuthWithProgram fails first).
+ */
+export function buildProgramScope(actor: SessionVisibilityActor): Prisma.TeachingSessionWhereInput {
+  return actor.activeProgramId ? { programId: actor.activeProgramId } : {};
 }
 
 /**
  * Build a Prisma `TeachingSessionWhereInput` fragment encoding "which sessions
- * is this actor allowed to see". Caller composes it into a wider query (time
- * window, approval status, search, etc.).
+ * is this actor allowed to see in their calendar/listing surfaces". Caller
+ * composes it into a wider query (time window, approval status, search, etc.).
  *
- * Rules mirror the per-session `userCanSeeSession` check below so the listing
- * and detail surfaces stay in sync. Any drift between them is a privacy bug.
+ *   - ADMIN / PROGRAM_DIRECTOR — program-scope only (full access within tenant)
+ *   - FACULTY — cohort-member OR invited OR host OR proposer (within tenant)
+ *   - RESIDENT / EXTERNAL_LEARNER — cohort-member OR invited (within tenant)
  *
- *   - ADMIN / PROGRAM_DIRECTOR — empty fragment (full access)
- *   - FACULTY — open-to-all OR cohort-member OR invited OR host OR proposer
- *   - RESIDENT / EXTERNAL_LEARNER — open-to-all OR cohort-member OR invited
+ * OPEN_TO_ALL is intentionally NOT a list-surface match: those sessions are
+ * link-shareable (anyone with the URL can join via `userCanSeeSession` below)
+ * but should not auto-populate every user's calendar. The detail-page check
+ * still admits them so a shared link works.
  *
- * NOTE: returns `{}` for ADMIN/PD so the spread is a no-op. Callers can
- * unconditionally `...await buildSessionVisibilityWhere(actor)`.
+ * The returned fragment is meant to be composed under AND with `buildProgramScope`.
  */
 export async function buildSessionVisibilityWhere(
   actor: SessionVisibilityActor
@@ -41,7 +61,6 @@ export async function buildSessionVisibilityWhere(
   const cohortIds = await getUserCohortIds(actor.userId);
 
   const visibilityOptions: Prisma.TeachingSessionWhereInput[] = [
-    { visibility: SessionVisibility.OPEN_TO_ALL },
     { visibility: SessionVisibility.COHORT, cohortId: { in: cohortIds } },
     { visibility: SessionVisibility.INVITE_ONLY, invites: { some: { userId: actor.userId } } },
   ];

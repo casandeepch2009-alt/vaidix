@@ -6,7 +6,6 @@ import {
   LiveKitRoom,
   RoomAudioRenderer,
   GridLayout,
-  ParticipantTile,
   useTracks,
   useLocalParticipant,
   useParticipants,
@@ -19,6 +18,7 @@ import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   PhoneOff, Hand, MessageSquare, Users, Trophy,
   LayoutGrid, Zap, Brain, X, Settings, Link2, ChevronDown,
+  NotebookPen, Pencil,
 } from 'lucide-react'
 import { WaitingRoom } from './waiting-room'
 import { PreJoin } from './pre-join'
@@ -35,6 +35,15 @@ import { LiveCaptionsOverlay } from '@/components/engagement/live-captions-overl
 import { BreakoutsPanel } from './breakouts-panel'
 import { BreakoutRoomView } from './breakout-room-view'
 import { BgPicker } from './bg-picker'
+import { ReactionsBar, FloatingReactionsLayer } from './reactions-bar'
+import { useSpotlight } from './spotlight'
+import { SpotlightTile } from './spotlight-tile'
+import { AnnotationOverlay } from './annotation-overlay'
+import { NoiseSuppressionToggle } from './noise-suppression-toggle'
+import { PictureInPictureButton } from './pip-button'
+import { PopOutWindowButton } from './popout-button'
+import { SharedNotesPanel } from './shared-notes-panel'
+import { WhiteboardPanel } from './whiteboard-panel'
 import { cn } from '@/lib/utils'
 
 interface SessionInfo {
@@ -293,6 +302,8 @@ function InnerRoom({
   const tabs = [
     { id: 'participants', label: 'People', icon: Users },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
+    { id: 'notes', label: 'Notes', icon: NotebookPen },
+    { id: 'whiteboard', label: 'Whiteboard', icon: Pencil },
     { id: 'leaderboard', label: 'Board', icon: Trophy },
     { id: 'breakouts', label: 'Breakouts', icon: LayoutGrid },
     ...(isHostish ? [{ id: 'hooks', label: 'Hooks', icon: Zap }] : []),
@@ -308,8 +319,17 @@ function InnerRoom({
     <div className="relative h-full bg-zinc-950 overflow-hidden">
       {/* Full-screen video layer */}
       <div className="absolute inset-0">
-        <VideoGrid />
+        <VideoGrid sessionId={session.id} isHostish={isHostish} />
       </div>
+
+      {/* Screen-share annotation overlay — only renders when screen-share is
+          live, and only accepts pointer input from host/co-host. Lives
+          between the video grid and the floating reactions so reactions
+          float OVER any annotations. */}
+      <AnnotationOverlay sessionId={session.id} isHostish={isHostish} />
+
+      {/* Floating emoji reactions — pointer-events:none, layered over video */}
+      <FloatingReactionsLayer sessionId={session.id} />
 
       {/* Top gradient vignette */}
       <div className="absolute inset-x-0 top-0 h-28 bg-linear-to-b from-black/75 via-black/30 to-transparent z-10 pointer-events-none" />
@@ -424,6 +444,12 @@ function InnerRoom({
               )}
               {activeTab === 'chat' && (
                 <ChatPanel sessionId={session.id} currentUser={currentUser} />
+              )}
+              {activeTab === 'notes' && (
+                <SharedNotesPanel sessionId={session.id} isHostish={isHostish} />
+              )}
+              {activeTab === 'whiteboard' && (
+                <WhiteboardPanel sessionId={session.id} isHostish={isHostish} />
               )}
               {activeTab === 'leaderboard' && (
                 <LeaderboardPanel sessionId={session.id} />
@@ -683,6 +709,9 @@ function ControlBar({
           />
         )}
 
+        {/* Reactions — anyone in the room can react */}
+        <ReactionsBar sessionId={sessionId} />
+
         <Divider />
 
         {/* Chat */}
@@ -701,13 +730,42 @@ function ControlBar({
           variant={sidebarOpen && activeTab === 'participants' ? 'active' : 'default'}
         />
 
-        {/* Board */}
+        {/* Notes */}
+        <CtrlBtn
+          onClick={() => onOpenTab('notes')}
+          icon={<NotebookPen className="w-5 h-5" />}
+          label="Notes"
+          variant={sidebarOpen && activeTab === 'notes' ? 'active' : 'default'}
+        />
+
+        {/* Whiteboard */}
+        <CtrlBtn
+          onClick={() => onOpenTab('whiteboard')}
+          icon={<Pencil className="w-5 h-5" />}
+          label="Board"
+          variant={sidebarOpen && activeTab === 'whiteboard' ? 'active' : 'default'}
+        />
+
+        {/* Leaderboard — relabelled "Stats" so it doesn't collide with the
+            new Whiteboard ("Board") button. The sidebar tab itself still says
+            "Board" inside the engagement panel; this label is the control-bar
+            shortcut. */}
         <CtrlBtn
           onClick={() => onOpenTab('leaderboard')}
           icon={<Trophy className="w-5 h-5" />}
-          label="Board"
+          label="Stats"
           variant={sidebarOpen && activeTab === 'leaderboard' ? 'active' : 'default'}
         />
+
+        <Divider />
+
+        {/* UX accessory cluster: noise toggle + PiP + pop-out — small icons,
+            grouped to the right of the main pill so they don't crowd primary
+            actions. NoiseSuppressionToggle is a labeled chip; PiP and PopOut
+            are icon-only since they're enhancement features. */}
+        {role !== 'VIEWER' && <NoiseSuppressionToggle sessionId={sessionId} />}
+        <PictureInPictureButton sessionId={sessionId} />
+        <PopOutWindowButton sessionId={sessionId} />
       </motion.div>
 
       {/* Leave — separate pill, visually distinct */}
@@ -904,19 +962,41 @@ function HostMenuItem({
 }
 
 // ----------------------------------------------------------------------------
-// Video grid — full height
+// Video grid — full height. When a participant is spotlighted (HOST set) the
+// grid collapses to a single focused tile for everyone in the room. Screen-
+// share tracks always take precedence over the spotlight (a host sharing
+// their slides is an implicit spotlight on the slides). Other camera tiles
+// remain available in the participant sidebar but are removed from the grid.
 // ----------------------------------------------------------------------------
-function VideoGrid() {
-  const tracks = useTracks(
+function VideoGrid({ sessionId, isHostish }: { sessionId: string; isHostish: boolean }) {
+  const allTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
     { onlySubscribed: false }
   )
+  const { targetIdentity, setSpotlight } = useSpotlight(sessionId)
+
+  // Screen share short-circuits the spotlight — slides are always king.
+  const hasScreenShare = allTracks.some((t) => t.source === Track.Source.ScreenShare)
+
+  const tracks =
+    targetIdentity && !hasScreenShare
+      ? allTracks.filter(
+          (t) =>
+            t.source === Track.Source.ScreenShare ||
+            t.participant.identity === targetIdentity
+        )
+      : allTracks
+
   return (
     <GridLayout tracks={tracks} style={{ height: '100%', background: 'transparent' }}>
-      <ParticipantTile />
+      <SpotlightTile
+        isHostish={isHostish}
+        spotlightedIdentity={targetIdentity}
+        onToggleSpotlight={setSpotlight}
+      />
     </GridLayout>
   )
 }

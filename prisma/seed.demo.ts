@@ -85,6 +85,7 @@ async function main() {
       academicYear: '2025-26',
       status: CohortStatus.ACTIVE,
       createdBy: admin.id,
+      programId: 'prg_default_lvpei_ms',
     },
   })
   const cohortFellows = await prisma.cohort.upsert({
@@ -97,6 +98,7 @@ async function main() {
       academicYear: '2026',
       status: CohortStatus.ACTIVE,
       createdBy: admin.id,
+      programId: 'prg_default_lvpei_ms',
     },
   })
 
@@ -183,6 +185,7 @@ async function main() {
         sessionType: s.sessionType,
         hostId: 'demo-user-faculty',
         proposedBy: 'demo-user-pd',
+        programId: 'prg_default_lvpei_ms',
         approvedBy: admin.id,
         approvedAt: new Date(now - 1 * day),
         status: s.status,

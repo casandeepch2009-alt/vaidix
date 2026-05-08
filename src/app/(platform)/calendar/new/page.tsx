@@ -131,8 +131,8 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
                 Visibility guide
               </h3>
               <div className="space-y-1.5 text-xs text-muted-foreground">
-                <p><span className="font-semibold text-foreground">Open to all</span> — great for Grand Rounds, department-wide lectures.</p>
-                <p><span className="font-semibold text-foreground">Cohort</span> — batch-year or specialty-specific sessions.</p>
+                <p><span className="font-semibold text-foreground">Anyone with link</span> — share the URL and people can join. Doesn’t hit everyone’s calendar.</p>
+                <p><span className="font-semibold text-foreground">Cohort</span> — batch-year or specialty-specific sessions; appears on members’ calendars.</p>
                 <p><span className="font-semibold text-foreground">Invite only</span> — targeted small groups, mentoring sessions.</p>
                 <p><span className="font-semibold text-foreground">Private</span> — host-only planning or draft sessions.</p>
               </div>

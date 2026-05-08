@@ -7,6 +7,7 @@
 import { useCallback, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { DocumentRoute } from '@prisma/client';
+import { csrfHeaders } from '@/lib/csrf-client';
 
 interface DocumentRow {
   id: string;
@@ -42,6 +43,33 @@ export function DocumentsLibraryClient({ initialDocuments }: { initialDocuments:
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [classifying, setClassifying] = useState<string | null>(null);
+  const [forging, setForging] = useState<string | null>(null);
+  const [forgeError, setForgeError] = useState<string | null>(null);
+
+  async function forgeSlidesFromDocument(documentId: string) {
+    setForging(documentId);
+    setForgeError(null);
+    try {
+      const res = await fetch('/api/decks/forge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ documentId }),
+      });
+      const json = (await res.json()) as {
+        ok: boolean;
+        data?: { jobId: string };
+        error?: { message: string };
+      };
+      if (!json.ok || !json.data) {
+        throw new Error(json.error?.message ?? `Forge failed (${res.status})`);
+      }
+      router.push(`/faculty/decks/${json.data.jobId}`);
+    } catch (err) {
+      setForgeError((err as Error).message);
+    } finally {
+      setForging(null);
+    }
+  }
 
   const refresh = useCallback(async () => {
     const res = await fetch('/api/documents', { cache: 'no-store' });
@@ -160,6 +188,7 @@ export function DocumentsLibraryClient({ initialDocuments }: { initialDocuments:
       <section className="rounded-lg border border-border bg-card">
         <header className="border-b p-4">
           <h2 className="text-lg font-medium">Library ({docs.length})</h2>
+          {forgeError && <p className="mt-1 text-xs text-destructive">Forge: {forgeError}</p>}
         </header>
         {docs.length === 0 ? (
           <p className="p-6 text-sm text-muted-foreground">No documents yet — upload one above.</p>
@@ -197,6 +226,14 @@ export function DocumentsLibraryClient({ initialDocuments }: { initialDocuments:
                       )
                     )}
                   </div>
+                  <button
+                    type="button"
+                    disabled={forging === d.id}
+                    onClick={() => forgeSlidesFromDocument(d.id)}
+                    className="mt-2 inline-flex items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-xs font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    {forging === d.id ? 'Forging…' : '✨ Forge slides'}
+                  </button>
                 </div>
               </li>
             ))}

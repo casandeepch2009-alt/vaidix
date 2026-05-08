@@ -1,4 +1,6 @@
+import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
+import { Pencil } from 'lucide-react'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
 import { LiveSession } from '@/components/classroom/live-session'
@@ -83,27 +85,36 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
       : Promise.resolve(null),
   ])
 
+  const canEdit =
+    session.user.id === s.hostId ||
+    session.user.id === s.proposedBy ||
+    session.user.role === 'ADMIN' ||
+    session.user.role === 'PROGRAM_DIRECTOR'
+
   // Pending / draft / rejected sessions get the management UI instead of the live room.
   if (s.approvalStatus !== 'APPROVED') {
     return (
-      <PendingSessionManager
-        session={{
-          id: s.id,
-          title: s.title,
-          description: s.description,
-          sessionType: s.sessionType,
-          approvalStatus: s.approvalStatus,
-          scheduledStart: effectiveStart.toISOString(),
-          scheduledEnd: effectiveEnd.toISOString(),
-          host: host ?? { id: s.hostId, name: 'Unknown host', email: '' },
-        }}
-        proposer={proposer}
-        currentUser={{
-          id: session.user.id,
-          name: session.user.name ?? '',
-          role: session.user.role,
-        }}
-      />
+      <>
+        {canEdit && <EditSessionLink sessionId={s.id} />}
+        <PendingSessionManager
+          session={{
+            id: s.id,
+            title: s.title,
+            description: s.description,
+            sessionType: s.sessionType,
+            approvalStatus: s.approvalStatus,
+            scheduledStart: effectiveStart.toISOString(),
+            scheduledEnd: effectiveEnd.toISOString(),
+            host: host ?? { id: s.hostId, name: 'Unknown host', email: '' },
+          }}
+          proposer={proposer}
+          currentUser={{
+            id: session.user.id,
+            name: session.user.name ?? '',
+            role: session.user.role,
+          }}
+        />
+      </>
     )
   }
 
@@ -160,6 +171,7 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
 
   return (
     <>
+      {canEdit && <EditSessionLink sessionId={s.id} />}
       {showCuratorBlock && (
         <PreConferencePrepBlock
           sessionId={s.id}
@@ -203,5 +215,19 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
         prereqStatus={prereqStatus}
       />
     </>
+  )
+}
+
+function EditSessionLink({ sessionId }: { sessionId: string }) {
+  return (
+    <div className="flex justify-end">
+      <Link
+        href={`/classroom/${sessionId}/edit`}
+        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-accent"
+      >
+        <Pencil className="size-3.5" />
+        Edit session
+      </Link>
+    </div>
   )
 }

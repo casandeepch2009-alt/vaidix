@@ -73,10 +73,10 @@ const SESSION_TYPE_LABEL: Record<SessionType, string> = {
 const VISIBILITY_OPTIONS: Array<{
   value: Visibility; label: string; description: string; icon: typeof Globe
 }> = [
-  { value: 'OPEN_TO_ALL', label: 'Open to all',  description: 'Every resident + faculty in the institution',     icon: Globe },
-  { value: 'COHORT',      label: 'Cohort',       description: 'Members of a single cohort (live membership)',    icon: UsersRound },
-  { value: 'INVITE_ONLY', label: 'Invite only',  description: 'Specific people you pick (snapshot at create)',   icon: UserCheck },
-  { value: 'PRIVATE',     label: 'Private',      description: 'Only the host and you',                            icon: Lock },
+  { value: 'OPEN_TO_ALL', label: 'Anyone with link', description: 'Anyone with the link can join. Doesn’t auto-appear on others’ calendars.', icon: Globe },
+  { value: 'COHORT',      label: 'Cohort',           description: 'Members of a single cohort (live membership)',                                       icon: UsersRound },
+  { value: 'INVITE_ONLY', label: 'Invite only',      description: 'Specific people you pick (snapshot at create)',                                      icon: UserCheck },
+  { value: 'PRIVATE',     label: 'Private',          description: 'Only the host and you',                                                              icon: Lock },
 ]
 
 const WEEKDAYS: Array<{ label: string; rrule: Weekday }> = [
@@ -95,6 +95,32 @@ function toLocalInput(iso: string | undefined): string {
   const tzOffset = d.getTimezoneOffset() * 60000
   return new Date(d.getTime() - tzOffset).toISOString().slice(0, 16)
 }
+
+function addMinutesToLocal(local: string, minutes: number): string {
+  const [datePart, timePart] = local.split('T')
+  const [y, mo, d] = datePart.split('-').map(Number)
+  const [h, mi] = timePart.split(':').map(Number)
+  const next = new Date(y, mo - 1, d, h, mi + minutes)
+  const tzOffset = next.getTimezoneOffset() * 60000
+  return new Date(next.getTime() - tzOffset).toISOString().slice(0, 16)
+}
+
+function diffMinutes(start: string, end: string): number | null {
+  if (!start || !end) return null
+  const [sd, st] = start.split('T'); const [ed, et] = end.split('T')
+  const [sy, smo, sda] = sd.split('-').map(Number); const [sh, smi] = st.split(':').map(Number)
+  const [ey, emo, eda] = ed.split('-').map(Number); const [eh, emi] = et.split(':').map(Number)
+  const a = new Date(sy, smo - 1, sda, sh, smi).getTime()
+  const b = new Date(ey, emo - 1, eda, eh, emi).getTime()
+  return Math.round((b - a) / 60000)
+}
+
+const DURATION_PRESETS: Array<{ label: string; minutes: number }> = [
+  { label: '30 min', minutes: 30 },
+  { label: '1 hour', minutes: 60 },
+  { label: '1.5 hour', minutes: 90 },
+  { label: '2 hours', minutes: 120 },
+]
 
 function initials(name: string): string {
   return name.trim().split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() ?? '').join('')
@@ -399,9 +425,70 @@ export function NewSessionForm({ faculty, cohorts, topics, defaultStart, default
       {/* ── Section 2: When ── */}
       <Section title="When" subtitle="Date, time, and recurrence" icon={CalendarIcon}>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <DateTimePicker label="Start" required value={start} onChange={setStart} />
-          <DateTimePicker label="End"   required value={end}   onChange={setEnd} />
+          <DateTimePicker
+            label="Start"
+            required
+            value={start}
+            onChange={(v) => {
+              // Preserve duration when the user shifts start (matches Teams /
+              // Calendar app behaviour). If end isn't set yet, default to +60.
+              // If the old end was at or before the old start (stale state),
+              // also default to +60 so we never end up with end <= start.
+              const oldDur = diffMinutes(start, end)
+              setStart(v)
+              if (!end) {
+                setEnd(addMinutesToLocal(v, 60))
+              } else if (oldDur !== null && oldDur > 0) {
+                setEnd(addMinutesToLocal(v, oldDur))
+              } else {
+                setEnd(addMinutesToLocal(v, 60))
+              }
+            }}
+          />
+          <DateTimePicker
+            label="End"
+            required
+            value={end}
+            onChange={setEnd}
+            min={start || undefined}
+          />
         </div>
+        {start && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-xs font-semibold text-muted-foreground">Duration:</span>
+            {DURATION_PRESETS.map((p) => {
+              const active = diffMinutes(start, end) === p.minutes
+              return (
+                <button
+                  key={p.minutes}
+                  type="button"
+                  onClick={() => setEnd(addMinutesToLocal(start, p.minutes))}
+                  className={`rounded-full border-2 px-3 py-1 text-xs font-bold transition ${
+                    active
+                      ? 'border-primary bg-primary text-primary-foreground shadow-sm'
+                      : 'border-input bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              )
+            })}
+            {(() => {
+              const d = diffMinutes(start, end)
+              if (d === null) return null
+              const known = DURATION_PRESETS.some((p) => p.minutes === d)
+              if (known || d <= 0) return null
+              const hours = Math.floor(d / 60)
+              const mins = d % 60
+              const label = hours > 0 ? `${hours}h${mins > 0 ? ` ${mins}m` : ''}` : `${mins}m`
+              return (
+                <span className="rounded-full border border-dashed border-input px-3 py-1 text-xs font-semibold text-muted-foreground">
+                  Custom · {label}
+                </span>
+              )
+            })()}
+          </div>
+        )}
 
         <div className="rounded-xl border-2 border-input p-3">
           <label className="flex cursor-pointer items-center gap-2 text-sm font-medium">

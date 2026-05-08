@@ -122,4 +122,13 @@ export const LIMITS = {
   COACH_ASK: { limit: 60, windowSec: 60 * 60, failMode: 'closed' as const }, // billable Gemini call
   KIRKPATRICK_WRITE: { limit: 60, windowSec: 60 * 60, failMode: 'open' as const },
   ENGAGEMENT_SIGNAL_WRITE: { limit: 600, windowSec: 60, failMode: 'open' as const },
+
+  // ─── W7 — Live collaboration ─────────────────────────────────────────────
+  // Reactions burst hard during exciting moments — keep ceiling generous.
+  // Fail-open because each event also rides the LiveKit data channel; losing
+  // a DB row degrades replay accuracy but doesn't break the live UX.
+  SESSION_EVENT_WRITE: { limit: 600, windowSec: 60, failMode: 'open' as const },
+  SHARED_NOTE_WRITE: { limit: 120, windowSec: 60, failMode: 'open' as const },
+  SESSION_FILE_UPLOAD: { limit: 30, windowSec: 60 * 60, failMode: 'closed' as const },
+  WEBINAR_REGISTER: { limit: 5, windowSec: 60 * 60, failMode: 'closed' as const },
 } as const;

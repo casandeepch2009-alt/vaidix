@@ -9,17 +9,22 @@
 import { useRef, useState, useTransition } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RecordingPlayer } from './recording-player'
+import { RecordingReplayLayer } from './recording-replay-layer'
 import { QaSidebar } from '@/components/classroom/qa-sidebar'
 import { SessionPearlsTab, type SessionPearl } from './session-pearls-tab'
 import { TranscriptTab } from './transcript-tab'
 import {
   ThumbsUp, Bookmark, Share2, Gem, BookOpen, MessageSquare,
-  User, Calendar, Clock, Captions, X, Copy, Check, Lock, Loader2, ExternalLink,
+  User, Calendar, Clock, Captions, X, Copy, Check, Lock, Loader2, ExternalLink, Sparkles,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
+import { csrfHeaders } from '@/lib/csrf-client'
 import { toggleRecordingBookmarkAction, createRecordingShareAction } from '@/app/(platform)/classroom/[id]/recording/actions'
+
+const FACULTY_LIKE_ROLES = new Set(['FACULTY', 'PROGRAM_DIRECTOR', 'ADMIN'])
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -107,6 +112,37 @@ export function RecordingViewer({
   const [liked, setLiked] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [forging, setForging] = useState(false)
+  const [forgeError, setForgeError] = useState<string | null>(null)
+  const router = useRouter()
+
+  const canForgeFromTranscript =
+    FACULTY_LIKE_ROLES.has(currentUser.role) && tracks.length > 0
+
+  async function handleForgeFromTranscript() {
+    setForging(true)
+    setForgeError(null)
+    try {
+      const res = await fetch('/api/decks/forge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ recordingId }),
+      })
+      const json = (await res.json()) as {
+        ok: boolean
+        data?: { jobId: string }
+        error?: { message: string }
+      }
+      if (!json.ok || !json.data) {
+        throw new Error(json.error?.message ?? `Forge failed (${res.status})`)
+      }
+      router.push(`/faculty/decks/${json.data.jobId}`)
+    } catch (err) {
+      setForgeError((err as Error).message)
+    } finally {
+      setForging(false)
+    }
+  }
 
   function handleLangChange(lang: string) {
     setActiveLang(lang)
@@ -137,15 +173,21 @@ export function RecordingViewer({
         {/* ════════ Left column ════════ */}
         <div className="min-w-0 space-y-4">
 
-          {/* Video */}
-          <RecordingPlayer
-            hlsUrl={hlsUrl}
-            posterUrl={posterUrl}
-            tracks={tracks}
-            onTimeUpdate={setCurrentTimeSec}
-            seekRef={seekRef}
-            activeLang={activeLang}
-          />
+          {/* Video — wrapped so the replay layer can absolute-position over it */}
+          <div className="relative">
+            <RecordingPlayer
+              hlsUrl={hlsUrl}
+              posterUrl={posterUrl}
+              tracks={tracks}
+              onTimeUpdate={setCurrentTimeSec}
+              seekRef={seekRef}
+              activeLang={activeLang}
+            />
+            <RecordingReplayLayer
+              sessionId={sessionId}
+              currentTimeSec={currentTimeSec}
+            />
+          </div>
 
           {/* Caption language row */}
           {hasTracks && (
@@ -249,6 +291,22 @@ export function RecordingViewer({
                 <Share2 className="size-4" />
                 Share
               </motion.button>
+            )}
+
+            {/* Forge slides — faculty only, requires at least one transcript track */}
+            {canForgeFromTranscript && (
+              <motion.button
+                onClick={handleForgeFromTranscript}
+                disabled={forging}
+                whileTap={{ scale: 0.93 }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary/10 px-3.5 py-1.5 text-sm font-semibold text-primary ring-1 ring-primary/20 transition-all hover:bg-primary/20 disabled:opacity-50"
+              >
+                {forging ? <Loader2 className="size-4 animate-spin" /> : <Sparkles className="size-4" />}
+                {forging ? 'Forging…' : 'Forge slides'}
+              </motion.button>
+            )}
+            {forgeError && (
+              <span className="ml-1 text-xs text-destructive">{forgeError}</span>
             )}
           </div>
 

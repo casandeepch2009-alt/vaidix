@@ -258,6 +258,22 @@ enum DeckForgeStatus {
   FAILED
 }
 
+enum DeckForgeSource {
+  DOCUMENT // PDF / PPT / DOC / notes uploaded to /faculty/documents
+  TRANSCRIPT // Forged from a recording's transcript
+  HYBRID // Both a document and a transcript (slides cite both)
+}
+
+enum SlideLayout {
+  TITLE_ONLY // hero / section divider — large title, no bullets
+  TITLE_BULLETS // standard content slide
+  TWO_COLUMN // bullets split L/R
+  IMAGE_FOCUS // big image, caption below
+  QUOTE // pull-quote with attribution
+  INTERACTION // poll / T-F / discussion prompt
+  CLOSING // thank-you / Q&A
+}
+
 enum EscalationSeverity {
   TIER_1_DIRECT
   TIER_2_INDIRECT
@@ -339,6 +355,11 @@ enum VcceItemKind {
   LANGUAGE_PROBE
 }
 
+enum ProgramStatus {
+  ACTIVE
+  ARCHIVED
+}
+
 enum ConsentType {
   PATIENT_RECORDING
   RESIDENT_PLATFORM
@@ -352,25 +373,25 @@ enum ConsentType {
 // ════════════════════════════════════════════════════════════════════════════
 
 model User {
-  id               String     @id @default(cuid())
-  email            String     @unique
+  id                String     @id @default(cuid())
+  email             String     @unique
   /// Optional alternate login identifiers. Both unique-when-set, both
   /// nullable so existing rows survive the additive migration.
   /// Mobile is stored canonical-form '+91XXXXXXXXXX'. Username is lowercase,
   /// 3-32 chars, [a-z0-9_-]. See identifier primitives in lib/validation.
-  mobile           String?    @unique
-  username         String?    @unique
-  passwordHash     String?
-  passwordVersion  Int        @default(1)
-  name             String
-  role             Role       @default(RESIDENT)
-  status           UserStatus @default(PENDING_INVITE)
-  avatarUrl        String?
-  emailVerifiedAt  DateTime?
-  lastLoginAt      DateTime?
-  failedLoginCount Int        @default(0)
-  lockedUntil      DateTime?
-  icalFeedToken    String?    @unique
+  mobile            String?    @unique
+  username          String?    @unique
+  passwordHash      String?
+  passwordVersion   Int        @default(1)
+  name              String
+  role              Role       @default(RESIDENT)
+  status            UserStatus @default(PENDING_INVITE)
+  avatarUrl         String?
+  emailVerifiedAt   DateTime?
+  lastLoginAt       DateTime?
+  failedLoginCount  Int        @default(0)
+  lockedUntil       DateTime?
+  icalFeedToken     String?    @unique
   /// Optional Program Director uplink for FACULTY users. Service layer
   /// enforces target.role=FACULTY and ref.role=PROGRAM_DIRECTOR. ON DELETE
   /// SET NULL so a PD's removal cleanly orphans their faculty without
@@ -380,10 +401,15 @@ model User {
   /// enforces target.role=RESIDENT and ref.role=FACULTY. Independent of
   /// cohort membership — a resident may have a mentor outside their cohort.
   /// ON DELETE SET NULL.
-  facultyMentorId  String?
-  deletedAt        DateTime?
-  createdAt        DateTime   @default(now())
-  updatedAt        DateTime   @updatedAt
+  facultyMentorId   String?
+  /// W6.11 multi-tenancy: the program the user is currently viewing. Always a
+  /// program they are a member of (enforced at write time in the active-program
+  /// endpoint). Nullable only so the additive migration can land before backfill;
+  /// post-backfill every active user has a value.
+  activeProgramId   String?
+  deletedAt         DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   profile                 UserProfile?
   preferences             UserPreferences?
@@ -391,9 +417,9 @@ model User {
   sessions                AuthSession[]
   accounts                AuthAccount[]
   roleHistory             UserRoleHistory[]
-  invitationsSent         Invitation[]             @relation("InvitedBy")
-  invitationsAsPD         Invitation[]             @relation("InvitationPD")
-  invitationsAsMentor     Invitation[]             @relation("InvitationMentor")
+  invitationsSent         Invitation[]                  @relation("InvitedBy")
+  invitationsAsPD         Invitation[]                  @relation("InvitationPD")
+  invitationsAsMentor     Invitation[]                  @relation("InvitationMentor")
   passwordResets          PasswordResetToken[]
   cases                   Case[]
   journalEntries          JournalEntry[]
@@ -402,29 +428,29 @@ model User {
   conversations           Conversation[]
   scoringEvents           ScoringEvent[]
   reviews                 Review[]
-  sessionsHosted          TeachingSession[]        @relation("SessionHost")
-  sessionsProposed        TeachingSession[]        @relation("SessionProposer")
-  sessionsApproved        TeachingSession[]        @relation("SessionApprover")
-  cohortsCreated          Cohort[]                 @relation("CohortCreator")
-  cohortsAsFaculty        Cohort[]                 @relation("CohortFaculty")
-  cohortMemberships       CohortMember[]           @relation("CohortMembership")
-  programDirector         User?                    @relation("FacultyToPD", fields: [programDirectorId], references: [id], onDelete: SetNull)
-  facultyMembers          User[]                   @relation("FacultyToPD")
-  facultyMentor           User?                    @relation("ResidentToFaculty", fields: [facultyMentorId], references: [id], onDelete: SetNull)
-  mentees                 User[]                   @relation("ResidentToFaculty")
-  sessionInvites          SessionInvite[]          @relation("SessionInviteUser")
-  sessionAdmissions       SessionAdmission[]       @relation("SessionAdmissionUser")
-  admissionDecisions      SessionAdmission[]       @relation("SessionAdmissionDecider")
-  sessionApprovalAudits   SessionApprovalAudit[]   @relation("SessionApprovalActor")
+  sessionsHosted          TeachingSession[]             @relation("SessionHost")
+  sessionsProposed        TeachingSession[]             @relation("SessionProposer")
+  sessionsApproved        TeachingSession[]             @relation("SessionApprover")
+  cohortsCreated          Cohort[]                      @relation("CohortCreator")
+  cohortsAsFaculty        Cohort[]                      @relation("CohortFaculty")
+  cohortMemberships       CohortMember[]                @relation("CohortMembership")
+  programDirector         User?                         @relation("FacultyToPD", fields: [programDirectorId], references: [id], onDelete: SetNull)
+  facultyMembers          User[]                        @relation("FacultyToPD")
+  facultyMentor           User?                         @relation("ResidentToFaculty", fields: [facultyMentorId], references: [id], onDelete: SetNull)
+  mentees                 User[]                        @relation("ResidentToFaculty")
+  sessionInvites          SessionInvite[]               @relation("SessionInviteUser")
+  sessionAdmissions       SessionAdmission[]            @relation("SessionAdmissionUser")
+  admissionDecisions      SessionAdmission[]            @relation("SessionAdmissionDecider")
+  sessionApprovalAudits   SessionApprovalAudit[]        @relation("SessionApprovalActor")
   sessionParticipations   SessionParticipant[]
   chatMessagesSent        SessionChatMessage[]
-  documentsUploaded       Document[]               @relation("DocumentUploader")
+  documentsUploaded       Document[]                    @relation("DocumentUploader")
   qaItems                 QaItem[]
   qaReactions             QaReaction[]
-  dopsResident            DopsAssessment[]         @relation("DopsResident")
-  dopsAssessor            DopsAssessment[]         @relation("DopsAssessor")
-  miniCexResident         MiniCexAssessment[]      @relation("MiniCexResident")
-  miniCexAssessor         MiniCexAssessment[]      @relation("MiniCexAssessor")
+  dopsResident            DopsAssessment[]              @relation("DopsResident")
+  dopsAssessor            DopsAssessment[]              @relation("DopsAssessor")
+  miniCexResident         MiniCexAssessment[]           @relation("MiniCexResident")
+  miniCexAssessor         MiniCexAssessment[]           @relation("MiniCexAssessor")
   epaRecords              EpaRecord[]
   trainingFeedback        TrainingFeedback[]
   enrollments             CourseEnrollment[]
@@ -433,9 +459,9 @@ model User {
   notifications           Notification[]
   notificationPreferences NotificationPreference[]
   safetyEscalations       SafetyEscalation[]
-  auditEvents             AuditEvent[]             @relation("AuditActor")
-  adminActions            AdminAction[]            @relation("AdminActor")
-  dpdpaRequests           DpdpaRequest[]           @relation("DpdpaSubject")
+  auditEvents             AuditEvent[]                  @relation("AuditActor")
+  adminActions            AdminAction[]                 @relation("AdminActor")
+  dpdpaRequests           DpdpaRequest[]                @relation("DpdpaSubject")
   consentRecords          ConsentRecord[]
   gamificationPoints      GamificationPoint[]
   cmeCredits              CmeCredit[]
@@ -450,22 +476,100 @@ model User {
   liveHookResponses       LiveHookResponse[]
   presenterAlerts         PresenterAlert[]
   kirkpatrickEvaluations  KirkpatrickEvaluation[]
-  breakoutsCreated        Breakout[]               @relation("BreakoutCreator")
+  breakoutsCreated        Breakout[]                    @relation("BreakoutCreator")
   breakoutAssignments     BreakoutParticipant[]
-  recordingSharesCreated  RecordingShare[]         @relation("RecordingShareCreator")
-  recordingSharesRevoked  RecordingShare[]         @relation("RecordingShareRevoker")
+  recordingSharesCreated  RecordingShare[]              @relation("RecordingShareCreator")
+  recordingSharesRevoked  RecordingShare[]              @relation("RecordingShareRevoker")
   preQuestionsAsked       PreSessionQuestion[]
   preQuestionVotes        PreSessionQuestionVote[]
   sessionPreCases         SessionPreCase[]              @relation("SessionPreCaseAssigner")
   studyPackViews          StudyPackView[]
   objectiveAchievements   SessionObjectiveAchievement[]
+  programMemberships      ProgramMembership[]
+  activeProgram           Program?                      @relation("UserActiveProgram", fields: [activeProgramId], references: [id], onDelete: SetNull)
+  sharedNoteEdits         SharedNoteEdit[]
+  webinarRegistrations    WebinarRegistration[]
+  sessionFilesUploaded    SessionFile[]                 @relation("SessionFileUploader")
+  whiteboardSnapshots     WhiteboardSnapshot[]          @relation("WhiteboardSnapshotAuthor")
 
   @@index([email])
   @@index([role])
   @@index([status])
   @@index([programDirectorId])
   @@index([facultyMentorId])
+  @@index([activeProgramId])
   @@map("users")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Program — W6.11 Multi-tenancy entry point
+// ════════════════════════════════════════════════════════════════════════════
+// A "program" is one residency / fellowship curriculum at one institution
+// (e.g. "LVPEI MS Ophthalmology", "LVPEI Cornea Fellowship"). Tenant boundary
+// for the 6 entry-point domain tables (Cohort, TeachingSession, Topic,
+// CaseTemplate, Pearl, Course). All other domain rows are scoped transitively
+// through these (a Document attached to a session inherits the session's program).
+//
+// Users belong to programs via ProgramMembership (N:M) with an optional role
+// override per program — a faculty in MS Ophthalmology might be PD of Cornea
+// Fellowship. The role on User remains the user's "primary" role for
+// invitation / sidebar shaping; the membership role takes precedence inside
+// each program's UI.
+
+model Program {
+  id          String        @id @default(cuid())
+  slug        String        @unique
+  name        String
+  /// Free-text specialty label e.g. "Ophthalmology", "Cornea". Used for
+  /// header chips. The 16-topic ophthalmology subspecialty list lives in
+  /// Topic; specialty here is coarser (one program-wide string).
+  specialty   String?
+  /// Free-text institution name e.g. "LVPEI Hyderabad". Single string instead
+  /// of an Institution model — the second-tenancy-axis (one institution can
+  /// host multiple programs) is a v2 concern; flatten for now.
+  institution String?
+  description String?       @db.Text
+  status      ProgramStatus @default(ACTIVE)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  memberships      ProgramMembership[]
+  activeForUsers   User[]              @relation("UserActiveProgram")
+  cohorts          Cohort[]
+  teachingSessions TeachingSession[]
+  topics           Topic[]
+  caseTemplates    CaseTemplate[]
+  pearls           Pearl[]
+  courses          Course[]
+
+  @@index([status])
+  @@map("programs")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// ProgramMembership — User × Program with optional role override
+// ════════════════════════════════════════════════════════════════════════════
+// Same person can be RESIDENT in MS Ophth, EXTERNAL_LEARNER in Cornea
+// Fellowship, FACULTY in Glaucoma Fellowship. `role` here null = use User.role.
+
+model ProgramMembership {
+  id        String   @id @default(cuid())
+  userId    String
+  programId String
+  /// Optional per-program role override. Null = inherit User.role. Service
+  /// layer at active-program switch time uses (override ?? user.role) to
+  /// shape sidebars and route guards inside that program.
+  role      Role?
+  addedAt   DateTime @default(now())
+  addedBy   String?
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, programId])
+  @@index([userId])
+  @@index([programId])
+  @@map("program_memberships")
 }
 
 // NextAuth account links (OAuth or credentials provider link)
@@ -516,48 +620,48 @@ model VerificationToken {
 }
 
 model Invitation {
-  id              String           @id @default(cuid())
-  email           String
-  fullName        String?
-  mobile          String?
-  mciRegNumber    String?
-  role            Role
-  subspecialty    String?
-  department      String?
-  yearOfResidency Int?
-  moduleOverrides Json?
+  id                String           @id @default(cuid())
+  email             String
+  fullName          String?
+  mobile            String?
+  mciRegNumber      String?
+  role              Role
+  subspecialty      String?
+  department        String?
+  yearOfResidency   Int?
+  moduleOverrides   Json?
   /// Optional Program Director uplink applied on accept when role=FACULTY.
   /// Service layer enforces ref.role=PROGRAM_DIRECTOR. ON DELETE SET NULL so
   /// removing a PD doesn't cascade-revoke pending faculty invites.
   programDirectorId String?
   /// Optional Faculty mentor uplink applied on accept when role=RESIDENT.
   /// Service enforces ref.role=FACULTY. ON DELETE SET NULL.
-  facultyMentorId String?
+  facultyMentorId   String?
   /// Optional cohort assignment applied on accept when role=RESIDENT.
   /// Becomes a CohortMember row at acceptance. ON DELETE SET NULL.
-  cohortId        String?
+  cohortId          String?
   /// Optional pre-set profile photo. Carried over to User.avatarUrl on accept.
-  avatarUrl       String?
+  avatarUrl         String?
   /// Optional gender pre-fill. Carried over to UserProfile.gender on accept.
-  gender          String?
-  token           String           @unique
-  status          InvitationStatus @default(PENDING)
-  invitedById     String
-  acceptedAt      DateTime?
-  acceptedUserId  String?
-  expiresAt       DateTime
-  revokedAt       DateTime?
-  revokedReason   String?
-  lastResentAt    DateTime?
-  resendCount     Int              @default(0)
-  metadata        Json?
-  createdAt       DateTime         @default(now())
-  updatedAt       DateTime         @updatedAt
+  gender            String?
+  token             String           @unique
+  status            InvitationStatus @default(PENDING)
+  invitedById       String
+  acceptedAt        DateTime?
+  acceptedUserId    String?
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  revokedReason     String?
+  lastResentAt      DateTime?
+  resendCount       Int              @default(0)
+  metadata          Json?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
 
-  invitedBy        User    @relation("InvitedBy", fields: [invitedById], references: [id])
-  programDirector  User?   @relation("InvitationPD", fields: [programDirectorId], references: [id], onDelete: SetNull)
-  facultyMentor    User?   @relation("InvitationMentor", fields: [facultyMentorId], references: [id], onDelete: SetNull)
-  cohort           Cohort? @relation("InvitationCohort", fields: [cohortId], references: [id], onDelete: SetNull)
+  invitedBy       User    @relation("InvitedBy", fields: [invitedById], references: [id])
+  programDirector User?   @relation("InvitationPD", fields: [programDirectorId], references: [id], onDelete: SetNull)
+  facultyMentor   User?   @relation("InvitationMentor", fields: [facultyMentorId], references: [id], onDelete: SetNull)
+  cohort          Cohort? @relation("InvitationCohort", fields: [cohortId], references: [id], onDelete: SetNull)
 
   @@index([email])
   @@index([status])
@@ -636,15 +740,20 @@ model UserRoleHistory {
 
 model Topic {
   id            String   @id @default(cuid())
-  slug          String   @unique
+  slug          String
   name          String
   subspecialty  String? // Cornea, Glaucoma, Retina, Pediatric, etc.
   description   String?
   parentTopicId String?
   displayOrder  Int      @default(0)
+  /// W6.11 tenancy. Topic curriculum is per-program — Cornea Fellowship
+  /// has different topics than MS Ophthalmology. Slug is unique within
+  /// program (the global @unique was relaxed for tenancy).
+  programId     String
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
+  program       Program        @relation(fields: [programId], references: [id])
   parent        Topic?         @relation("TopicHierarchy", fields: [parentTopicId], references: [id])
   children      Topic[]        @relation("TopicHierarchy")
   cases         Case[]
@@ -653,6 +762,8 @@ model Topic {
   courses       Course[]
   atlasImages   AtlasImage[]
 
+  @@unique([programId, slug])
+  @@index([programId])
   @@index([parentTopicId])
   @@index([subspecialty])
   @@map("topics")
@@ -735,6 +846,8 @@ model CaseTemplate {
   condition                  String
   specialty                  String
   topicId                    String?
+  /// W6.11 tenancy. Case bank is per-program.
+  programId                  String
   bloomsLevel                Int            @default(3) // 1..6
   difficulty                 CaseDifficulty @default(INTERMEDIATE)
   estimatedMinutes           Int            @default(20)
@@ -751,10 +864,12 @@ model CaseTemplate {
   createdAt                  DateTime       @default(now())
   updatedAt                  DateTime       @updatedAt
 
+  program         Program          @relation(fields: [programId], references: [id])
   topic           Topic?           @relation(fields: [topicId], references: [id])
   cases           Case[]
   sessionPreCases SessionPreCase[]
 
+  @@index([programId])
   @@index([specialty])
   @@index([difficulty])
   @@index([topicId])
@@ -933,6 +1048,8 @@ model Pearl {
   title             String
   body              String    @db.Text
   topicId           String?
+  /// W6.11 tenancy. Pearls library is per-program.
+  programId         String
   sourceType        String // 'recording' | 'document' | 'manual' | 'ai_extracted'
   sourceRecordingId String?
   sourceDocumentId  String?
@@ -944,9 +1061,11 @@ model Pearl {
   createdAt         DateTime  @default(now())
   updatedAt         DateTime  @updatedAt
 
-  topic Topic?      @relation(fields: [topicId], references: [id])
-  likes PearlLike[]
+  program Program     @relation(fields: [programId], references: [id])
+  topic   Topic?      @relation(fields: [topicId], references: [id])
+  likes   PearlLike[]
 
+  @@index([programId])
   @@index([topicId])
   @@index([approved])
   @@index([sourceRecordingId])
@@ -1297,7 +1416,15 @@ model TeachingSession {
   recordingEnabled    Boolean               @default(true)
   consentRequired     Boolean               @default(true)
   hlsBroadcast        Boolean               @default(false)
+  /// W7 Webinar mode. When true, sessions surface a public registration page
+  /// (`/webinar/[id]/register`) and registrants are auto-issued a SessionInvite
+  /// granting VIEWER role. Distinct from regular INVITE_ONLY sessions which
+  /// require admin-managed invitations.
+  isWebinar           Boolean               @default(false)
   topicId             String?
+  /// W6.11 tenancy. Sessions are owned by a program. Set at create time
+  /// from the proposer's activeProgramId; cohort.programId must match.
+  programId           String
   tags                String[]
   metadata            Json?
   // Structured learning objectives — array of { id, text, blooms, epaTag? }.
@@ -1308,15 +1435,20 @@ model TeachingSession {
   createdAt           DateTime              @default(now())
   updatedAt           DateTime              @updatedAt
 
-  host                   User                           @relation("SessionHost", fields: [hostId], references: [id])
-  proposer               User                           @relation("SessionProposer", fields: [proposedBy], references: [id])
-  approver               User?                          @relation("SessionApprover", fields: [approvedBy], references: [id])
-  cohort                 Cohort?                        @relation(fields: [cohortId], references: [id])
-  parentSession          TeachingSession?               @relation("SessionSeries", fields: [parentSessionId], references: [id])
-  childSessions          TeachingSession[]              @relation("SessionSeries")
+  program                Program                       @relation(fields: [programId], references: [id])
+  host                   User                          @relation("SessionHost", fields: [hostId], references: [id])
+  proposer               User                          @relation("SessionProposer", fields: [proposedBy], references: [id])
+  approver               User?                         @relation("SessionApprover", fields: [approvedBy], references: [id])
+  cohort                 Cohort?                       @relation(fields: [cohortId], references: [id])
+  parentSession          TeachingSession?              @relation("SessionSeries", fields: [parentSessionId], references: [id])
+  childSessions          TeachingSession[]             @relation("SessionSeries")
   participants           SessionParticipant[]
   chatMessages           SessionChatMessage[]
   recording              Recording?
+  files                  SessionFile[]
+  sharedNote             SharedNote?
+  whiteboard             Whiteboard?
+  webinarRegistrations   WebinarRegistration[]
   documentLinks          DocumentSessionLink[]
   bans                   SessionBan[]
   auditEvents            SessionAuditEvent[]
@@ -1334,6 +1466,7 @@ model TeachingSession {
   studyPackViews         StudyPackView[]
   objectiveAchievements  SessionObjectiveAchievement[]
 
+  @@index([programId])
   @@index([hostId])
   @@index([proposedBy])
   @@index([approvalStatus])
@@ -1366,14 +1499,21 @@ model SessionParticipant {
 }
 
 model SessionChatMessage {
-  id        String   @id @default(cuid())
-  sessionId String
-  userId    String
-  content   String   @db.Text
-  createdAt DateTime @default(now())
+  id           String   @id @default(cuid())
+  sessionId    String
+  userId       String
+  content      String   @db.Text
+  /// Optional attachment uploaded via /api/classroom/sessions/[id]/files. The
+  /// attachment row carries its own access controls + S3 key — chat just
+  /// references it so deleting a message hides the attachment from chat
+  /// without orphaning the underlying file (a deleted message keeps its
+  /// attachment row for the recording replay).
+  attachmentId String?  @unique
+  createdAt    DateTime @default(now())
 
-  session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    User            @relation(fields: [userId], references: [id])
+  session    TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user       User            @relation(fields: [userId], references: [id])
+  attachment SessionFile?    @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
 
   @@index([sessionId, createdAt])
   @@map("session_chat_messages")
@@ -1412,16 +1552,21 @@ model Cohort {
   /// referenced user has role=FACULTY. ON DELETE SET NULL so a faculty
   /// departure / soft-delete leaves the cohort intact, just unmapped.
   facultyId    String?
+  /// W6.11 tenancy. A cohort belongs to one program — "PGY-1 Residents
+  /// 2026–27" of MS Ophthalmology, distinct from Cornea Fellowship cohorts.
+  programId    String
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   deletedAt    DateTime?
 
+  program     Program           @relation(fields: [programId], references: [id])
   creator     User              @relation("CohortCreator", fields: [createdBy], references: [id])
   faculty     User?             @relation("CohortFaculty", fields: [facultyId], references: [id], onDelete: SetNull)
   members     CohortMember[]
   sessions    TeachingSession[]
   invitations Invitation[]      @relation("InvitationCohort")
 
+  @@index([programId])
   @@index([status])
   @@index([createdBy])
   @@index([facultyId])
@@ -1529,6 +1674,12 @@ model Recording {
   transcribeFinishedAt DateTime?
   aiProcessStartedAt   DateTime?
   aiProcessFinishedAt  DateTime?
+  /// Wall-clock instant the LiveKit egress started capturing. The recording
+  /// viewer uses this as t=0 to compute SessionAuditEvent.tMs offsets when
+  /// replaying reactions/notes/files in sync with playback. Distinct from
+  /// `transcodeStartedAt` (post-egress) and `TeachingSession.actualStart`
+  /// (room open). Falls back to `actualStart` when null for legacy rows.
+  startedAtRoom        DateTime?
   retryCount           Int             @default(0)
   failureReason        String?         @db.Text
   expungedAt           DateTime?
@@ -1538,12 +1689,13 @@ model Recording {
   createdAt            DateTime        @default(now())
   updatedAt            DateTime        @updatedAt
 
-  session     TeachingSession       @relation(fields: [sessionId], references: [id])
-  transcripts Transcript[]
-  qaItems     QaItem[]
-  clips       Clip[]
-  stages      RecordingStageEvent[]
-  shares      RecordingShare[]
+  session       TeachingSession       @relation(fields: [sessionId], references: [id])
+  transcripts   Transcript[]
+  qaItems       QaItem[]
+  clips         Clip[]
+  stages        RecordingStageEvent[]
+  shares        RecordingShare[]
+  deckForgeJobs DeckForgeJob[]
 
   @@index([status])
   @@index([pipelineStage])
@@ -1720,7 +1872,12 @@ model DocumentSessionLink {
 
 model DeckForgeJob {
   id              String          @id @default(cuid())
-  documentId      String
+  // Source — either a Document (PDF/PPT/DOC/notes) or a Recording transcript.
+  // At least one of (documentId, recordingId) must be set; both may be set
+  // when slides are forged from a session that also has uploaded materials.
+  documentId      String?
+  recordingId     String?
+  sourceKind      DeckForgeSource @default(DOCUMENT)
   requestedById   String
   status          DeckForgeStatus @default(QUEUED)
   inputTitle      String?
@@ -1736,12 +1893,41 @@ model DeckForgeJob {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  document    Document @relation(fields: [documentId], references: [id])
-  requestedBy User     @relation(fields: [requestedById], references: [id])
+  document    Document?  @relation(fields: [documentId], references: [id])
+  recording   Recording? @relation(fields: [recordingId], references: [id])
+  requestedBy User       @relation(fields: [requestedById], references: [id])
+  slides      Slide[]
 
   @@index([documentId])
+  @@index([recordingId])
   @@index([status])
+  @@index([requestedById])
   @@map("deck_forge_jobs")
+}
+
+// One row per slide produced by a DeckForgeJob. Slides are first-class:
+// editable, reorderable, and the source of truth for both the in-app
+// presenter and the .pptx export. PPT files are an export, never canonical.
+model Slide {
+  id              String      @id @default(cuid())
+  deckForgeJobId  String
+  order           Int // 0-based, contiguous within a deck
+  layout          SlideLayout @default(TITLE_BULLETS)
+  title           String      @db.Text
+  bullets         String[] // top-level bullet points
+  speakerNotes    String?     @db.Text
+  // [{ documentId?, recordingId?, transcriptStart?, transcriptEnd?, page? }]
+  sourceCitations Json?
+  // Optional accent color override (hex, no '#'); else inherits theme.
+  accentHex       String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  job DeckForgeJob @relation(fields: [deckForgeJobId], references: [id], onDelete: Cascade)
+
+  @@unique([deckForgeJobId, order])
+  @@index([deckForgeJobId])
+  @@map("slides")
 }
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1904,23 +2090,30 @@ model RagReindexJob {
 
 model Course {
   id               String       @id @default(cuid())
-  slug             String       @unique
+  slug             String
   title            String
   description      String?      @db.Text
   track            ScoringHead // HEAD / HEART / HANDS
   format           CourseFormat @default(MIXED)
   topicId          String?
+  /// W6.11 tenancy. Courses are per-program. Slug uniqueness relaxed from
+  /// global to per-program — same "empathy-basics" slug can exist in two
+  /// programs without collision.
+  programId        String
   estimatedMinutes Int?
   prerequisites    String[]
   active           Boolean      @default(true)
   createdAt        DateTime     @default(now())
   updatedAt        DateTime     @updatedAt
 
+  program     Program            @relation(fields: [programId], references: [id])
   topic       Topic?             @relation(fields: [topicId], references: [id])
   modules     CourseModule[]
   enrollments CourseEnrollment[]
   completions CourseCompletion[]
 
+  @@unique([programId, slug])
+  @@index([programId])
   @@index([track])
   @@index([topicId])
   @@map("courses")
@@ -2481,15 +2674,24 @@ model SilenceTestRun {
 model SessionAuditEvent {
   id           String   @id @default(cuid())
   sessionId    String
-  eventType    String // 'JOIN' | 'LEAVE' | 'KICK' | 'SCREEN_SHARE_START' | 'RECORDING_START' | ...
+  eventType    String // see SESSION_AUDIT in services/session-audit.ts for the canonical set
   actorId      String?
   targetUserId String?
   details      Json?
+  /// Server-assigned monotonic offset from Recording.startedAtRoom (or
+  /// TeachingSession.actualStart fallback) in ms, used by the recording
+  /// viewer to align replay overlays (reactions, spotlight, note-edits, file
+  /// shares) with the video timeline. Negative values are kept for audit but
+  /// dropped from replay. Null for moderation/lifecycle events that don't
+  /// need replay alignment (JOIN, LEAVE, KICK, etc.).
+  tMs          Int?
   createdAt    DateTime @default(now())
 
   session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId])
+  @@index([sessionId, eventType, createdAt])
+  @@index([sessionId, tMs])
   @@map("session_audit_events")
 }
 
@@ -2978,4 +3180,193 @@ model SessionObjectiveAchievement {
   @@index([sessionId, objectiveId])
   @@index([userId])
   @@map("session_objective_achievements")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// W7 — Collaboration surfaces (notes, files, webinar registrations)
+// ════════════════════════════════════════════════════════════════════════════
+// Replay-able transient events (reactions, spotlight, note-edit beacons, file-
+// share beacons, blur/noise/PiP toggles, webinar joins) are NOT modelled as a
+// new table. They are written to the existing `SessionAuditEvent` model
+// extended with a nullable `tMs` (offset from recording start, ms) so the
+// recording-viewer can align replay overlays with the video timeline. The
+// canonical set of `eventType` strings lives in
+// `services/session-audit.ts:SESSION_AUDIT` and the new types added in W7 are
+// flagged "// REPLAY" in the constant block.
+
+// One shared note per session (faculty + co-host edit, residents read or
+// co-edit per `editableByResidents`). Stored as a single content blob plus an
+// append-only edit log so the recording viewer can replay how the note grew
+// over time. We deliberately use a simple last-writer-wins model with
+// optimistic concurrency (`version`) instead of a full CRDT — the panel is
+// auto-saved every few seconds, conflicts are rare in practice, and tldraw-
+// style multiplayer wasn't worth dragging in for a textarea.
+model SharedNote {
+  id                  String   @id @default(cuid())
+  sessionId           String   @unique
+  content             String   @db.Text
+  version             Int      @default(0)
+  editableByResidents Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  session TeachingSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  edits   SharedNoteEdit[]
+
+  @@map("shared_notes")
+}
+
+// Edit log for the shared note. Each row captures the post-edit snapshot so
+// the recording-viewer can scrub through how the note evolved. `delta` is the
+// diff for compact transmission over the data channel, `snapshot` is the
+// canonical full text at that version. Old edits are retained — pruning is a
+// future op once volume warrants.
+model SharedNoteEdit {
+  id        String   @id @default(cuid())
+  noteId    String
+  authorId  String
+  version   Int
+  delta     Json
+  snapshot  String   @db.Text
+  createdAt DateTime @default(now())
+
+  note   SharedNote @relation(fields: [noteId], references: [id], onDelete: Cascade)
+  author User       @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@unique([noteId, version])
+  @@index([noteId, createdAt])
+  @@map("shared_note_edits")
+}
+
+// File attachment uploaded inside a live session — either as a chat
+// attachment (referenced from SessionChatMessage.attachmentId) or as a
+// host-published handout. Files live in the same S3 bucket as recordings
+// under `session-files/<sessionId>/<id>/<filename>` and are exposed to the
+// recording viewer via a SessionAuditEvent FILE_SHARE row, so a learner
+// scrubbing the timeline sees the file appear at the moment it was shared.
+//
+// Access control: everyone with `getEffectiveSessionRole != null` can read;
+// only PARTICIPANT/CO_HOST/HOST can upload. Files survive session deletion
+// via the Cascade on session — when the session is hard-deleted, files go
+// with it (S3 cleanup is the worker's job, not modelled here).
+model SessionFile {
+  id           String   @id @default(cuid())
+  sessionId    String
+  uploadedById String
+  name         String
+  mimeType     String
+  sizeBytes    Int
+  s3Key        String   @unique
+  /// SHA-256 of the uploaded bytes. Set after presigned upload completes via
+  /// the /files/[id]/finalize endpoint. Null until then — the chat UI hides
+  /// attachments without a checksum.
+  sha256       String?
+  createdAt    DateTime @default(now())
+
+  session     TeachingSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  uploadedBy  User                @relation("SessionFileUploader", fields: [uploadedById], references: [id], onDelete: Cascade)
+  chatMessage SessionChatMessage?
+
+  @@index([sessionId, createdAt])
+  @@index([uploadedById])
+  @@map("session_files")
+}
+
+// Public-facing webinar registrations. Created when isWebinar=true and a
+// visitor fills the /webinar/[id]/register form. We keep this table separate
+// from SessionInvite/SessionAdmission because webinar registrants:
+//   • may not have a User row at registration time (auto-provisioned on join),
+//   • carry marketing-style fields (organisation, role title) that don't
+//     belong on the User profile,
+//   • need a confirmation email + ICS attachment delivered out-of-band.
+//
+// On confirmation, a SessionInvite is created (linking to the auto-provisioned
+// User) granting VIEWER role; on session start, the invite is the auth gate
+// for the webinar viewer's LiveKit token.
+model WebinarRegistration {
+  id           String    @id @default(cuid())
+  sessionId    String
+  email        String
+  name         String
+  organisation String?
+  roleTitle    String?
+  /// Set once the registrant clicks the email confirmation link. The token is
+  /// random and single-use; once confirmed the invite is created and the user
+  /// is auto-provisioned (or matched by existing email).
+  confirmToken String    @unique
+  confirmedAt  DateTime?
+  /// Linked to a User row once the webinar registrant signs in or is auto-
+  /// provisioned. Nullable for registrations that never confirmed.
+  userId       String?
+  /// Free-text source ("twitter", "linkedin", "newsletter") for attribution.
+  source       String?
+  /// True after consent confirmation (privacy + recording). Required to
+  /// confirm the registration; the registration row is kept either way for
+  /// audit / abuse signals (e.g. spam form submissions).
+  consented    Boolean   @default(false)
+  attendedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user    User?           @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([sessionId, email])
+  @@index([sessionId, confirmedAt])
+  @@index([email])
+  @@map("webinar_registrations")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// W7 Phase 2 — Whiteboard
+// ════════════════════════════════════════════════════════════════════════════
+// One Whiteboard per session, plus an append-only WhiteboardSnapshot log.
+//
+// Sync model is intentionally simple snapshot-based: when the host edits the
+// canvas, we (a) persist a new snapshot every few seconds of idle change and
+// (b) broadcast that snapshot over the LiveKit data channel so participants
+// re-load their tldraw store from it. We considered tldraw's CRDT-based
+// multiplayer but its sync server is paid + the classroom flow has a single
+// editor (the faculty); concurrent collaborative editing is Phase 3 if the
+// product calls for it.
+//
+// Snapshots double as the recording-viewer replay source — each row carries
+// a `tMs` offset (matching SessionAuditEvent.tMs semantics) so the recording
+// timeline can scrub through how the board evolved.
+
+model Whiteboard {
+  id                  String   @id @default(cuid())
+  sessionId           String   @unique
+  /// Hosts can flip this on to let residents draw too. Defaults to host-only
+  /// because uncontrolled editing in a classroom of 30 quickly turns into
+  /// scribble-storm; the host opts in when running a workshop session.
+  editableByResidents Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  session   TeachingSession      @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  snapshots WhiteboardSnapshot[]
+
+  @@map("whiteboards")
+}
+
+model WhiteboardSnapshot {
+  id           String   @id @default(cuid())
+  whiteboardId String
+  authorId     String
+  /// tldraw v5 store snapshot (call `editor.store.getSnapshot()`). Stored as
+  /// raw Json — we never rehydrate on the server, just hand it back to the
+  /// next client so they can `editor.store.loadSnapshot(...)`.
+  snapshot     Json
+  /// Server-assigned offset from Recording.startedAtRoom (or actualStart
+  /// fallback) in ms. Used by the recording viewer to scrub through history.
+  tMs          Int?
+  createdAt    DateTime @default(now())
+
+  whiteboard Whiteboard @relation(fields: [whiteboardId], references: [id], onDelete: Cascade)
+  author     User       @relation("WhiteboardSnapshotAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@index([whiteboardId, createdAt])
+  @@index([whiteboardId, tMs])
+  @@map("whiteboard_snapshots")
 }

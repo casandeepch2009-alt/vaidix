@@ -114,6 +114,11 @@ export const AUDIT_EVENTS = {
   DOCUMENT_TAGGED_TO_SESSION: 'document.tagged_to_session',
   DOCUMENT_DELETED: 'document.deleted',
   DOCUMENT_ANALYZED: 'document.analyzed',
+  DECK_FORGE_REQUESTED: 'deck_forge.requested',
+  DECK_FORGE_COMPLETED: 'deck_forge.completed',
+  DECK_FORGE_FAILED: 'deck_forge.failed',
+  DECK_SLIDE_UPDATED: 'deck.slide.updated',
+  DECK_EXPORTED_PPTX: 'deck.exported.pptx',
 
   // Stream D — Engagement / Hooks / Alerts
   LIVE_HOOK_CREATED: 'live_hook.created',

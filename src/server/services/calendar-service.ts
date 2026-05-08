@@ -40,13 +40,15 @@ export interface CalendarEvent {
 // ADMIN / PD bypass approvalStatus too (they need to see drafts/pending in
 // the calendar to approve them); other roles see APPROVED only.
 // ----------------------------------------------------------------------------
-async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: Date) {
-  const visibility = await buildSessionVisibilityWhere({ userId, role });
+async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: Date, activeProgramId?: string) {
+  const visibility = await buildSessionVisibilityWhere({ userId, role, activeProgramId });
   const approvalGate = buildApprovalGate({ userId, role });
 
   // Compose under `AND` so the two independent OR-clauses (time-window vs.
   // visibility) don't collide on a shared top-level `OR` key.
   return {
+    // W6.11 — narrow to the actor's active program. Defensive when missing.
+    ...(activeProgramId ? { programId: activeProgramId } : {}),
     deletedAt: null,
     scheduledStart: { lt: to },
     AND: [
@@ -151,9 +153,10 @@ export async function listCalendarEvents(
   userId: string,
   role: Role,
   from: Date,
-  to: Date
+  to: Date,
+  activeProgramId?: string,
 ): Promise<CalendarEvent[]> {
-  const where = await buildVisibilityWhere(userId, role, from, to);
+  const where = await buildVisibilityWhere(userId, role, from, to, activeProgramId);
   const sessions = await db.teachingSession.findMany({
     where,
     select: {

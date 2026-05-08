@@ -15,7 +15,11 @@
 //     app to function: 4 levels, 16 topics, 1 admin user, retention policies,
 //     feature flags. NO demo users, NO mock content.
 
-import { PrismaClient, Role, UserStatus } from '@prisma/client';
+import { PrismaClient, Role, UserStatus, ProgramStatus } from '@prisma/client';
+
+// W6.11: stable cuid-shape ID matched to the migration's INSERT so re-seeding
+// after a fresh migrate-deploy upserts onto the same row.
+const DEFAULT_PROGRAM_ID = 'prg_default_lvpei_ms';
 import bcrypt from 'bcryptjs';
 import path from 'path';
 import fs from 'fs';
@@ -106,6 +110,40 @@ async function main() {
   const passwordHash     = await bcrypt.hash(DEFAULT_PASSWORD, 12);
   const demoPasswordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
 
+  // ─── 0. PROGRAMS (W6.11 multi-tenancy) ────────────────────────────────────
+  // Seeded before everything else because Cohort/TeachingSession/Topic/
+  // CaseTemplate/Pearl/Course all FK into program.
+  console.log('🏛️  Seeding Programs...');
+  await prisma.program.upsert({
+    where: { id: DEFAULT_PROGRAM_ID },
+    update: {},
+    create: {
+      id:          DEFAULT_PROGRAM_ID,
+      slug:        'lvpei-ms-ophthalmology',
+      name:        'LVPEI MS Ophthalmology',
+      specialty:   'Ophthalmology',
+      institution: 'L V Prasad Eye Institute',
+      description: 'Three-year MS Ophthalmology residency at L V Prasad Eye Institute.',
+      status:      ProgramStatus.ACTIVE,
+    },
+  });
+  if (SEED_DEMO) {
+    // Second demo program so the switcher has something to switch *to*.
+    await prisma.program.upsert({
+      where: { slug: 'lvpei-cornea-fellowship' },
+      update: {},
+      create: {
+        slug:        'lvpei-cornea-fellowship',
+        name:        'LVPEI Cornea Fellowship',
+        specialty:   'Cornea',
+        institution: 'L V Prasad Eye Institute',
+        description: 'One-year long-term cornea fellowship — separate EPA framework, separate competency map.',
+        status:      ProgramStatus.ACTIVE,
+      },
+    });
+  }
+  console.log(`   ✓ ${SEED_DEMO ? 2 : 1} program(s)`);
+
   // ─── 1. LEVELS ────────────────────────────────────────────────────────────
   console.log('📊 Seeding Levels...');
   for (const l of LEVELS) {
@@ -117,13 +155,13 @@ async function main() {
   }
   console.log(`   ✓ ${LEVELS.length} levels`);
 
-  // ─── 2. TOPICS ────────────────────────────────────────────────────────────
+  // ─── 2. TOPICS (program-scoped — seed into default program) ───────────────
   console.log('📚 Seeding Topics...');
   for (const t of TOPICS) {
     await prisma.topic.upsert({
-      where: { slug: t.slug },
+      where: { programId_slug: { programId: DEFAULT_PROGRAM_ID, slug: t.slug } },
       update: {},
-      create: t,
+      create: { ...t, programId: DEFAULT_PROGRAM_ID },
     });
   }
   console.log(`   ✓ ${TOPICS.length} topics`);
@@ -180,17 +218,18 @@ async function main() {
   const usersToSeed = SEED_DEMO ? [adminUser, ...demoNonAdminUsers] : [adminUser];
 
   for (const u of usersToSeed) {
-    await prisma.user.upsert({
+    const userRow = await prisma.user.upsert({
       where: { email: u.email },
-      update: { mobile: u.mobile, passwordHash: u.hash },
+      update: { mobile: u.mobile, passwordHash: u.hash, activeProgramId: DEFAULT_PROGRAM_ID },
       create: {
-        email:          u.email,
-        mobile:         u.mobile,
-        name:           u.name,
-        role:           u.role,
-        status:         UserStatus.ACTIVE,
-        passwordHash:   u.hash,
+        email:           u.email,
+        mobile:          u.mobile,
+        name:            u.name,
+        role:            u.role,
+        status:          UserStatus.ACTIVE,
+        passwordHash:    u.hash,
         emailVerifiedAt: new Date(),
+        activeProgramId: DEFAULT_PROGRAM_ID,
         profile: {
           create: {
             affiliation: u.affiliation,
@@ -202,7 +241,37 @@ async function main() {
         stats:       { create: {} },
       },
     });
+    // W6.11: ensure every seeded user is a member of the default program.
+    await prisma.programMembership.upsert({
+      where:  { userId_programId: { userId: userRow.id, programId: DEFAULT_PROGRAM_ID } },
+      update: {},
+      create: { userId: userRow.id, programId: DEFAULT_PROGRAM_ID },
+    });
     console.log(`   ✓ ${u.mobile}  ${u.name.padEnd(24)} [${u.role}]`);
+  }
+
+  // W6.11: seed the demo Cornea Fellowship memberships so the switcher has
+  // something interesting to demo. Sandeep (admin) + Rajeev (PD) get both
+  // programs; Meera (faculty) is FACULTY in MS, FACULTY override in Cornea.
+  if (SEED_DEMO) {
+    const cornea = await prisma.program.findUnique({ where: { slug: 'lvpei-cornea-fellowship' } });
+    if (cornea) {
+      const multiProgramEmails = [
+        { email: 'sandeep@vaidix.local',       role: null },
+        { email: 'rajeev.nair@vaidix.local',   role: Role.PROGRAM_DIRECTOR },
+        { email: 'meera.krishnan@vaidix.local', role: Role.FACULTY },
+      ];
+      for (const m of multiProgramEmails) {
+        const u = await prisma.user.findUnique({ where: { email: m.email } });
+        if (!u) continue;
+        await prisma.programMembership.upsert({
+          where:  { userId_programId: { userId: u.id, programId: cornea.id } },
+          update: { role: m.role },
+          create: { userId: u.id, programId: cornea.id, role: m.role },
+        });
+      }
+      console.log(`   ✓ ${multiProgramEmails.length} demo users granted Cornea Fellowship membership`);
+    }
   }
 
   // ─── 4. ROLE MAPPINGS (Faculty → PD, Cohort → Faculty mentor) ─────────────
@@ -241,6 +310,7 @@ async function main() {
               academicYear: '2026–27',
               createdBy:    sandeep.id,
               facultyId:    meera.id,
+              programId:    DEFAULT_PROGRAM_ID,
             },
           });
       await prisma.cohortMember.upsert({
@@ -270,6 +340,7 @@ async function main() {
           title: p.question?.slice(0, 200) ?? 'Pearl',
           body: `${p.question}\n\n${p.answer}\n\n${p.mechanism ?? ''}`,
           topicId: topic.id,
+          programId: DEFAULT_PROGRAM_ID,
           sourceType: 'manual',
           extractedByAi: false,
           approved: true,
@@ -345,6 +416,7 @@ async function main() {
         condition: c.condition,
         specialty: c.specialty,
         topicId: topic?.id ?? null,
+        programId: DEFAULT_PROGRAM_ID,
         bloomsLevel: c.bloomsLevel,
         difficulty,
         estimatedMinutes: c.estimatedMinutes,
@@ -375,7 +447,7 @@ async function main() {
     ];
     for (const c of sampleCourses) {
       await prisma.course.upsert({
-        where: { slug: c.slug },
+        where: { programId_slug: { programId: DEFAULT_PROGRAM_ID, slug: c.slug } },
         update: {},
         create: {
           slug: c.slug,
@@ -384,6 +456,7 @@ async function main() {
           track: c.track,
           format: 'MIXED',
           estimatedMinutes: 120,
+          programId: DEFAULT_PROGRAM_ID,
         },
       });
     }

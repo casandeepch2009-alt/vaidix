@@ -90,7 +90,12 @@ export async function findHostConflicts(opts: {
 // Create session (PD drafts)
 // Auto-approve when the proposer is also the host.
 // ----------------------------------------------------------------------------
-export async function createSession(input: CreateSessionInput, proposedBy: string, proposerRole: Role) {
+export async function createSession(
+  input: CreateSessionInput,
+  proposedBy: string,
+  proposerRole: Role,
+  programId: string,
+) {
   const start = new Date(input.scheduledStart);
   const end = new Date(input.scheduledEnd);
 
@@ -114,10 +119,15 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
     throw new Error('HOST_NOT_FACULTY');
   }
 
-  // Cohort / invitee validation
+  // W6.11 — cohort must belong to the same program; defense-in-depth against
+  // a PD with two memberships submitting a Cornea cohort id while active in MS.
   if (input.visibility === SessionVisibility.COHORT && input.cohortId) {
-    const cohort = await db.cohort.findUnique({ where: { id: input.cohortId }, select: { id: true } });
+    const cohort = await db.cohort.findUnique({
+      where: { id: input.cohortId },
+      select: { id: true, programId: true },
+    });
     if (!cohort) throw new Error('COHORT_NOT_FOUND');
+    if (cohort.programId !== programId) throw new Error('COHORT_PROGRAM_MISMATCH');
   }
 
   // Auto-approve when proposer == host
@@ -142,6 +152,7 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
         sessionType: input.sessionType,
         hostId: input.hostId,
         proposedBy,
+        programId,
         status: SessionStatus.SCHEDULED,
         approvalStatus,
         approvedBy: autoApprove ? proposedBy : null,
@@ -337,7 +348,17 @@ export async function rescheduleSession(
     },
   });
   if (!session) throw new Error('SESSION_NOT_FOUND');
-  if (session.proposedBy !== actorId && actorRole !== Role.ADMIN) throw new Error('NOT_PROPOSER');
+  // Host of the session may also reschedule their own slot — the edit-session
+  // form surfaces date/time edits for hosts, and refusing them here forces an
+  // awkward "ask the original proposer to move it" round-trip. Auto-approve
+  // logic below already short-circuits for the host case.
+  if (
+    session.proposedBy !== actorId &&
+    session.hostId !== actorId &&
+    actorRole !== Role.ADMIN
+  ) {
+    throw new Error('NOT_PROPOSER');
+  }
   if (session.approvalStatus === SessionApprovalStatus.CANCELLED) throw new Error('ALREADY_CANCELLED');
 
   const start = new Date(input.scheduledStart);
@@ -813,6 +834,7 @@ export async function updateSession(
       recordingEnabled: input.recordingEnabled ?? undefined,
       consentRequired: input.consentRequired ?? undefined,
       tags: input.tags ?? undefined,
+      topicId: input.topicId === undefined ? undefined : input.topicId,
       ...objectivesPatch,
       ...metadataPatch,
     },

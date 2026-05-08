@@ -2,17 +2,17 @@
 import {
   jsonOk,
   jsonError,
-  requireAuth,
+  requireAuthWithProgram,
   handleUnexpected,
 } from '@/server/services/api-helpers';
 import { getCaseTemplate, CasesError } from '@/server/services/cases/cases-service';
 
 export async function GET(_req: Request, ctx: { params: Promise<{ caseTemplateId: string }> }) {
   try {
-    const gate = await requireAuth();
+    const gate = await requireAuthWithProgram();
     if (!gate.ok) return gate.response;
     const { caseTemplateId } = await ctx.params;
-    const t = await getCaseTemplate(caseTemplateId);
+    const t = await getCaseTemplate(caseTemplateId, gate.user.activeProgramId);
     return jsonOk(t);
   } catch (err) {
     if (err instanceof CasesError && err.code === 'NOT_FOUND') {

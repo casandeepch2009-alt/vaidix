@@ -4,7 +4,7 @@
 // Returns the current user's next scheduled sessions in a Training[] shape
 // suited to the dashboard's UpcomingCalendar widget.
 
-import { jsonOk, requireAuth, handleUnexpected } from '@/server/services/api-helpers';
+import { jsonOk, requireAuthWithProgram, handleUnexpected } from '@/server/services/api-helpers';
 import { db } from '@/lib/db';
 import { SessionStatus, SessionType } from '@prisma/client';
 import { buildApprovalGate, buildSessionVisibilityWhere } from '@/server/services/sessions/visibility';
@@ -53,17 +53,27 @@ function formatTime(d: Date): string {
 
 export async function GET() {
   try {
-    const gate = await requireAuth();
+    // W6.11 — dashboard upcoming is tenant-scoped.
+    const gate = await requireAuthWithProgram();
     if (!gate.ok) return gate.response;
     const { user } = gate;
 
     const now = new Date();
     const horizon = new Date(now.getTime() + 30 * 24 * 3600 * 1000);
-    const visibility = await buildSessionVisibilityWhere({ userId: user.id, role: user.role });
-    const approvalGate = buildApprovalGate({ userId: user.id, role: user.role });
+    const visibility = await buildSessionVisibilityWhere({
+      userId: user.id,
+      role: user.role,
+      activeProgramId: user.activeProgramId,
+    });
+    const approvalGate = buildApprovalGate({
+      userId: user.id,
+      role: user.role,
+      activeProgramId: user.activeProgramId,
+    });
 
     const sessions = await db.teachingSession.findMany({
       where: {
+        programId: user.activeProgramId,
         deletedAt: null,
         scheduledEnd: { gt: now },
         scheduledStart: { lt: horizon },

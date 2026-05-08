@@ -351,6 +351,43 @@ export async function acceptInvitation(
   const existingUser = await db.user.findUnique({ where: { email: inv.email } });
   if (existingUser) throw new Error('USER_EXISTS');
 
+  // W6.11 — figure out which program this new user lands in. Order:
+  //   1. Cohort's program (if cohortId on the invitation)
+  //   2. Inviter's currently active program
+  //   3. The default LVPEI MS Ophthalmology program
+  // The Invitation model does NOT (yet) carry a programId column; that's a
+  // Phase-2 schema addition once admins routinely manage > 1 program. For
+  // now we derive at accept time so existing W3 invitation flows keep working.
+  let assignedProgramId: string | null = null;
+  if (inv.cohortId) {
+    const c = await db.cohort.findUnique({
+      where: { id: inv.cohortId },
+      select: { programId: true },
+    });
+    assignedProgramId = c?.programId ?? null;
+  }
+  if (!assignedProgramId) {
+    const inviter = await db.user.findUnique({
+      where: { id: inv.invitedById },
+      select: { activeProgramId: true },
+    });
+    assignedProgramId = inviter?.activeProgramId ?? null;
+  }
+  if (!assignedProgramId) {
+    const fallback = await db.program.findFirst({
+      where: { status: 'ACTIVE' },
+      orderBy: { createdAt: 'asc' },
+      select: { id: true },
+    });
+    assignedProgramId = fallback?.id ?? null;
+  }
+  if (!assignedProgramId) {
+    // No active programs in the system at all — extremely unlikely (the seed
+    // always creates one) but throw early so the user creation rolls back
+    // cleanly rather than producing a half-baked tenant-less account.
+    throw new Error('NO_ACTIVE_PROGRAM');
+  }
+
   const passwordHash = await hashPassword(password);
 
   // Multi-identifier login (B-track): canonicalise the invited mobile and
@@ -392,6 +429,9 @@ export async function acceptInvitation(
       avatarUrl: inv.avatarUrl,
       programDirectorId: programDirectorIdToApply,
       facultyMentorId: facultyMentorIdToApply,
+      // W6.11 — every new user lands in a program from day 1 so the cohort/
+      // session lists never 409 NO_ACTIVE_PROGRAM on first login.
+      activeProgramId: assignedProgramId,
       profile: {
         create: {
           mciRegNumber: inv.mciRegNumber,
@@ -427,6 +467,17 @@ export async function acceptInvitation(
         throw err;
       }
     }
+
+    // W6.11 — register the membership inside the transaction so accept/create
+    // either both succeed or both roll back. assignedProgramId is computed
+    // above (cohort program → inviter active → first ACTIVE → throw).
+    await tx.programMembership.create({
+      data: {
+        userId: u.id,
+        programId: assignedProgramId,
+        addedBy: inv.invitedById,
+      },
+    });
 
     // Cohort assignment for residents. Skipped silently if the cohort got
     // archived/deleted between invite and accept (the FK is SET NULL but

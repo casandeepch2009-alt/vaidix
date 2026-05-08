@@ -66,6 +66,8 @@ export interface CaseTemplateView {
 }
 
 export interface ListTemplatesOptions {
+  /** W6.11: required — case bank is per-program. */
+  programId: string;
   search?: string;
   difficulty?: CaseDifficulty;
   bloomsLevel?: number;
@@ -73,8 +75,8 @@ export interface ListTemplatesOptions {
   topicSlug?: string;
 }
 
-export async function listCaseTemplates(opts: ListTemplatesOptions = {}): Promise<CaseTemplateView[]> {
-  const where: Prisma.CaseTemplateWhereInput = {};
+export async function listCaseTemplates(opts: ListTemplatesOptions): Promise<CaseTemplateView[]> {
+  const where: Prisma.CaseTemplateWhereInput = { programId: opts.programId };
   if (opts.difficulty) where.difficulty = opts.difficulty;
   if (typeof opts.bloomsLevel === 'number') where.bloomsLevel = opts.bloomsLevel;
   if (opts.specialty) where.specialty = opts.specialty;
@@ -117,9 +119,14 @@ export async function listCaseTemplates(opts: ListTemplatesOptions = {}): Promis
   }));
 }
 
-export async function getCaseTemplate(idOrLegacyId: string): Promise<CaseTemplateView> {
+export async function getCaseTemplate(idOrLegacyId: string, programId: string): Promise<CaseTemplateView> {
+  // W6.11 — scope by program so an MS Ophth user can never read a Cornea
+  // Fellowship template by guessing its id.
   const t = await db.caseTemplate.findFirst({
-    where: { OR: [{ id: idOrLegacyId }, { legacyId: idOrLegacyId }] },
+    where: {
+      programId,
+      OR: [{ id: idOrLegacyId }, { legacyId: idOrLegacyId }],
+    },
     include: {
       topic: { select: { slug: true } },
       _count: { select: { cases: { where: { status: CaseStatus.COMPLETED } } } },
@@ -185,10 +192,15 @@ function nextStage(current: CaseStage): CaseStage {
 
 export async function startCase(
   actor: CasesActor,
-  templateIdOrLegacy: string
+  templateIdOrLegacy: string,
+  programId: string,
 ): Promise<{ caseId: string; conversationId: string }> {
+  // W6.11 — case bank is per-program; never start a case from another tenant.
   const template = await db.caseTemplate.findFirst({
-    where: { OR: [{ id: templateIdOrLegacy }, { legacyId: templateIdOrLegacy }] },
+    where: {
+      programId,
+      OR: [{ id: templateIdOrLegacy }, { legacyId: templateIdOrLegacy }],
+    },
     select: {
       id: true,
       title: true,

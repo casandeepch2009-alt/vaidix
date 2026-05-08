@@ -11,6 +11,7 @@ import { SIDEBAR_NAV, ROLE_LABELS } from '@/lib/constants'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
+import { ProgramSwitcher } from '@/components/layout/program-switcher'
 import type { UserRole } from '@/lib/types'
 
 function getInitials(name: string): string {
@@ -94,10 +95,13 @@ export function Header() {
 
       <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
 
-      {/* Left: Page title */}
-      <div className="flex min-w-0 flex-1 items-center">
+      {/* Left: Page title + program switcher */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <h1 className="text-sm font-semibold text-foreground md:hidden">Vaidix</h1>
         <h1 className="hidden text-sm font-semibold text-foreground md:block">{pageTitle}</h1>
+        {/* W6.11 — multi-program tenancy switcher. Hides itself when the user
+            has < 2 memberships, so single-tenant LVPEI accounts see no chrome. */}
+        <ProgramSwitcher />
       </div>
 
       {/* Center: Search */}
