@@ -17,19 +17,29 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
   if (
     session.user.role !== Role.PROGRAM_DIRECTOR &&
     session.user.role !== Role.ADMIN &&
-    session.user.role !== Role.FACULTY
+    session.user.role !== Role.FACULTY &&
+    session.user.role !== Role.RESIDENT
   ) {
     redirect('/calendar')
   }
 
   const params = await searchParams
 
-  const [faculty, cohorts, topics] = await Promise.all([
+  const [facultyList, currentUser, cohorts, topics] = await Promise.all([
     db.user.findMany({
       where: { role: { in: [Role.FACULTY, Role.PROGRAM_DIRECTOR] }, status: 'ACTIVE' },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: 'asc' },
     }),
+    // Residents need themselves in the host list so the picker shows a "host
+    // myself" option alongside faculty. Faculty/PD already appear in the list
+    // above; this lookup just covers RESIDENT.
+    session.user.role === Role.RESIDENT
+      ? db.user.findUnique({
+          where: { id: session.user.id },
+          select: { id: true, name: true, email: true, role: true },
+        })
+      : Promise.resolve(null),
     db.cohort.findMany({
       where: { status: CohortStatus.ACTIVE, deletedAt: null },
       select: { id: true, name: true, _count: { select: { members: true } } },
@@ -40,6 +50,12 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
       orderBy: [{ subspecialty: 'asc' }, { displayOrder: 'asc' }, { name: 'asc' }],
     }),
   ])
+
+  // Resident proposers can host themselves (peer-led, auto-approves) or pick a
+  // faculty member (PENDING_FACULTY). Putting the resident at the top of the
+  // list makes self-host the natural default.
+  const faculty = currentUser ? [currentUser, ...facultyList] : facultyList
+  const isResident = session.user.role === Role.RESIDENT
 
   return (
     <div className="space-y-6">
@@ -54,7 +70,9 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Schedule Session</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Pick a faculty host — they get an approval request, then it appears on attendee calendars.
+              {isResident
+                ? 'Host it yourself for a peer-led session, or pick a faculty member to host — they’ll get an approval request first.'
+                : 'Pick a faculty host — they get an approval request, then it appears on attendee calendars.'}
             </p>
           </div>
         </div>
@@ -71,6 +89,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
             defaultStart={params.start}
             defaultEnd={params.end}
             currentUserId={session.user.id}
+            currentUserRole={session.user.role}
           />
         </div>
 

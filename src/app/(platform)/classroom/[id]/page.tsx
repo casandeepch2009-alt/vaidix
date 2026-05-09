@@ -68,7 +68,7 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     ? new Date(next.getTime() + (s.scheduledEnd.getTime() - s.scheduledStart.getTime()))
     : s.scheduledEnd
 
-  const [host, proposer, topic] = await Promise.all([
+  const [host, proposer, topic, viewer] = await Promise.all([
     db.user.findUnique({
       where: { id: s.hostId },
       select: { id: true, name: true, email: true, avatarUrl: true },
@@ -83,7 +83,40 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           select: { name: true, subspecialty: true },
         })
       : Promise.resolve(null),
+    // Authoritative profile lookup for the local viewer. The Vaidix flow
+    // requires every joiner to be a registered user (no anonymous guests),
+    // so we always have name / email / avatar on file — pull all three so
+    // the live-room UI shows their real photo + display name + handle,
+    // not a placeholder. Auth.js's session.user.name can be null on
+    // legacy JWTs minted before the name-claim fix; the DB row is the
+    // source of truth.
+    db.user.findUnique({
+      where: { id: session.user.id },
+      select: { name: true, email: true, avatarUrl: true },
+    }),
   ])
+
+  // Fallback chain: DB row → JWT claim → email-prefix → empty.
+  // We deliberately never use placeholder labels like "Guest" because
+  // Vaidix only admits registered users.
+  const viewerEmail = viewer?.email ?? session.user.email ?? ''
+  const viewerName =
+    viewer?.name?.trim() ||
+    (session.user.name ?? '').trim() ||
+    (viewerEmail ? viewerEmail.split('@')[0] : '')
+  const viewerAvatarUrl = viewer?.avatarUrl ?? null
+
+  // Diagnostic — logs every render so we can verify the DB lookup is
+  // returning what we expect. Remove once the name pipeline is confirmed
+  // to be working end-to-end.
+  console.log('[classroom/page] viewer profile resolved', {
+    sessionUserId: session.user.id,
+    dbName: viewer?.name,
+    dbEmail: viewer?.email,
+    dbAvatarUrl: viewer?.avatarUrl,
+    sessionName: session.user.name,
+    finalViewerName: viewerName,
+  })
 
   const canEdit =
     session.user.id === s.hostId ||
@@ -110,7 +143,7 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           proposer={proposer}
           currentUser={{
             id: session.user.id,
-            name: session.user.name ?? '',
+            name: viewerName,
             role: session.user.role,
           }}
         />
@@ -210,7 +243,14 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           consentRequired: s.consentRequired,
           host: host ?? { id: s.hostId, name: 'Unknown host', email: '', avatarUrl: null },
         }}
-        currentUser={{ id: session.user.id, name: session.user.name }}
+        currentUser={{
+          id: session.user.id,
+          name: viewerName,
+          email: viewerEmail,
+          avatarUrl: viewerAvatarUrl,
+          role: session.user.role,
+          isOrganizer: session.user.id === s.hostId,
+        }}
         shareToken={shareToken}
         prereqStatus={prereqStatus}
       />

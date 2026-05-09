@@ -63,11 +63,17 @@ interface DateTimePickerProps {
    * picker resolves to before min's time.
    */
   min?: string
+  /** Compact trigger button — smaller padding for dense forms. */
+  compact?: boolean
 }
+
+// Conservative panel-height estimate for direction detection. Calendar view
+// is the tallest at ~480px (header + 6-week grid + time picker + confirm).
+const PANEL_H = 480
 
 type View = 'calendar' | 'year' | 'month'
 
-export function DateTimePicker({ label, required, value, onChange, min }: DateTimePickerProps) {
+export function DateTimePicker({ label, required, value, onChange, min, compact }: DateTimePickerProps) {
   const now = new Date()
   const parsed = parseValue(value)
   const minParsed = min ? parseValue(min) : null
@@ -88,7 +94,7 @@ export function DateTimePicker({ label, required, value, onChange, min }: DateTi
 
   const buttonRef = useRef<HTMLButtonElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
-  const [panelPos, setPanelPos] = useState({ top: 0, left: 0, width: 0 })
+  const [panelPos, setPanelPos] = useState({ top: 0, left: 0, width: 0, openUp: false })
   // Mounted-after-hydration flag so the portal only renders client-side.
   // The setState in effect is intentional to avoid SSR hydration mismatch.
   const [mounted, setMounted] = useState(false)
@@ -113,7 +119,15 @@ export function DateTimePicker({ label, required, value, onChange, min }: DateTi
       const r = buttonRef.current.getBoundingClientRect()
       const panelWidth = 360
       const left = Math.min(r.left, window.innerWidth - panelWidth - 8)
-      setPanelPos({ top: r.bottom + 8, left: Math.max(8, left), width: r.width })
+      // Open upward only when there's clearly not enough room below AND
+      // there's more room above. Otherwise default to opening down.
+      const spaceBelow = window.innerHeight - r.bottom - 8
+      const spaceAbove = r.top - 8
+      const openUp = spaceBelow < PANEL_H && spaceAbove > spaceBelow
+      const top = openUp
+        ? Math.max(8, r.top - PANEL_H - 8)
+        : r.bottom + 8
+      setPanelPos({ top, left: Math.max(8, left), width: r.width, openUp })
     }
     setOpen((v) => !v)
   }, [])
@@ -246,7 +260,8 @@ export function DateTimePicker({ label, required, value, onChange, min }: DateTi
         type="button"
         onClick={openPicker}
         className={cn(
-          'flex w-full items-center gap-2.5 rounded-xl border-2 bg-card px-3.5 py-2.5 text-sm transition-all text-left',
+          'flex w-full items-center gap-2.5 rounded-xl border-2 bg-card text-sm transition-all text-left',
+          compact ? 'px-3 py-1.5' : 'px-3.5 py-2.5',
           open
             ? 'border-primary shadow-[0_0_0_4px_oklch(0.45_0.15_165/0.12)]'
             : 'border-input hover:border-primary/40',
@@ -272,9 +287,9 @@ export function DateTimePicker({ label, required, value, onChange, min }: DateTi
             {open && (
               <motion.div
                 ref={panelRef}
-                initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                initial={{ opacity: 0, y: panelPos.openUp ? 8 : -8, scale: 0.96 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                exit={{ opacity: 0, y: panelPos.openUp ? 8 : -8, scale: 0.96 }}
                 transition={{ duration: 0.15, ease: 'easeOut' }}
                 style={{ top: panelPos.top, left: panelPos.left, width: 360 }}
                 className="fixed z-9999 max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/20"

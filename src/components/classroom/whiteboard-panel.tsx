@@ -24,10 +24,14 @@ import {
   useRef,
   useState,
 } from 'react'
-import { useDataChannel, useLocalParticipant } from '@livekit/components-react'
+import { useDataChannel, useLocalParticipant, useRoomContext } from '@livekit/components-react'
+import { ConnectionState } from 'livekit-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Loader2, Lock, Unlock, Maximize2, Minimize2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+// TODO(extraction): replace direct /whiteboard fetches with VideoRoomClient.
+// Deferred — the LMS endpoint also carries an `editableByResidents` flag
+// that needs a small interface extension to remain product-agnostic.
 
 // Dynamic import — tldraw is heavy and only relevant when this tab is open.
 const TldrawSurface = lazy(() => import('./whiteboard-surface'))
@@ -62,6 +66,7 @@ export function WhiteboardPanel({
   isHostish: boolean
 }) {
   const { localParticipant } = useLocalParticipant()
+  const room = useRoomContext()
   const { message: lastDc } = useDataChannel(DC_TOPIC)
 
   const [editableByResidents, setEditableByResidents] = useState(false)
@@ -132,20 +137,24 @@ export function WhiteboardPanel({
       const version = versionRef.current
       setSaveStatus('saving')
       // Fire-and-forget broadcast first so peers see the update without
-      // waiting on the persistence round-trip.
-      void localParticipant
-        .publishData(
-          encoder.encode(
-            JSON.stringify({
-              kind: 'snapshot',
-              version,
-              authorId: localParticipant.identity,
-              snapshot,
-            } satisfies WhiteboardWireMessage)
-          ),
-          { topic: DC_TOPIC, reliable: true }
-        )
-        .catch(() => {/* DC unavailable; persistence still attempts below */})
+      // waiting on the persistence round-trip. Skipped entirely when the
+      // engine is closed/reconnecting — LiveKit logs a NegotiationError
+      // synchronously before publishData rejects, so .catch() doesn't help.
+      if (room.state === ConnectionState.Connected) {
+        void localParticipant
+          .publishData(
+            encoder.encode(
+              JSON.stringify({
+                kind: 'snapshot',
+                version,
+                authorId: localParticipant.identity,
+                snapshot,
+              } satisfies WhiteboardWireMessage)
+            ),
+            { topic: DC_TOPIC, reliable: true }
+          )
+          .catch(() => {/* late-rejection — persistence still attempts below */})
+      }
       try {
         const res = await fetch(`/api/classroom/sessions/${sessionId}/whiteboard`, {
           method: 'POST',

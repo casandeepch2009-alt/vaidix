@@ -36,13 +36,18 @@ export function ApprovalsInbox({ sessions: initial }: { sessions: PendingSession
       const res = await fetch(`/api/classroom/sessions/${id}/approve`, { method: 'POST' })
       const json = await res.json()
       if (!json.ok) {
-        if (json.error?.code === 'HOST_CONFLICT') {
-          const c = json.error.details?.[0]
-          throw new Error(
-            c ? `You have a conflict with "${c.title}" at that time` : json.error.message
-          )
-        }
         throw new Error(json.error?.message ?? 'Approve failed')
+      }
+      // Teams-style overlapping schedules are allowed; surface the conflict
+      // info as a non-blocking note after approval succeeds.
+      const conflicts = (json.data?.warnings?.hostConflicts ?? []) as Array<{
+        title: string; scheduledStart: string
+      }>
+      if (conflicts.length > 0) {
+        const c = conflicts[0]
+        if (typeof window !== 'undefined') {
+          window.alert(`Approved. Heads up: you also have "${c.title}" at ${new Date(c.scheduledStart).toLocaleString()}.`)
+        }
       }
       setSessions((prev) => prev.filter((s) => s.id !== id))
       router.refresh()

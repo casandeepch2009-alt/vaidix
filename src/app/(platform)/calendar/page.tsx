@@ -12,7 +12,8 @@ export default async function CalendarPage() {
   const canCreate =
     session.user.role === Role.PROGRAM_DIRECTOR ||
     session.user.role === Role.ADMIN ||
-    session.user.role === Role.FACULTY
+    session.user.role === Role.FACULTY ||
+    session.user.role === Role.RESIDENT
 
   return (
     <div className="space-y-6">

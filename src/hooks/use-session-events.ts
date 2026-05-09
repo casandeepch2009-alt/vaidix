@@ -13,11 +13,47 @@
 // replay row, not a broken live experience.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useDataChannel, useLocalParticipant } from '@livekit/components-react'
+import { useDataChannel, useLocalParticipant, useRoomContext } from '@livekit/components-react'
+import { ConnectionState } from 'livekit-client'
+import { useVideoRoomClient } from '@/components/classroom/video-room-client'
 
 const DC_TOPIC = 'events'
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
+
+// ─── Local in-memory bus ─────────────────────────────────────────────────────
+// LiveKit's publishData does NOT echo to the publisher, so a self-emitted
+// REACTION never reaches FloatingReactionsLayer (which lives in a different
+// useSessionEvents instance from ReactionsBar) via the data channel. The
+// previous "local echo" inside emit() only delivered to the *emitting*
+// instance's onEvent — useless when the emitter doesn't render bubbles.
+// This module-level bus broadcasts self-emits to every instance subscribed
+// to the same sessionId so all overlays (floating layer, leaderboard
+// aggregates, etc.) see the user's own actions immediately.
+
+type LocalListener = (event: SessionEvent) => void
+const localBus = new Map<string, Set<LocalListener>>()
+
+function subscribeLocal(sessionId: string, cb: LocalListener): () => void {
+  let set = localBus.get(sessionId)
+  if (!set) {
+    set = new Set()
+    localBus.set(sessionId, set)
+  }
+  set.add(cb)
+  return () => {
+    const s = localBus.get(sessionId)
+    if (!s) return
+    s.delete(cb)
+    if (s.size === 0) localBus.delete(sessionId)
+  }
+}
+
+function publishLocal(sessionId: string, event: SessionEvent) {
+  localBus.get(sessionId)?.forEach((cb) => {
+    try { cb(event) } catch { /* listener errors must not break the bus */ }
+  })
+}
 
 export interface SessionEvent {
   /// Stable ID for de-duping. For locally-emitted events we mint a temporary
@@ -47,6 +83,8 @@ interface UseSessionEventsOptions {
 
 export function useSessionEvents({ sessionId, filter, onEvent }: UseSessionEventsOptions) {
   const { localParticipant } = useLocalParticipant()
+  const room = useRoomContext()
+  const client = useVideoRoomClient()
   const { message } = useDataChannel(DC_TOPIC)
   const [events, setEvents] = useState<SessionEvent[]>([])
 
@@ -88,6 +126,16 @@ export function useSessionEvents({ sessionId, filter, onEvent }: UseSessionEvent
     }
   }, [message, matches])
 
+  // Subscribe to the local bus so self-emitted events from another instance
+  // on the same page (e.g. ReactionsBar → FloatingReactionsLayer) reach us.
+  useEffect(() => {
+    return subscribeLocal(sessionId, (event) => {
+      if (!matches(event)) return
+      setEvents((prev) => [...prev.slice(-499), event])
+      onEventRef.current?.(event)
+    })
+  }, [sessionId, matches])
+
   const emit = useCallback(
     async (
       eventType: string,
@@ -105,29 +153,29 @@ export function useSessionEvents({ sessionId, filter, onEvent }: UseSessionEvent
         details: args.details ?? null,
         emittedAt: Date.now(),
       }
-      // Local echo first — keeps your own reaction visible even if the DC
-      // round-trips slowly or the network blips on send.
-      if (matches(event)) {
-        setEvents((prev) => [...prev.slice(-499), event])
-        onEventRef.current?.(event)
+      // Local echo via the in-memory bus — keeps your own reaction visible
+      // even if the DC round-trips slowly, and crucially also reaches OTHER
+      // useSessionEvents instances on the same page (FloatingReactionsLayer,
+      // engagement aggregators, etc.) which is what makes self-clicks float.
+      publishLocal(sessionId, event)
+      // Live broadcast — but only when the room engine is actually connected.
+      // LiveKit logs a NegotiationError ("cannot negotiate on closed engine")
+      // BEFORE the publishData promise rejects, so a `.catch()` alone doesn't
+      // suppress the console error. We have to skip the call entirely.
+      if (room.state === ConnectionState.Connected) {
+        void localParticipant
+          .publishData(encoder.encode(JSON.stringify(event)), { topic: DC_TOPIC, reliable: false })
+          .catch(() => { /* late-rejection (race vs disconnect) — drop */ })
       }
-      // Live broadcast.
-      void localParticipant
-        .publishData(encoder.encode(JSON.stringify(event)), { topic: DC_TOPIC, reliable: false })
-        .catch(() => { /* DC not connected yet — drop */ })
-      // Persistence (best-effort).
-      void fetch(`/api/classroom/sessions/${sessionId}/events`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          eventType,
-          targetUserId: args.targetUserId ?? undefined,
-          details: args.details ?? undefined,
-        }),
-      }).catch(() => { /* swallow — DC already delivered live */ })
+      // Persistence (best-effort, independent of DC liveness). Routed
+      // through the VideoRoomClient so consumers extracting the module
+      // can plug in their own audit-event sink.
+      void client.emitEvent(sessionId, eventType, {
+        targetUserId: args.targetUserId ?? undefined,
+        details: args.details,
+      }).catch(() => { /* swallow — local echo already happened */ })
     },
-    [localParticipant, sessionId, matches]
+    [localParticipant, room, sessionId, matches, client]
   )
 
   return { events, emit }

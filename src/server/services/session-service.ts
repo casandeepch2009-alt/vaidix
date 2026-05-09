@@ -99,13 +99,18 @@ export async function createSession(
   const start = new Date(input.scheduledStart);
   const end = new Date(input.scheduledEnd);
 
-  // FACULTY / PD / ADMIN may propose; host must be FACULTY, PD, or ADMIN.
-  // Faculty proposing for themselves auto-approves below; faculty proposing
-  // for another faculty goes to PENDING_FACULTY for the host to approve.
+  // FACULTY / PD / ADMIN / RESIDENT may propose. Host rules:
+  //   • FACULTY / PD / ADMIN host — anyone above may propose (faculty hosting
+  //     themselves auto-approves; resident-proposed goes to PENDING_FACULTY).
+  //   • RESIDENT host — only allowed when proposer == host (peer-led journal
+  //     club / case presentation), and auto-approves. A resident cannot
+  //     schedule a session *for* another resident — there is no faculty
+  //     approver in that path.
   if (
     proposerRole !== Role.FACULTY &&
     proposerRole !== Role.PROGRAM_DIRECTOR &&
-    proposerRole !== Role.ADMIN
+    proposerRole !== Role.ADMIN &&
+    proposerRole !== Role.RESIDENT
   ) {
     throw new Error('FORBIDDEN_PROPOSER_ROLE');
   }
@@ -115,7 +120,12 @@ export async function createSession(
     select: { id: true, role: true, status: true, name: true, email: true },
   });
   if (!host || host.status !== 'ACTIVE') throw new Error('HOST_NOT_FOUND');
-  if (host.role !== Role.FACULTY && host.role !== Role.PROGRAM_DIRECTOR && host.role !== Role.ADMIN) {
+  const hostIsStaff =
+    host.role === Role.FACULTY ||
+    host.role === Role.PROGRAM_DIRECTOR ||
+    host.role === Role.ADMIN;
+  const hostIsSelfResident = host.role === Role.RESIDENT && host.id === proposedBy;
+  if (!hostIsStaff && !hostIsSelfResident) {
     throw new Error('HOST_NOT_FACULTY');
   }
 
@@ -134,15 +144,11 @@ export async function createSession(
   const autoApprove = proposedBy === input.hostId;
   const approvalStatus = autoApprove ? SessionApprovalStatus.APPROVED : SessionApprovalStatus.PENDING_FACULTY;
 
-  // Pre-check host conflicts only if auto-approving; pending sessions don't lock time.
-  if (autoApprove) {
-    const conflicts = await findHostConflicts({ hostId: input.hostId, start, end });
-    if (conflicts.length > 0) {
-      const err = new Error('HOST_CONFLICT');
-      (err as Error & { conflicts?: unknown }).conflicts = conflicts;
-      throw err;
-    }
-  }
+  // Detect overlapping APPROVED sessions on this host's calendar so we can
+  // warn the proposer (Teams-style). Non-blocking: with the DB exclusion
+  // constraint dropped (migration 20260509150000), we let the schedule
+  // through and surface the conflict in the response.
+  const hostConflicts = await findHostConflicts({ hostId: input.hostId, start, end });
 
   const session = await db.$transaction(async (tx) => {
     const created = await tx.teachingSession.create({
@@ -169,9 +175,15 @@ export async function createSession(
         topicId: input.topicId ?? null,
         tags: input.tags,
         objectives: normaliseObjectives(input.objectives) ?? Prisma.JsonNull,
-        // Prereq config lives under metadata.prereq so we don't add columns
-        // for a feature that isn't queried from SQL.
-        metadata: input.prereq ? { prereq: input.prereq } : Prisma.JsonNull,
+        // Metadata bag for session features that aren't queried from SQL:
+        // prereq config + recurrence exception list (Teams-style "skip these
+        // dates" — the RRULE itself doesn't carry exclusions).
+        metadata: (() => {
+          const m: Record<string, unknown> = {};
+          if (input.prereq) m.prereq = input.prereq;
+          if (input.excludedDates?.length) m.excludedDates = input.excludedDates;
+          return Object.keys(m).length > 0 ? (m as Prisma.InputJsonValue) : Prisma.JsonNull;
+        })(),
       },
     });
 
@@ -215,7 +227,7 @@ export async function createSession(
     runSideEffects(notifySessionProposed(session.id), 'notify proposed');
   }
 
-  return session;
+  return { session, hostConflicts };
 }
 
 // ----------------------------------------------------------------------------
@@ -242,40 +254,30 @@ export async function approveSession(sessionId: string, actorId: string, actorRo
     throw new Error('NOT_DESIGNATED_HOST');
   }
 
-  // Conflict check at approval time (hard — Postgres exclusion constraint will enforce)
-  const conflicts = await findHostConflicts({
+  // Detect overlap (warning only — DB constraint was dropped in migration
+  // 20260509150000 to permit Teams-style overlapping schedules). The caller
+  // surfaces this back to the approver so they can choose to cancel one of
+  // the conflicting sessions afterwards.
+  const hostConflicts = await findHostConflicts({
     hostId: session.hostId,
     start: session.scheduledStart,
     end: session.scheduledEnd,
     excludeSessionId: sessionId,
   });
-  if (conflicts.length > 0) {
-    const err = new Error('HOST_CONFLICT');
-    (err as Error & { conflicts?: unknown }).conflicts = conflicts;
-    throw err;
-  }
 
-  try {
-    await db.$transaction([
-      db.teachingSession.update({
-        where: { id: sessionId },
-        data: {
-          approvalStatus: SessionApprovalStatus.APPROVED,
-          approvedBy: actorId,
-          approvedAt: new Date(),
-        },
-      }),
-      db.sessionApprovalAudit.create({
-        data: { sessionId, actorId, action: SessionApprovalAction.APPROVED },
-      }),
-    ]);
-  } catch (e) {
-    // Postgres exclusion constraint violation (race with another approval)
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2010') {
-      throw new Error('HOST_CONFLICT');
-    }
-    throw e;
-  }
+  await db.$transaction([
+    db.teachingSession.update({
+      where: { id: sessionId },
+      data: {
+        approvalStatus: SessionApprovalStatus.APPROVED,
+        approvedBy: actorId,
+        approvedAt: new Date(),
+      },
+    }),
+    db.sessionApprovalAudit.create({
+      data: { sessionId, actorId, action: SessionApprovalAction.APPROVED },
+    }),
+  ]);
 
   await audit({
     actorId,
@@ -288,7 +290,8 @@ export async function approveSession(sessionId: string, actorId: string, actorRo
   runSideEffects(notifySessionApproved(sessionId), 'notify approved');
   runSideEffects(scheduleSessionReminders(sessionId), 'schedule reminders (approved)');
 
-  return db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  const updated = await db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  return { session: updated, hostConflicts };
 }
 
 export async function rejectSession(sessionId: string, actorId: string, actorRole: Role, reason: string) {
@@ -367,6 +370,15 @@ export async function rescheduleSession(
   const previousStart = session.scheduledStart;
   const previousEnd = session.scheduledEnd;
 
+  // Warning-only host conflict detection at the new slot — same Teams-style
+  // contract as createSession/approveSession.
+  const hostConflicts = await findHostConflicts({
+    hostId: session.hostId,
+    start,
+    end,
+    excludeSessionId: sessionId,
+  });
+
   await db.$transaction([
     db.teachingSession.update({
       where: { id: sessionId },
@@ -411,7 +423,8 @@ export async function rescheduleSession(
     runSideEffects(scheduleSessionReminders(sessionId), 'schedule reminders (rescheduled)');
   }
 
-  return db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  const updated = await db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  return { session: updated, hostConflicts };
 }
 
 // ----------------------------------------------------------------------------

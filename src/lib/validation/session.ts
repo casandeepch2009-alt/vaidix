@@ -87,6 +87,10 @@ export const createSessionSchema = z
     tags: z.array(z.string().min(1).max(50)).max(20).default([]),
     objectives: objectivesArraySchema,
     prereq: prereqConfigSchema.optional(),
+    // YYYY-MM-DD strings — dates the recurrence should skip (Teams-style
+    // exception list). Persisted under metadata.excludedDates; not a column
+    // because nothing queries it from SQL.
+    excludedDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(100).optional(),
   })
   .refine((v) => new Date(v.scheduledEnd) > new Date(v.scheduledStart), {
     message: 'scheduledEnd must be after scheduledStart',

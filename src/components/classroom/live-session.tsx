@@ -8,22 +8,25 @@ import {
   GridLayout,
   useTracks,
   useLocalParticipant,
-  useParticipants,
   useRoomContext,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
-import { Track } from 'livekit-client'
+import { ConnectionState, DisconnectReason, Track } from 'livekit-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   PhoneOff, Hand, MessageSquare, Users, Trophy,
   LayoutGrid, Zap, Brain, X, Settings, Link2, ChevronDown,
-  NotebookPen, Pencil,
+  NotebookPen, Pencil, Loader2,
 } from 'lucide-react'
 import { WaitingRoom } from './waiting-room'
 import { PreJoin } from './pre-join'
 import type { PrereqStatus } from '@/server/services/sessions/prereq'
 import { ParticipantSidebar } from './participant-sidebar'
+import { ParticipantStrip } from './participant-strip'
+import { HandRaiseNotifications } from './hand-raise-notifications'
+import { NotificationSounds, NotificationSoundsToggle } from './notification-sounds'
+import { useVideoRoomClient } from './video-room-client'
 import { ChatPanel } from './chat-panel'
 import { Button } from '@/components/ui/button'
 import { HookOverlay } from '@/components/engagement/hook-overlay'
@@ -75,11 +78,23 @@ export function LiveSession({
   prereqStatus,
 }: {
   session: SessionInfo
-  currentUser: { id: string; name: string }
+  currentUser: {
+    id: string
+    name: string
+    email?: string
+    avatarUrl?: string | null
+    /// Vaidix role (FACULTY / RESIDENT / ADMIN / PROGRAM_DIRECTOR) — used
+    /// to render the role badge next to your entry in the People panel.
+    role?: string
+    /// True when the local user is the host of this teaching session, so
+    /// we can show an "Organizer" badge in addition to their role.
+    isOrganizer?: boolean
+  }
   shareToken?: string
   prereqStatus?: PrereqStatus | null
 }) {
   const router = useRouter()
+  const client = useVideoRoomClient()
   const [state, setState] = useState<JoinState>({ kind: 'IDLE' })
   const [consented, setConsented] = useState(!session.consentRequired)
   const [activeBreakout, setActiveBreakout] = useState<{ id: string; name: string } | null>(null)
@@ -87,15 +102,7 @@ export function LiveSession({
   const requestToken = useCallback(async () => {
     setState({ kind: 'FETCHING' })
     try {
-      const url = new URL(`/api/classroom/sessions/${session.id}/token`, window.location.origin)
-      if (shareToken) url.searchParams.set('t', shareToken)
-      const res = await fetch(url.toString(), { method: 'POST', credentials: 'include' })
-      const json = await res.json()
-      if (!json.ok) {
-        setState({ kind: 'ERROR', message: json.error?.message ?? 'Failed to get token' })
-        return
-      }
-      const d = json.data
+      const d = await client.getToken(session.id, { shareToken })
       if (d.state === 'JOINED') {
         setState({ kind: 'JOINED', token: d.token, url: d.url, role: d.role })
       } else if (d.state === 'WAITING') {
@@ -106,28 +113,24 @@ export function LiveSession({
     } catch (e) {
       setState({ kind: 'ERROR', message: (e as Error).message })
     }
-  }, [session.id, shareToken])
+  }, [session.id, shareToken, client])
 
   useEffect(() => {
     if (state.kind !== 'WAITING') return
     const iv = setInterval(async () => {
       try {
-        const res = await fetch(`/api/classroom/sessions/${session.id}/token${shareToken ? `?t=${shareToken}` : ''}`, {
-          method: 'POST',
-          credentials: 'include',
-        })
-        const json = await res.json()
-        if (json.ok && json.data.state === 'JOINED') {
-          setState({ kind: 'JOINED', token: json.data.token, url: json.data.url, role: json.data.role })
-        } else if (json.ok && json.data.state === 'DENIED') {
-          setState({ kind: 'DENIED', reason: json.data.reason })
+        const d = await client.getToken(session.id, { shareToken })
+        if (d.state === 'JOINED') {
+          setState({ kind: 'JOINED', token: d.token, url: d.url, role: d.role })
+        } else if (d.state === 'DENIED') {
+          setState({ kind: 'DENIED', reason: d.reason })
         }
       } catch {
-        /* swallow */
+        /* swallow — keep polling */
       }
     }, 3000)
     return () => clearInterval(iv)
-  }, [state.kind, session.id, shareToken])
+  }, [state.kind, session.id, shareToken, client])
 
   if (session.approvalStatus !== 'APPROVED') {
     return (
@@ -200,6 +203,7 @@ export function LiveSession({
       loading={state.kind === 'FETCHING'}
       error={state.kind === 'ERROR' ? state.message : null}
       prereqStatus={prereqStatus ?? null}
+      isHost={currentUser.id === session.host.id}
     />
   )
 }
@@ -220,62 +224,258 @@ function LiveRoom({
   url: string
   role: 'HOST' | 'CO_HOST' | 'PARTICIPANT' | 'VIEWER'
   session: SessionInfo
-  currentUser: { id: string; name: string }
+  currentUser: {
+    id: string
+    name: string
+    email?: string
+    avatarUrl?: string | null
+    /// Vaidix role (FACULTY / RESIDENT / ADMIN / PROGRAM_DIRECTOR) — used
+    /// to render the role badge next to your entry in the People panel.
+    role?: string
+    /// True when the local user is the host of this teaching session, so
+    /// we can show an "Organizer" badge in addition to their role.
+    isOrganizer?: boolean
+  }
   onLeave: () => void
   onJoinBreakout: (breakout: { id: string; name: string }) => void
 }) {
   const isHostish = role === 'HOST' || role === 'CO_HOST'
-  const [connectedOnce, setConnectedOnce] = useState(false)
-  const [exitState, setExitState] = useState<'live' | 'left' | 'failed'>('live')
 
-  if (exitState === 'left' || exitState === 'failed') {
-    const failed = exitState === 'failed'
+  // Connection state machine.
+  //   connecting   — initial mount, LiveKit hasn't fired onConnected yet
+  //   connected    — healthy, room visible, no banner
+  //   reconnecting — was connected, dropped, auto-retrying remount
+  //   failed       — sustained failure (>FAIL_GRACE_MS in connecting, or
+  //                  >MAX_RECONNECT_ATTEMPTS retries). Banner asks the user
+  //                  whether to retry or leave; room stays mounted behind it.
+  type ConnStatus = 'connecting' | 'connected' | 'reconnecting' | 'failed'
+  const [status, setStatus] = useState<ConnStatus>('connecting')
+  const [phase, setPhase] = useState<0 | 1 | 2>(0)   // copy variant 0/1/2
+  const [bumper, setBumper] = useState(0)            // bump → remounts <LiveKitRoom>
+  // Tracked in state (not a ref) so we can pass the live count into the
+  // banner copy without violating the no-refs-during-render rule.
+  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+
+  const SLOW_CONNECT_MS = 5000
+  const VERY_SLOW_MS = 15000
+  const FAIL_GRACE_MS = 60000     // 60s before declaring initial connect failed
+  const RECONNECT_DELAY_MS = 2000 // brief settle before remount on reconnect
+  const MAX_RECONNECT_ATTEMPTS = 4
+
+  // Drive the connecting-phase copy ("Connecting…" → "Still connecting…" →
+  // "Slow connection…") and arm the FAIL_GRACE timer. Resets every time we
+  // re-enter 'connecting' (initial mount, manual retry, auto-reconnect).
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPhase(0)
+    if (status !== 'connecting') return
+    const t1 = setTimeout(() => setPhase(1), SLOW_CONNECT_MS)
+    const t2 = setTimeout(() => setPhase(2), VERY_SLOW_MS)
+    const tFail = setTimeout(() => {
+      setStatus((s) => (s === 'connecting' ? 'failed' : s))
+    }, FAIL_GRACE_MS)
+    return () => {
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(tFail)
+    }
+  }, [status, bumper])
+
+  // When we land in 'reconnecting' (a was-connected drop), wait briefly
+  // then bump the LiveKitRoom key to force a fresh connect attempt. After
+  // MAX_RECONNECT_ATTEMPTS without success, fall through to 'failed' so
+  // the user sees an actionable banner instead of an endless spinner.
+  useEffect(() => {
+    if (status !== 'reconnecting') return
+    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStatus('failed')
+      return
+    }
+    const t = setTimeout(() => {
+      setReconnectAttempts((n) => n + 1)
+      setStatus('connecting')
+      setBumper((b) => b + 1)
+    }, RECONNECT_DELAY_MS)
+    return () => clearTimeout(t)
+  }, [status, reconnectAttempts])
+
+  function handleConnected() {
+    setReconnectAttempts(0)
+    setStatus('connected')
+  }
+
+  function handleDisconnected(reason?: DisconnectReason) {
+    // CLIENT_INITIATED only fires when the user clicks Leave (we call
+    // room.disconnect() under the hood). USER_REJECTED means admission
+    // was denied. Both are explicit exits — bail to the calendar.
+    if (reason === DisconnectReason.CLIENT_INITIATED || reason === DisconnectReason.USER_REJECTED) {
+      onLeave()
+      return
+    }
+    // Otherwise treat as recoverable. If we'd already reached 'connected'
+    // it's a transient drop → 'reconnecting' (auto-retry path). If we
+    // never connected, stay in 'connecting' so the FAIL_GRACE timer
+    // continues counting; LiveKit's own reconnect may still land before
+    // the timer fires.
+    setStatus((s) => (s === 'connected' ? 'reconnecting' : s === 'failed' ? 'failed' : s))
+  }
+
+  function manualRejoin() {
+    setReconnectAttempts(0)
+    setStatus('connecting')
+    setBumper((b) => b + 1)
+  }
+
+  return (
+    // Fullscreen takeover when JOINED so the live room behaves like Teams /
+    // Zoom — covers the page chrome (sidebar, header, prep block) instead of
+    // sitting inline below them. The fixed positioning lives on this OUTER
+    // wrapper rather than on `<LiveKitRoom>` itself: LiveKit injects the
+    // `lk-room-container` class with `position: relative` from
+    // `@livekit/components-styles`, which wins the cascade over a Tailwind
+    // `fixed` utility on the same element.
+    <div className="fixed inset-0 z-40 overflow-hidden bg-black">
+      {/* Connecting / reconnecting / failed banners — non-blocking, sit on
+          top of the room. The room itself stays mounted underneath so any
+          state (chat scrollback, sidebar, captions) is preserved across
+          a transient drop. Banner styling escalates with status: pill at
+          top during connecting/reconnecting, slightly heavier "actionable"
+          card for `failed` (with Retry / Leave buttons). */}
+      <ConnectionBanner
+        status={status}
+        phase={phase}
+        attempts={reconnectAttempts}
+        serverUrl={url}
+        onRejoin={manualRejoin}
+        onLeave={onLeave}
+      />
+      <LiveKitRoom
+        // Bumper is the only way to retry from React land — the LiveKit
+        // SDK's `connect` prop is read once on mount, so a fresh attempt
+        // requires a fresh component instance.
+        key={bumper}
+        token={token}
+        serverUrl={url}
+        connect
+        data-lk-theme="default"
+        onConnected={handleConnected}
+        onDisconnected={handleDisconnected}
+        className="size-full"
+      >
+        <InnerRoom
+          session={session}
+          currentUser={currentUser}
+          role={role}
+          isHostish={isHostish}
+          onLeave={onLeave}
+          onJoinBreakout={onJoinBreakout}
+        />
+        <RoomAudioRenderer />
+      </LiveKitRoom>
+    </div>
+  )
+}
+
+// Small status banner shown over the live room while we're not connected.
+// Positioned as `pointer-events-none` for the connecting / reconnecting
+// pills so it doesn't block clicks on the room behind; the failure card
+// re-enables pointer events on its inner card so Retry / Leave are usable.
+function ConnectionBanner({
+  status,
+  phase,
+  attempts,
+  serverUrl,
+  onRejoin,
+  onLeave,
+}: {
+  status: 'connecting' | 'connected' | 'reconnecting' | 'failed'
+  phase: 0 | 1 | 2
+  attempts: number
+  serverUrl: string
+  onRejoin: () => void
+  onLeave: () => void
+}) {
+  if (status === 'connected') return null
+
+  // Localhost dev environment? Show a more actionable failure message that
+  // tells the user the most likely cause — LiveKit Docker container isn't
+  // running. Saves the round trip of "why isn't it working?" support.
+  const isLocalDev = /^(ws|wss|http|https):\/\/(localhost|127\.0\.0\.1)/i.test(serverUrl)
+
+  if (status === 'failed') {
     return (
-      <div className="flex h-[80vh] items-center justify-center">
-        <div className="rounded-2xl border border-border bg-card p-8 text-center max-w-md shadow-sm">
-          <h2 className="text-lg font-bold text-foreground">
-            {failed ? 'Could not connect' : "You've left the session"}
-          </h2>
-          <p className="mt-2 text-sm text-muted-foreground">
-            {failed
-              ? "The live class server didn't accept the connection. Make sure LiveKit is running locally, then try again."
-              : 'You disconnected from the live room. You can rejoin or go back to the calendar.'}
-          </p>
-          <div className="mt-5 flex items-center justify-center gap-2">
-            <Button onClick={() => { setConnectedOnce(false); setExitState('live') }}>
-              Rejoin
-            </Button>
-            <Button variant="outline" onClick={onLeave}>
-              Back to calendar
-            </Button>
+      <div className="pointer-events-none absolute inset-x-0 top-6 z-30 flex justify-center px-4">
+        <div className="pointer-events-auto flex max-w-lg items-start gap-3 rounded-2xl border border-amber-400/40 bg-zinc-900/95 px-4 py-3 text-sm text-white shadow-2xl shadow-black/50 backdrop-blur-md">
+          <span className="mt-1.5 flex size-2 shrink-0 animate-pulse rounded-full bg-amber-400" />
+          <div className="flex flex-col gap-1">
+            <span className="font-semibold">Connection trouble</span>
+            {isLocalDev ? (
+              <>
+                <span className="text-[11px] leading-snug text-white/70">
+                  The local LiveKit server isn&apos;t responding on{' '}
+                  <code className="rounded bg-white/10 px-1 font-mono text-[10px]">{serverUrl}</code>.
+                  Start it with:
+                </span>
+                <code className="block whitespace-pre-wrap break-all rounded-md bg-black/50 px-2 py-1 font-mono text-[10px] text-emerald-300">
+                  docker compose -f docker-compose.dev.yml up -d livekit
+                </code>
+                <span className="text-[11px] text-white/55">
+                  (Docker Desktop must be running.)
+                </span>
+              </>
+            ) : (
+              <span className="text-[11px] text-white/70">
+                We couldn&apos;t reach the live-class server. Retry or leave the room.
+              </span>
+            )}
+            <div className="mt-1.5 flex items-center gap-2">
+              <button
+                type="button"
+                onClick={onRejoin}
+                className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-bold text-white shadow-md shadow-emerald-500/30 transition hover:bg-emerald-400 active:scale-95"
+              >
+                Retry
+              </button>
+              <button
+                type="button"
+                onClick={onLeave}
+                className="rounded-lg border border-white/20 px-3 py-1.5 text-xs font-semibold text-white/80 transition hover:bg-white/8"
+              >
+                Leave
+              </button>
+            </div>
           </div>
         </div>
       </div>
     )
   }
 
+  // 'connecting' or 'reconnecting' — soft pill, lower visual weight, no
+  // user action required. Copy escalates with phase.
+  const reconnecting = status === 'reconnecting'
+  const copy = reconnecting
+    ? attempts > 0
+      ? `Reconnecting… (attempt ${attempts + 1})`
+      : 'Connection lost — reconnecting…'
+    : phase === 0
+      ? 'Connecting to the live class…'
+      : phase === 1
+        ? 'Still connecting — taking a bit longer than usual…'
+        : 'Slow connection — still trying…'
+
   return (
-    <LiveKitRoom
-      token={token}
-      serverUrl={url}
-      connect
-      data-lk-theme="default"
-      onConnected={() => setConnectedOnce(true)}
-      onDisconnected={() => setExitState(connectedOnce ? 'left' : 'failed')}
-      className="h-[calc(100vh-4rem)] overflow-hidden"
-    >
-      <InnerRoom
-        session={session}
-        currentUser={currentUser}
-        role={role}
-        isHostish={isHostish}
-        onLeave={onLeave}
-        onJoinBreakout={onJoinBreakout}
-      />
-      <RoomAudioRenderer />
-    </LiveKitRoom>
+    <div className="pointer-events-none absolute inset-x-0 top-6 z-30 flex justify-center">
+      <div className="flex items-center gap-3 rounded-full bg-black/65 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur-md">
+        <Loader2 className="size-4 animate-spin" />
+        {copy}
+      </div>
+    </div>
   )
 }
+
+// Tabs reachable from the bottom toolbar — sidebar header omits these to
+// avoid duplicating them. Only the truly sidebar-only tabs (breakouts,
+// hooks, coach) appear in the header icon strip.
+const TOOLBAR_TAB_IDS = new Set(['chat', 'participants', 'notes', 'whiteboard', 'leaderboard'])
 
 // ----------------------------------------------------------------------------
 // InnerRoom — lives inside LiveKitRoom context so hooks work
@@ -289,7 +489,18 @@ function InnerRoom({
   onJoinBreakout,
 }: {
   session: SessionInfo
-  currentUser: { id: string; name: string }
+  currentUser: {
+    id: string
+    name: string
+    email?: string
+    avatarUrl?: string | null
+    /// Vaidix role (FACULTY / RESIDENT / ADMIN / PROGRAM_DIRECTOR) — used
+    /// to render the role badge next to your entry in the People panel.
+    role?: string
+    /// True when the local user is the host of this teaching session, so
+    /// we can show an "Organizer" badge in addition to their role.
+    isOrganizer?: boolean
+  }
   role: 'HOST' | 'CO_HOST' | 'PARTICIPANT' | 'VIEWER'
   isHostish: boolean
   onLeave: () => void
@@ -297,7 +508,6 @@ function InnerRoom({
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('chat')
-  const participants = useParticipants()
 
   const tabs = [
     { id: 'participants', label: 'People', icon: Users },
@@ -346,11 +556,13 @@ function InnerRoom({
           <div className="bg-black/30 backdrop-blur-md border border-white/7 rounded-lg px-3 py-1.5 max-w-65">
             <span className="text-sm font-medium text-white/90 truncate block">{session.title}</span>
           </div>
-          {/* Participant count */}
-          <div className="flex items-center gap-1.5 text-white/40 text-xs bg-black/20 backdrop-blur-md border border-white/6 rounded-lg px-2.5 py-1.5">
-            <Users className="w-3 h-3" />
-            <span>{participants.length}</span>
-          </div>
+          {/* Participant strip — Teams-style avatars always visible */}
+          <ParticipantStrip
+            selfName={currentUser.name}
+            selfEmail={currentUser.email}
+            selfAvatarUrl={currentUser.avatarUrl}
+            selfIsOrganizer={currentUser.isOrganizer}
+          />
         </div>
 
         {isHostish && (
@@ -364,6 +576,8 @@ function InnerRoom({
       {/* Floating control bar */}
       <ControlBar
         sessionId={session.id}
+        sessionTitle={session.title}
+        selfDisplayName={currentUser.name}
         role={role}
         isHostish={isHostish}
         sidebarOpen={sidebarOpen}
@@ -403,26 +617,30 @@ function InnerRoom({
                 {tabs.find((t) => t.id === activeTab)?.label ?? ''}
               </span>
               <div className="flex items-center gap-0.5">
-                {tabs.map((tab) => {
-                  const Icon = tab.icon
-                  const isActive = activeTab === tab.id
-                  return (
-                    <button
-                      key={tab.id}
-                      title={tab.label}
-                      onClick={() => setActiveTab(tab.id)}
-                      className={cn(
-                        'w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-150',
-                        isActive
-                          ? 'bg-teal-500/20 text-teal-400'
-                          : 'text-white/35 hover:text-white/75 hover:bg-white/6'
-                      )}
-                    >
-                      <Icon className="w-4 h-4" />
-                    </button>
-                  )
-                })}
-                <div className="w-px h-5 bg-white/10 mx-1" />
+                {/* Only sidebar-only tabs (Breakouts / Hooks / Coach). The
+                    rest are reachable from the bottom toolbar, so showing
+                    them here too is just visual noise. */}
+                {tabs
+                  .filter((t) => !TOOLBAR_TAB_IDS.has(t.id))
+                  .map((tab) => {
+                    const Icon = tab.icon
+                    const isActive = activeTab === tab.id
+                    return (
+                      <button
+                        key={tab.id}
+                        title={tab.label}
+                        onClick={() => setActiveTab(tab.id)}
+                        className={cn(
+                          'w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-150',
+                          isActive
+                            ? 'bg-teal-500/20 text-teal-400'
+                            : 'text-white/35 hover:text-white/75 hover:bg-white/6'
+                        )}
+                      >
+                        <Icon className="w-4 h-4" />
+                      </button>
+                    )
+                  })}
                 <button
                   title="Close panel"
                   onClick={() => setSidebarOpen(false)}
@@ -440,6 +658,11 @@ function InnerRoom({
                   sessionId={session.id}
                   canModerate={isHostish}
                   currentUserId={currentUser.id}
+                  currentUserName={currentUser.name}
+                  currentUserEmail={currentUser.email}
+                  currentUserAvatarUrl={currentUser.avatarUrl}
+                  currentUserRole={currentUser.role}
+                  currentUserIsOrganizer={currentUser.isOrganizer}
                 />
               )}
               {activeTab === 'chat' && (
@@ -477,6 +700,11 @@ function InnerRoom({
       <HookOverlay sessionId={session.id} />
       <PresenterAlertsHud sessionId={session.id} isHost={role === 'HOST'} />
       <LiveCaptionsOverlay sessionId={session.id} />
+      <HandRaiseNotifications />
+      {/* Headless join/leave chime — plays a soft 2-note tone when remote
+          participants connect or disconnect. Default on; the toolbar
+          NotificationSoundsToggle lets the user mute. */}
+      <NotificationSounds />
     </div>
   )
 }
@@ -486,6 +714,8 @@ function InnerRoom({
 // ----------------------------------------------------------------------------
 function ControlBar({
   sessionId,
+  sessionTitle,
+  selfDisplayName,
   role,
   isHostish,
   sidebarOpen,
@@ -494,6 +724,12 @@ function ControlBar({
   onLeave,
 }: {
   sessionId: string
+  /// Friendly session title for the PiP mini-window. Threaded down from
+  /// the page so users see "Chat with Avinash" not "session-{cuid}".
+  sessionTitle?: string
+  /// Friendly self-name for the PiP mini-window. Comes from the
+  /// DB-authoritative profile lookup at page render.
+  selfDisplayName?: string
   role: 'HOST' | 'CO_HOST' | 'PARTICIPANT' | 'VIEWER'
   isHostish: boolean
   sidebarOpen: boolean
@@ -502,6 +738,8 @@ function ControlBar({
   onLeave: () => void
 }) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant()
+  const room = useRoomContext()
+  const client = useVideoRoomClient()
   const [isSharing, setIsSharing] = useState(false)
   const [handRaised, setHandRaised] = useState(false)
   const [bgPickerOpen, setBgPickerOpen] = useState(false)
@@ -546,41 +784,44 @@ function ControlBar({
     }
   }, [isCameraEnabled, localParticipant])
 
-  // Sync hand-raise state with LiveKit participant metadata
+  // Sync hand-raise state with LiveKit participant metadata. metadata is an
+  // externally-mutated property on the LiveKit Participant — this effect is
+  // the subscription bridge between LiveKit and React state. Computed into
+  // a single value so the setState fires exactly once per metadata change.
   useEffect(() => {
-    if (!localParticipant.metadata) {
-      setHandRaised(false)
-      return
+    let raised = false
+    if (localParticipant.metadata) {
+      try {
+        const parsed = JSON.parse(localParticipant.metadata)
+        raised = parsed?.handRaised === true
+      } catch { /* malformed metadata — leave raised=false */ }
     }
-    try {
-      const parsed = JSON.parse(localParticipant.metadata)
-      setHandRaised(parsed?.handRaised === true)
-    } catch {
-      setHandRaised(false)
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setHandRaised(raised)
   }, [localParticipant.metadata])
 
   const toggleHand = useCallback(async () => {
     const next = !handRaised
-    await localParticipant.setMetadata(
-      next ? JSON.stringify({ handRaised: true, at: Date.now() }) : '{}'
-    )
+    // LiveKit refuses signal sends until the room WebSocket is fully connected
+    // ("cannot send signal request before connected, type: updateMetadata").
+    // Skip silently if the user clicks during reconnect/initial-connect.
+    if (room.state !== ConnectionState.Connected) return
+    try {
+      await localParticipant.setMetadata(
+        next ? JSON.stringify({ handRaised: true, at: Date.now() }) : '{}'
+      )
+    } catch (err) {
+      console.warn('[hand-raise] setMetadata failed:', err)
+      return
+    }
     setHandRaised(next)
     // Emit a HAND_RAISE engagement signal only on raise (not on lower) so the
     // leaderboard's `recentHandRaises` aggregate (engagement-service.ts) stays
-    // aligned with the metadata broadcast. Failure is non-fatal — the LiveKit
-    // metadata is the source of truth for the visual hand-raise state.
+    // aligned with the metadata broadcast.
     if (next) {
-      void fetch(`/api/classroom/sessions/${sessionId}/engagement-signals`, {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ kind: 'HAND_RAISE' }),
-      }).catch(() => {
-        /* engagement signal is best-effort; UI hand-raise already broadcast */
-      })
+      void client.emitEngagementSignal(sessionId, 'HAND_RAISE').catch(() => {/* best-effort */})
     }
-  }, [handRaised, localParticipant, sessionId])
+  }, [handRaised, localParticipant, sessionId, room, client])
 
   const toggleScreen = useCallback(async () => {
     try {
@@ -619,7 +860,7 @@ function ControlBar({
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ delay: 0.15, type: 'spring', damping: 22, stiffness: 220 }}
-        className="flex items-center gap-2 bg-zinc-900/90 backdrop-blur-2xl border border-white/7 rounded-[28px] px-4 py-3 shadow-2xl shadow-black/70"
+        className="flex items-center gap-2 bg-zinc-950/80 backdrop-blur-2xl border border-white/10 rounded-[28px] px-4 py-3 shadow-2xl shadow-black/70"
       >
         {/* Mic */}
         {role !== 'VIEWER' && (
@@ -629,19 +870,24 @@ function ControlBar({
               ? <Mic className="w-5 h-5" />
               : <MicOff className="w-5 h-5" />}
             label={isMicrophoneEnabled ? 'Mute' : 'Unmute'}
-            variant={isMicrophoneEnabled ? 'default' : 'danger'}
+            variant={isMicrophoneEnabled ? 'active' : 'danger'}
+            color="green"
+            pulse={isMicrophoneEnabled}
           />
         )}
 
         {/* Camera + background picker (half-pill split button) */}
         {role !== 'VIEWER' && (
           <div className="relative flex flex-col items-center gap-1.5 group">
-            <div
+            <motion.div
+              whileHover={{ scale: 1.06 }}
+              whileTap={{ scale: 0.93 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 22 }}
               className={cn(
                 'flex items-stretch rounded-full overflow-hidden transition-all duration-200',
                 isCameraEnabled
-                  ? 'bg-white/10 hover:bg-white/14'
-                  : 'bg-red-500/15 hover:bg-red-500/22'
+                  ? 'bg-sky-500/20 hover:bg-sky-500/32 shadow-[0_0_0_1px_rgba(14,165,233,0.35),0_0_16px_rgba(14,165,233,0.3)]'
+                  : 'bg-red-500/30 hover:bg-red-500/40 shadow-[0_0_0_1px_rgba(239,68,68,0.45),0_0_16px_rgba(239,68,68,0.3)]'
               )}
             >
               {/* Main camera toggle */}
@@ -650,7 +896,7 @@ function ControlBar({
                 title={isCameraEnabled ? 'Stop video' : 'Start video'}
                 className={cn(
                   'w-10 h-12 flex items-center justify-center transition-colors duration-200 pl-2',
-                  isCameraEnabled ? 'text-white/90' : 'text-red-400'
+                  isCameraEnabled ? 'text-sky-200' : 'text-red-300'
                 )}
               >
                 {isCameraEnabled
@@ -663,15 +909,15 @@ function ControlBar({
                 title="Change background"
                 className={cn(
                   'w-6 h-12 flex items-center justify-center border-l transition-colors duration-200 pr-1',
-                  isCameraEnabled ? 'border-white/10' : 'border-red-500/20',
+                  isCameraEnabled ? 'border-sky-500/20' : 'border-red-500/20',
                   bgPickerOpen
                     ? 'text-teal-400'
-                    : isCameraEnabled ? 'text-white/30 hover:text-white/70' : 'text-red-400/60 hover:text-red-400'
+                    : isCameraEnabled ? 'text-sky-300/40 hover:text-sky-300' : 'text-red-400/60 hover:text-red-400'
                 )}
               >
                 <ChevronDown className={cn('w-3 h-3 transition-transform duration-150', bgPickerOpen && 'rotate-180')} />
               </button>
-            </div>
+            </motion.div>
             <span className="text-[11px] text-white/40 group-hover:text-white/70 transition-colors leading-none">
               Video
             </span>
@@ -695,6 +941,7 @@ function ControlBar({
                 : <Monitor className="w-5 h-5" />}
               label={isSharing ? 'Stop share' : 'Share screen'}
               variant={isSharing ? 'active' : 'default'}
+              color="violet"
             />
           </>
         )}
@@ -706,6 +953,7 @@ function ControlBar({
             icon={<Hand className="w-5 h-5" />}
             label={handRaised ? 'Lower hand' : 'Raise hand'}
             variant={handRaised ? 'active' : 'default'}
+            color="amber"
           />
         )}
 
@@ -759,22 +1007,28 @@ function ControlBar({
 
         <Divider />
 
-        {/* UX accessory cluster: noise toggle + PiP + pop-out — small icons,
-            grouped to the right of the main pill so they don't crowd primary
-            actions. NoiseSuppressionToggle is a labeled chip; PiP and PopOut
-            are icon-only since they're enhancement features. */}
-        {role !== 'VIEWER' && <NoiseSuppressionToggle sessionId={sessionId} />}
-        <PictureInPictureButton sessionId={sessionId} />
+        {/* PiP + pop-out + mute-notifications accessories */}
+        <PictureInPictureButton
+          sessionId={sessionId}
+          sessionTitle={sessionTitle}
+          selfDisplayName={selfDisplayName}
+        />
         <PopOutWindowButton sessionId={sessionId} />
+        <NotificationSoundsToggle />
+
+        {/* Headless always-on noise suppression — no UI rendered */}
+        <NoiseSuppressionToggle sessionId={sessionId} />
       </motion.div>
 
       {/* Leave — separate pill, visually distinct */}
       <motion.button
         initial={{ y: 20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ delay: 0.22, type: 'spring', damping: 22, stiffness: 220 }}
+        whileHover={{ scale: 1.05 }}
+        whileTap={{ scale: 0.93 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 22 }}
         onClick={onLeave}
-        className="flex items-center gap-2 bg-red-500 hover:bg-red-400 active:scale-95 text-white rounded-full h-12 px-6 font-semibold text-sm shadow-xl shadow-red-500/30 transition-all duration-200 shrink-0"
+        className="flex items-center gap-2 bg-red-500 hover:bg-red-400 text-white rounded-full h-12 px-6 font-semibold text-sm shadow-xl shadow-red-500/40 hover:shadow-red-500/60 transition-shadow duration-200 shrink-0"
       >
         <PhoneOff className="w-5 h-5" />
         Leave
@@ -787,38 +1041,64 @@ function ControlBar({
 // Individual control button
 // ----------------------------------------------------------------------------
 type CtrlVariant = 'default' | 'danger' | 'active'
+type CtrlColor = 'default' | 'green' | 'blue' | 'violet' | 'amber'
 
 function CtrlBtn({
   onClick,
   icon,
   label,
   variant = 'default',
+  color = 'default',
+  pulse = false,
 }: {
   onClick: () => void
   icon: React.ReactNode
   label: string
   variant?: CtrlVariant
+  color?: CtrlColor
+  pulse?: boolean
 }) {
+  const circleCls = cn(
+    'relative w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200',
+    // Danger — red, clearly visible with outer glow
+    variant === 'danger'  && 'bg-red-500/30 text-red-300 shadow-[0_0_0_1px_rgba(239,68,68,0.45),0_0_18px_rgba(239,68,68,0.35)] hover:bg-red-500/40',
+    // Active states — strong color + outer glow so it's visible at rest
+    variant === 'active'  && color === 'default' && 'bg-teal-500/30 text-teal-200 shadow-[0_0_0_1px_rgba(20,184,166,0.5),0_0_18px_rgba(20,184,166,0.35)] hover:bg-teal-500/40',
+    variant === 'active'  && color === 'green'   && 'bg-emerald-500/30 text-emerald-200 shadow-[0_0_0_1px_rgba(16,185,129,0.5),0_0_18px_rgba(16,185,129,0.4)] hover:bg-emerald-500/40',
+    variant === 'active'  && color === 'blue'    && 'bg-sky-500/30 text-sky-200 shadow-[0_0_0_1px_rgba(14,165,233,0.5),0_0_18px_rgba(14,165,233,0.4)] hover:bg-sky-500/40',
+    variant === 'active'  && color === 'violet'  && 'bg-violet-500/30 text-violet-200 shadow-[0_0_0_1px_rgba(139,92,246,0.5),0_0_18px_rgba(139,92,246,0.4)] hover:bg-violet-500/40',
+    variant === 'active'  && color === 'amber'   && 'bg-amber-500/30 text-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.5),0_0_18px_rgba(245,158,11,0.4)] hover:bg-amber-500/40',
+    // Idle — visible color identity even at rest (20%+ opacity)
+    variant === 'default' && color === 'default' && 'bg-white/12 text-white/75 shadow-[0_0_0_1px_rgba(255,255,255,0.1)] hover:bg-white/22 hover:text-white',
+    variant === 'default' && color === 'green'   && 'bg-emerald-500/20 text-emerald-300 shadow-[0_0_0_1px_rgba(16,185,129,0.25)] hover:bg-emerald-500/32 hover:text-emerald-200',
+    variant === 'default' && color === 'blue'    && 'bg-sky-500/20 text-sky-300 shadow-[0_0_0_1px_rgba(14,165,233,0.25)] hover:bg-sky-500/32 hover:text-sky-200',
+    variant === 'default' && color === 'violet'  && 'bg-violet-500/20 text-violet-300 shadow-[0_0_0_1px_rgba(139,92,246,0.25)] hover:bg-violet-500/32 hover:text-violet-200',
+    variant === 'default' && color === 'amber'   && 'bg-amber-500/20 text-amber-300 shadow-[0_0_0_1px_rgba(245,158,11,0.25)] hover:bg-amber-500/32 hover:text-amber-200',
+  )
+
   return (
-    <button
+    <motion.button
       onClick={onClick}
       title={label}
+      whileHover={{ scale: 1.08 }}
+      whileTap={{ scale: 0.91 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 22 }}
       className="flex flex-col items-center gap-1.5 group outline-none"
     >
-      <div
-        className={cn(
-          'w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 group-active:scale-95',
-          variant === 'default' && 'bg-white/10 text-white/90 hover:bg-white/18',
-          variant === 'danger'  && 'bg-red-500/15 text-red-400 hover:bg-red-500/25',
-          variant === 'active'  && 'bg-teal-500/20 text-teal-300 shadow-[0_0_0_1.5px_theme(colors.teal.500/0.4)] hover:bg-teal-500/30',
-        )}
-      >
+      <div className={circleCls}>
         {icon}
+        {pulse && variant === 'active' && (
+          <motion.span
+            animate={{ opacity: [0.2, 0.55, 0.2], scale: [1, 1.12, 1] }}
+            transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
+            className="absolute inset-0 rounded-full border border-emerald-400/40 pointer-events-none"
+          />
+        )}
       </div>
       <span className="text-[11px] text-white/40 group-hover:text-white/70 transition-colors leading-none">
         {label}
       </span>
-    </button>
+    </motion.button>
   )
 }
 
@@ -831,6 +1111,7 @@ function Divider() {
 // ----------------------------------------------------------------------------
 function HostControlsMenu({ sessionId, isHost }: { sessionId: string; isHost: boolean }) {
   const room = useRoomContext()
+  const client = useVideoRoomClient()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -841,13 +1122,7 @@ function HostControlsMenu({ sessionId, isHost }: { sessionId: string; isHost: bo
       const me = room.localParticipant.identity
       const others = Array.from(room.remoteParticipants.values()).filter((p) => p.identity !== me)
       await Promise.all(
-        others.map((p) =>
-          fetch(`/api/classroom/sessions/${sessionId}/participants/${p.identity}/mute`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ muted: true }),
-          })
-        )
+        others.map((p) => client.muteParticipant(sessionId, p.identity, true)),
       )
     } finally {
       setBusy(false)
@@ -858,15 +1133,11 @@ function HostControlsMenu({ sessionId, isHost }: { sessionId: string; isHost: bo
   async function copyShareLink() {
     setBusy(true)
     try {
-      const res = await fetch(`/api/classroom/sessions/${sessionId}/share-link`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ttlHours: 24 }),
-      })
-      const json = await res.json()
-      if (!json.ok) return
-      await navigator.clipboard.writeText(json.data.url)
-      alert(`Share link copied. Expires: ${new Date(json.data.expiresAt).toLocaleString()}`)
+      const link = await client.createShareLink(sessionId, 24)
+      await navigator.clipboard.writeText(link.url)
+      alert(`Share link copied. Expires: ${new Date(link.expiresAt).toLocaleString()}`)
+    } catch {
+      /* user-cancellable; nothing to show */
     } finally {
       setBusy(false)
       setOpen(false)
@@ -877,7 +1148,7 @@ function HostControlsMenu({ sessionId, isHost }: { sessionId: string; isHost: bo
     if (!confirm('End this session for everyone?')) return
     setBusy(true)
     try {
-      await fetch(`/api/classroom/sessions/${sessionId}/end`, { method: 'POST' })
+      await client.endSession(sessionId)
     } finally {
       setBusy(false)
       setOpen(false)

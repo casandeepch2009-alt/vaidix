@@ -28,7 +28,7 @@ import {
 } from '@/server/services/ai/gemini';
 import { env } from '@/lib/env';
 
-const SYSTEM_PROMPT = `You are an instructional designer for ophthalmology faculty at LV Prasad Eye Institute.
+const SYSTEM_PROMPT = `You are an ophthalmology medical educator + instructional designer at LV Prasad Eye Institute.
 You convert source teaching material into a clean, lecture-ready slide outline for a 60-minute live session.
 
 OUTPUT — strict JSON, no prose, no markdown fences:
@@ -45,14 +45,35 @@ OUTPUT — strict JSON, no prose, no markdown fences:
   ]
 }
 
-RULES
-- 14-22 slides total for a 1-hour lecture. Open with a TITLE_ONLY hero, close with CLOSING.
-- Insert one INTERACTION slide every 6-8 slides (poll, T/F, dilemma, case-based).
+STRUCTURE RULES
+- 14-22 slides total for a 1-hour lecture. Open with TITLE_ONLY hero, close with CLOSING.
 - Bullets are crisp phrases, not full sentences. No trailing periods on bullets.
-- Title slides use the deck title. CLOSING is "Thank you" or "Q&A".
-- Never invent clinical claims that are not in the source. If the source is sparse,
-  output fewer slides rather than padding.
-- Order matters — slides will be rendered in array order.`;
+- CLOSING is "Thank you" or "Q&A". Title slides use the deck title.
+- Order matters — slides render in array order.
+
+PEDAGOGY RULES (VARK multimodal — ophthalmology residency)
+- Tailor depth to the stated learner level. Interns/PGY-1 need anatomy-first, classification-heavy.
+  Senior residents/fellows need decision-points, evidence, and edge cases.
+- Include AT LEAST ONE IMAGE_FOCUS slide for visual learning (slit-lamp / fundus / OCT / FFA / ICGA /
+  USG / surgical-step image placeholders). Title states what the image shows; bullet[0] is the caption
+  / interpretation key.
+- Include AT LEAST ONE INTERACTION slide every 6-8 slides (poll, T/F, key-feature question, clinical
+  dilemma). Each option is a separate bullet, written as a discrete answer choice.
+- Include AT LEAST ONE INTERACTION slide formatted as a competency-check question testing the most
+  diagnostic discriminator for this topic (e.g. AAC vs PAC, NPDR severity, masquerade syndromes).
+- Include EXACTLY ONE slide near the end titled "Common pitfalls" or "Learner errors" with 4-6 bullets
+  capturing where residents most often go wrong on this topic.
+- Speaker notes carry the *why* — the reasoning a presenter would say aloud. Bullets carry the *what*.
+
+CONTENT RULES
+- Anchor every clinical claim to the source. Never invent dosages, drug names, classification cutoffs,
+  or procedural steps that aren't in the source. If the source is sparse, output fewer slides.
+- Ophthalmology-specific vocabulary throughout — slit-lamp, fundoscopy, OCT, FFA, ICGA, ultrasonography,
+  laser, wet-lab, microsurgery, slit-lamp findings, intraocular landmarks. No generic "the patient
+  presents…" pablum.
+- Where source mentions an imaging modality, prefer IMAGE_FOCUS for that slide.
+- Where source mentions a classification system (e.g. ETDRS, Shaffer, Spaeth, AAO PPP), put the
+  classification on a TWO_COLUMN slide so it scans cleanly.`;
 
 interface RawSlide {
   layout?: string;
@@ -220,6 +241,8 @@ export interface ForgeInput {
   recordingId?: string | null;
   requestedById: string;
   inputTitle?: string;
+  /** e.g. "PGY-1 resident", "senior resident", "vitreoretinal fellow". Defaults to "ophthalmology resident". */
+  learnerLevel?: string;
 }
 
 export class DeckForgeError extends Error {
@@ -277,7 +300,7 @@ export async function forgeDeck(input: ForgeInput): Promise<ForgeOutcome> {
     // Build the multimodal Gemini prompt.
     const userParts: Array<{ text: string } | { inlineData: { mimeType: string; data: string } }> = [];
     const headerLines: string[] = [
-      `Target audience: ophthalmology residents at LVPEI`,
+      `Target learner: ${input.learnerLevel ?? 'ophthalmology resident at LVPEI'}`,
       `Target session length: 60 minutes`,
     ];
     if (documentSource) {

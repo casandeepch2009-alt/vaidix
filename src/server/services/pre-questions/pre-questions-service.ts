@@ -16,10 +16,12 @@ import { db } from '@/lib/db';
 import {
   PreSessionQuestionUrgency,
   Role,
+  UserStatus,
   type Prisma,
 } from '@prisma/client';
 import { getQueue, QUEUES } from '@/lib/queue';
 import { audit, AUDIT_EVENTS } from '@/server/services/audit';
+import { emit } from '@/server/services/notifications-service';
 import {
   clusterPreQuestions,
   type ClusterInputQuestion,
@@ -134,6 +136,23 @@ export async function submitQuestion(
     select: { id: true },
   });
   await scheduleRecluster(sessionId);
+
+  // Notify the session host (faculty) that a new pre-conference question was
+  // posted. Skip if the submitter IS the host (they know what they wrote).
+  const session = await db.teachingSession.findUnique({
+    where: { id: sessionId },
+    select: { hostId: true, title: true, host: { select: { status: true } } },
+  });
+  if (session && session.hostId !== actor.userId && session.host.status === UserStatus.ACTIVE) {
+    await emit({
+      userId: session.hostId,
+      kind: 'prequestion.posted',
+      title: `New pre-class question for "${session.title}"`,
+      body: content.length > 100 ? `${content.slice(0, 97)}…` : content,
+      payload: { sessionId, questionId: created.id, urgency: input.urgency ?? 'NORMAL' },
+    });
+  }
+
   return created;
 }
 

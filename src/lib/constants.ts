@@ -132,6 +132,7 @@ export const ROLE_LABELS: Record<UserRole, string> = {
 export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: string; badge?: string }[]> = {
   resident: [
     { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
+    { label: 'Inbox', href: '/inbox', icon: 'Bell' },
     { label: 'Topics', href: '/topics', icon: 'LayoutGrid' },
     { label: 'My Progress', href: '/progress', icon: 'TrendingUp' },
     { label: 'Reviews', href: '/reviews', icon: 'RotateCcw' },
@@ -142,6 +143,7 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
   ],
   faculty: [
     { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
+    { label: 'Inbox', href: '/inbox', icon: 'Bell' },
     { label: 'Learners', href: '/faculty/learners', icon: 'Users' },
     { label: 'Assess', href: '/faculty/assess/dops', icon: 'ClipboardCheck' },
     { label: 'Cases', href: '/faculty/cases', icon: 'BookOpen' },
@@ -150,10 +152,12 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
     { label: 'Classroom', href: '/classroom', icon: 'Video' },
     { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
     { label: 'Documents', href: '/faculty/documents', icon: 'FolderOpen' },
+    { label: 'Blueprints', href: '/faculty/blueprints', icon: 'Sparkles' },
     { label: 'Approvals', href: '/inbox/approvals', icon: 'Inbox' },
   ],
   program_director: [
     { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
+    { label: 'Inbox', href: '/inbox', icon: 'Bell' },
     { label: 'Competency Map', href: '/program/competency-map', icon: 'Map' },
     { label: 'Milestones', href: '/program/milestones', icon: 'Flag' },
     { label: 'Accreditation', href: '/program/accreditation', icon: 'Award' },
@@ -161,11 +165,13 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
     { label: 'Cohort Analytics', href: '/faculty/cohort', icon: 'BarChart3' },
     { label: 'Live Classes', href: '/calendar', icon: 'CalendarDays' },
     { label: 'Documents', href: '/faculty/documents', icon: 'FolderOpen' },
+    { label: 'Blueprints', href: '/faculty/blueprints', icon: 'Sparkles' },
     { label: 'Approvals', href: '/inbox/approvals', icon: 'Inbox' },
     { label: 'Cohorts', href: '/admin/cohorts', icon: 'UsersRound' },
   ],
   admin: [
     { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
+    { label: 'Inbox', href: '/inbox', icon: 'Bell' },
     { label: 'Institution', href: '/admin/institution', icon: 'Building2' },
     { label: 'Users', href: '/admin/users', icon: 'UserCog' },
     { label: 'Invitations', href: '/admin/invitations', icon: 'Inbox' },
@@ -182,6 +188,7 @@ export const SIDEBAR_NAV: Record<UserRole, { label: string; href: string; icon: 
   // the additions below match that surface plus Cases for read-only review.
   external_learner: [
     { label: 'Dashboard', href: '/dashboard', icon: 'LayoutDashboard' },
+    { label: 'Inbox', href: '/inbox', icon: 'Bell' },
     { label: 'Cases', href: '/cases', icon: 'BookOpen' },
     { label: 'Pearls', href: '/pearls', icon: 'Lightbulb' },
     { label: 'Atlas', href: '/atlas', icon: 'ScanEye' },

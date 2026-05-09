@@ -467,6 +467,7 @@ model User {
   cmeCredits              CmeCredit[]
   sessionBans             SessionBan[]
   deckForgeJobs           DeckForgeJob[]
+  blueprints              Blueprint[]                   @relation("BlueprintRequester")
   simulatorRuns           SimulatorRun[]
   challengeAttempts       ChallengeAttempt[]
   vcceResults             VcceResult[]
@@ -1928,6 +1929,28 @@ model Slide {
   @@unique([deckForgeJobId, order])
   @@index([deckForgeJobId])
   @@map("slides")
+}
+
+// Curriculum / instructional-design blueprint for a topic. One Gemini call,
+// returns a structured markdown plan (learner profile, VARK adaptation,
+// learning theory, instructional tactics, feedback loop, assessment, common
+// errors). Distinct from Deck Forge: this is the *plan*, slides are the
+// *content*. Future: wire blueprintId onto DeckForgeJob to chain blueprint →
+// slide generation when faculty wants pedagogically-grounded decks.
+model Blueprint {
+  id            String   @id @default(cuid())
+  requestedById String
+  topic         String   @db.Text // the ophthalmology topic / module name
+  learnerLevel  String? // "PGY-1", "senior resident", "vitreoretinal fellow", etc.
+  content       String   @db.Text // generated markdown
+  source        String   @default("gemini") // "gemini" | "vaidix-core" (Phase B)
+  createdAt     DateTime @default(now())
+
+  requestedBy User @relation("BlueprintRequester", fields: [requestedById], references: [id])
+
+  @@index([requestedById])
+  @@index([createdAt])
+  @@map("blueprints")
 }
 
 // ════════════════════════════════════════════════════════════════════════════

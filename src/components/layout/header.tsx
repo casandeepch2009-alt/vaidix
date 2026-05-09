@@ -3,14 +3,14 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'next-auth/react'
-import { Bell, Search, LogOut, User, ChevronDown, Settings, Shuffle, X } from 'lucide-react'
+import { Search, LogOut, User, ChevronDown, Settings, Shuffle, X } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useRole } from '@/contexts/role-context'
 import { SIDEBAR_NAV, ROLE_LABELS } from '@/lib/constants'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
+import { NotificationBell } from '@/components/layout/notification-bell'
 import { ProgramSwitcher } from '@/components/layout/program-switcher'
 import type { UserRole } from '@/lib/types'
 
@@ -124,11 +124,8 @@ export function Header() {
         {/* Theme toggle — ghost, no visual noise */}
         <ThemeToggle />
 
-        {/* Notifications — subtle dot badge */}
-        <Button variant="ghost" size="icon" className="relative size-8" aria-label="Notifications">
-          <Bell className="size-4 text-muted-foreground" />
-          <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-teal-500" />
-        </Button>
+        {/* Notifications — popover backed by /api/notifications */}
+        <NotificationBell />
 
         {/* Divider */}
         <div className="mx-1.5 h-5 w-px bg-border/60" />

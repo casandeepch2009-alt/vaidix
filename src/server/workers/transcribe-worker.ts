@@ -20,6 +20,7 @@ import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { RecordingStatus } from '@prisma/client';
 import { getTranscriptionProvider, type TranscriptionResult, type TranscriptionSegment } from '@/server/services/transcription';
 import { audit, AUDIT_EVENTS } from '@/server/services/audit';
+import { emit } from '@/server/services/notifications-service';
 
 interface TranscribeJobData {
   recordingId: string;
@@ -216,6 +217,25 @@ async function transcribeJob(data: TranscribeJobData): Promise<{ recordingId: st
         languages: [...groupedByLang.keys()],
       },
     });
+
+    // Notify the session host that the recording and transcript are ready.
+    const sessionRow = await db.teachingSession.findUnique({
+      where: { id: recording.sessionId },
+      select: { title: true, hostId: true, host: { select: { status: true } } },
+    });
+    if (sessionRow && sessionRow.host.status === 'ACTIVE') {
+      await emit({
+        userId: sessionRow.hostId,
+        kind: 'recording.ready',
+        title: `Recording & transcript ready: ${sessionRow.title}`,
+        body: `${result.segments.length} segments transcribed via ${result.provider}`,
+        payload: {
+          sessionId: recording.sessionId,
+          recordingId: recording.id,
+          provider: result.provider,
+        },
+      });
+    }
 
     return { recordingId: recording.id, provider: result.provider };
   } finally {

@@ -34,6 +34,10 @@ export default async function EditSessionPage({ params }: PageProps) {
       metadata: true,
       tags: true,
       approvalStatus: true,
+      // Recurrence rule (RRULE) — when present the edit form surfaces the
+      // Teams/Outlook-style "this occurrence / this and following / entire
+      // series" scope picker so the host can choose how the change applies.
+      recurrenceRule: true,
       cohort: { select: { id: true, name: true } },
       invites: {
         include: {
@@ -116,6 +120,7 @@ export default async function EditSessionPage({ params }: PageProps) {
           maxParticipants: s.maxParticipants,
           objectives: (s.objectives as Array<{ id: string; text: string; blooms: number }> | null) ?? [],
           metadata: s.metadata,
+          recurrenceRule: s.recurrenceRule,
         }}
         faculty={faculty}
         cohorts={cohorts.map((c) => ({ id: c.id, name: c.name, memberCount: c._count.members }))}

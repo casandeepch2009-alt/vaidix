@@ -22,6 +22,11 @@ export const authConfig: NextAuthConfig = {
     async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id;
+        // Explicit so the display name reaches the LiveKit token mint —
+        // Auth.js's default user→token copy isn't always reliable when
+        // the session object is custom-shaped.
+        token.name = (user as unknown as { name?: string | null }).name ?? token.name ?? null;
+        token.email = (user as unknown as { email?: string | null }).email ?? token.email ?? null;
         token.role = (user as unknown as { role: Role }).role;
         token.passwordVersion = (user as unknown as { passwordVersion: number }).passwordVersion;
         // W6.11: hydrate programs[] + activeProgramId from the authorize()
@@ -52,6 +57,10 @@ export const authConfig: NextAuthConfig = {
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
+        // Explicit copy: Auth.js defaults rely on user→token→session passing
+        // intact, but our custom session.user augmentation can shadow it.
+        session.user.name = (token.name as string | null | undefined) ?? session.user.name ?? null;
+        session.user.email = (token.email as string | null | undefined) ?? session.user.email ?? null;
         session.user.role = token.role as Role;
         // Required by requireAuth() for the per-request passwordVersion
         // re-check (HARDENING-PLAN item #13).

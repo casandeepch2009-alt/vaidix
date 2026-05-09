@@ -16,22 +16,21 @@ const PRESETS: Preset[] = [
   { id: 'none',         label: 'None',       type: 'none' },
   { id: 'blur-light',   label: 'Soft blur',  type: 'blur', strength: 8  },
   { id: 'blur-strong',  label: 'Heavy blur', type: 'blur', strength: 22 },
-  { id: 'studio',       label: 'Studio',     type: 'image', src: '/bg/studio.svg'  },
-  { id: 'vaidix',       label: 'Vaidix',     type: 'image', src: '/bg/vaidix.svg'  },
-  { id: 'ocean',        label: 'Ocean',      type: 'image', src: '/bg/ocean.svg'   },
-  { id: 'space',        label: 'Space',      type: 'image', src: '/bg/space.svg'   },
+  // Real photoreal/3D-render wallpapers, downloaded from Unsplash and
+  // bundled in /public/bg as 1920x1080 JPEGs. These replace the previous
+  // hand-drawn SVG gradients which couldn't compete with Teams/Zoom.
+  { id: 'aurora',       label: 'Aurora',     type: 'image', src: '/bg/aurora.jpg'   },
+  { id: 'liquid',       label: 'Liquid',     type: 'image', src: '/bg/liquid.jpg'   },
+  { id: 'spectrum',     label: 'Spectrum',   type: 'image', src: '/bg/spectrum.jpg' },
+  { id: 'waves',        label: 'Waves',      type: 'image', src: '/bg/waves.jpg'    },
+  { id: 'pastel',       label: 'Pastel',     type: 'image', src: '/bg/pastel.jpg'   },
+  { id: 'cosmic',       label: 'Cosmic',     type: 'image', src: '/bg/cosmic.jpg'   },
+  { id: 'sunset',       label: 'Sunset',     type: 'image', src: '/bg/sunset.jpg'   },
+  { id: 'studio',       label: 'Studio',     type: 'image', src: '/bg/studio2.jpg'  },
+  // Vaidix-branded SVG kept for institutional branding scenarios. Already
+  // has explicit width/height so it rasterizes correctly.
+  { id: 'vaidix',       label: 'Vaidix',     type: 'image', src: '/bg/vaidix.svg'   },
 ]
-
-// CSS preview colours for each preset (no network request needed for the picker UI)
-const PREVIEW_CLASS: Record<string, string> = {
-  none:        'bg-zinc-800 border border-white/10',
-  'blur-light': 'bg-zinc-700',
-  'blur-strong':'bg-zinc-600',
-  studio:      'bg-gradient-to-b from-[#1a1f36] to-[#0d1117]',
-  vaidix:      'bg-gradient-to-br from-teal-900 to-zinc-950',
-  ocean:       'bg-gradient-to-b from-[#0c2461] to-[#061020]',
-  space:       'bg-gradient-to-br from-[#1a0533] to-[#04000f]',
-}
 
 export function BgPicker({ onClose }: { onClose: () => void }) {
   const { localParticipant } = useLocalParticipant()
@@ -50,20 +49,36 @@ export function BgPicker({ onClose }: { onClose: () => void }) {
         return
       }
 
+      const mod = await import('@livekit/track-processors')
+      if (!mod.supportsBackgroundProcessors()) {
+        setError('Background filters not supported in this browser')
+        return
+      }
+
       if (preset.type === 'none') {
         await track.stopProcessor()
       } else if (preset.type === 'blur') {
-        const { BackgroundBlur } = await import('@livekit/track-processors')
-        await track.setProcessor(BackgroundBlur(preset.strength))
+        const proc = mod.BackgroundProcessor({ mode: 'background-blur', blurRadius: preset.strength })
+        await track.setProcessor(proc)
       } else {
-        const { VirtualBackground } = await import('@livekit/track-processors')
-        await track.setProcessor(VirtualBackground(preset.src))
+        // Pre-load the image so we surface a clear error if the SVG path is
+        // bad / 404s, instead of letting the processor silently render with
+        // a transparent texture (looks like "background change not working").
+        await new Promise<void>((resolve, reject) => {
+          const img = new Image()
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error(`Image failed to load: ${preset.src}`))
+          img.src = preset.src
+        })
+        const proc = mod.BackgroundProcessor({ mode: 'virtual-background', imagePath: preset.src })
+        await track.setProcessor(proc)
       }
 
       setActive(preset.id)
     } catch (err) {
       console.error('[BgPicker]', err)
-      setError('Not supported in this browser')
+      const msg = (err as Error)?.message ?? ''
+      setError(msg.includes('Image failed') ? "Couldn't load that wallpaper" : 'Not supported in this browser')
     } finally {
       setApplying(null)
     }
@@ -90,7 +105,8 @@ export function BgPicker({ onClose }: { onClose: () => void }) {
         </button>
       </div>
 
-      {/* Preset grid */}
+      {/* Preset grid — image presets use the actual wallpaper as their
+          thumbnail (browser caches it once, so swapping later is instant). */}
       <div className="grid grid-cols-3 gap-2 p-3">
         {PRESETS.map((preset) => {
           const isActive  = active    === preset.id
@@ -109,15 +125,25 @@ export function BgPicker({ onClose }: { onClose: () => void }) {
               )}
             >
               {/* Swatch */}
-              <div
-                className={cn(
-                  'w-full aspect-video rounded-lg relative overflow-hidden',
-                  PREVIEW_CLASS[preset.id] ?? 'bg-zinc-800'
+              <div className="w-full aspect-video rounded-lg relative overflow-hidden bg-zinc-800">
+                {preset.type === 'image' && (
+                  // Native <img> here — Next/Image would need a remote
+                  // pattern config and these are local /public/bg assets.
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={preset.src}
+                    alt={preset.label}
+                    className="absolute inset-0 size-full object-cover"
+                    loading="lazy"
+                    draggable={false}
+                  />
                 )}
-              >
+                {preset.type === 'none' && (
+                  <div className="absolute inset-0 bg-zinc-800 border border-white/10 rounded-lg" />
+                )}
                 {/* Blur visualisation */}
                 {preset.type === 'blur' && (
-                  <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="absolute inset-0 bg-zinc-700 flex items-center justify-center">
                     <div
                       className="w-6 h-6 rounded-full bg-white/25"
                       style={{

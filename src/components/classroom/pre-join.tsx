@@ -16,6 +16,7 @@ export function PreJoin({
   loading,
   error,
   prereqStatus,
+  isHost = false,
 }: {
   session: {
     id: string
@@ -35,13 +36,17 @@ export function PreJoin({
   loading: boolean
   error: string | null
   prereqStatus?: PrereqStatus | null
+  isHost?: boolean
 }) {
   const start = new Date(session.scheduledStart)
   const end = new Date(session.scheduledEnd)
   const now = new Date()
   const startsInMs = start.getTime() - now.getTime()
-  const liveStartingSoon = startsInMs <= 15 * 60 * 1000 || session.status === 'LIVE'
-  const prereqBlocked = !!prereqStatus && prereqStatus.hasGate && !prereqStatus.allMet
+  // Hosts can open the room any time — a session can't go LIVE without the
+  // host, so blocking them by the 15-min window just locks them out of their
+  // own class.
+  const liveStartingSoon = isHost || startsInMs <= 15 * 60 * 1000 || session.status === 'LIVE'
+  const prereqBlocked = !isHost && !!prereqStatus && prereqStatus.hasGate && !prereqStatus.allMet
 
   return (
     <div className="mx-auto max-w-2xl py-8">
@@ -122,9 +127,11 @@ export function PreJoin({
               ? 'Connecting…'
               : prereqBlocked
                 ? 'Complete prerequisites to join'
-                : liveStartingSoon
-                  ? 'Join now'
-                  : 'Too early to join'}
+                : isHost && session.status !== 'LIVE' && startsInMs > 15 * 60 * 1000
+                  ? 'Open room early'
+                  : liveStartingSoon
+                    ? 'Join now'
+                    : 'Too early to join'}
           </Button>
         </div>
       </div>

@@ -19,6 +19,7 @@ import {
 } from './auth-service';
 import { canonicaliseMobile } from '@/lib/validation/primitives';
 import { audit, AUDIT_EVENTS } from './audit';
+import { emit } from './notifications-service';
 import { InvitationStatus, UserStatus, type Role } from '@prisma/client';
 import type { CreateInvitationInput, UpdateInvitationInput } from '@/lib/validation/auth';
 
@@ -545,7 +546,7 @@ export async function acceptInvitation(
   const loginUrl = `${env.NEXTAUTH_URL}/login`;
   const inviter = await db.user.findUnique({
     where: { id: inv.invitedById },
-    select: { email: true, name: true },
+    select: { id: true, email: true, name: true, status: true },
   });
 
   sendEmail({
@@ -563,6 +564,16 @@ export async function acceptInvitation(
         role: humanRole(inv.role),
       }),
     }).catch((err) => console.error('[invitation.accept] admin notify failed:', err));
+
+    if (inviter.status === UserStatus.ACTIVE) {
+      await emit({
+        userId: inviter.id,
+        kind: 'invitation.accepted',
+        title: `${user.name} accepted your invitation`,
+        body: `${humanRole(inv.role)} — ${user.email}`,
+        payload: { invitedUserId: user.id, role: inv.role },
+      });
+    }
   }
 
   return user;

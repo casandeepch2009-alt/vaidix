@@ -29,6 +29,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const url = new URL(req.url);
     const shareToken = url.searchParams.get('t');
 
+    // DB-authoritative display name. Auth.js's session.user.name can be
+    // stale on legacy JWTs, but the User table always carries a non-null
+    // `name` (column is NOT NULL in the schema). Fall back to email-prefix
+    // as a last defence; the LiveKit JWT then carries this as the `name`
+    // claim so peers see the registered Vaidix name.
+    const dbUser = await db.user.findUnique({
+      where: { id: user.id },
+      select: { name: true, email: true },
+    });
+    const displayName =
+      (dbUser?.name ?? '').trim() ||
+      (user.name ?? '').trim() ||
+      (dbUser?.email ?? user.email ?? '').split('@')[0];
+
     const session = await db.teachingSession.findUnique({
       where: { id: sessionId },
       select: {
@@ -59,7 +73,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         // Admin/Proposer auditing — skip admission, mint viewer token
         const token = await mintLiveKitToken({
           identity: user.id,
-          name: user.name,
+          name: displayName,
           roomName: sessionRoomName(sessionId),
           role: 'viewer',
         });
@@ -76,7 +90,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       const adm = await requestAdmission({
         sessionId,
         userId: user.id,
-        displayName: user.name,
+        displayName,
       });
       return jsonOk({ state: 'WAITING', admissionId: adm.id });
     }

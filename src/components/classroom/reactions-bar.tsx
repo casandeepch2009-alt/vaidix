@@ -1,28 +1,42 @@
 'use client'
 
-// ReactionsBar + FloatingReactionsLayer.
-//
-// The bar is a small popover triggered from the live-session control bar.
-// Picking an emoji emits a REACTION event via useSessionEvents (DC + REST).
-// FloatingReactionsLayer subscribes to the same hook, filters to REACTION
-// events, and renders each as a short-lived animated bubble that drifts
-// upward — same idiom Teams/Zoom use for reactions during a call.
-
 import { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { SmilePlus, X } from 'lucide-react'
+import { SmilePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useSessionEvents, type SessionEvent } from '@/hooks/use-session-events'
 
+// 8 × 3 grid. Row 1 = applause / hand variants, row 2 = positive / energy,
+// row 3 = emotion / mind. Ordered so the most-used reactions sit on the
+// left edge (closest to the trigger button reading direction).
 const REACTIONS = [
+  // Row 1 — applause family
+  { emoji: '👏', label: 'Clap' },
+  { emoji: '🙌', label: 'Raise hands' },
+  { emoji: '👐', label: 'Open hands' },
+  { emoji: '🤲', label: 'Palms up' },
+  { emoji: '🤝', label: 'Handshake' },
+  { emoji: '💪', label: 'Muscle' },
+  { emoji: '✊', label: 'Raised fist' },
+  { emoji: '🤗', label: 'Hug' },
+  // Row 2 — positive / energy
   { emoji: '👍', label: 'Thumbs up' },
   { emoji: '❤️', label: 'Heart' },
   { emoji: '🎉', label: 'Tada' },
+  { emoji: '🎊', label: 'Confetti' },
+  { emoji: '🔥', label: 'Fire' },
+  { emoji: '✨', label: 'Sparkle' },
+  { emoji: '🌟', label: 'Star' },
+  { emoji: '💯', label: 'Hundred' },
+  // Row 3 — emotion / mind
   { emoji: '😂', label: 'Laugh' },
   { emoji: '😮', label: 'Wow' },
-  { emoji: '🙌', label: 'Raise hands' },
-  { emoji: '🔥', label: 'Fire' },
+  { emoji: '🤯', label: 'Mind blown' },
+  { emoji: '🥺', label: 'Pleading' },
+  { emoji: '😍', label: 'Love' },
   { emoji: '💡', label: 'Idea' },
+  { emoji: '🙏', label: 'Pray' },
+  { emoji: '🚀', label: 'Rocket' },
 ] as const
 
 export function ReactionsBar({ sessionId }: { sessionId: string }) {
@@ -36,57 +50,57 @@ export function ReactionsBar({ sessionId }: { sessionId: string }) {
 
   return (
     <div className="relative flex flex-col items-center gap-1.5 group">
-      <button
+      <motion.button
         type="button"
         onClick={() => setOpen((v) => !v)}
         title="React"
+        whileHover={{ scale: 1.08 }}
+        whileTap={{ scale: 0.91 }}
+        transition={{ type: 'spring', stiffness: 420, damping: 22 }}
         className={cn(
-          'w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 group-active:scale-95',
+          'w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200',
           open
-            ? 'bg-amber-500/20 text-amber-300 shadow-[0_0_0_1.5px_theme(colors.amber.500/0.4)]'
-            : 'bg-white/10 text-white/90 hover:bg-white/18'
+            ? 'bg-amber-500/30 text-amber-200 shadow-[0_0_0_1px_rgba(245,158,11,0.5),0_0_18px_rgba(245,158,11,0.4)]'
+            : 'bg-amber-500/20 text-amber-300 shadow-[0_0_0_1px_rgba(245,158,11,0.25)] hover:bg-amber-500/32 hover:text-amber-200'
         )}
       >
         <SmilePlus className="w-5 h-5" />
-      </button>
+      </motion.button>
       <span className="text-[11px] text-white/40 group-hover:text-white/70 transition-colors leading-none">
         React
       </span>
 
       <AnimatePresence>
         {open && (
-          <motion.div
-            initial={{ opacity: 0, y: 8, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 8, scale: 0.9 }}
-            transition={{ duration: 0.14, ease: 'easeOut' }}
-            className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 bg-zinc-900/97 backdrop-blur-2xl border border-white/8 rounded-2xl shadow-2xl shadow-black/70 overflow-hidden z-50"
-          >
-            <div className="flex items-center justify-between px-3 py-2 border-b border-white/7 gap-2">
-              <span className="text-[10px] font-semibold text-white/60 tracking-wide uppercase">
-                React
-              </span>
-              <button
-                onClick={() => setOpen(false)}
-                className="text-white/30 hover:text-white/80 p-1 rounded-md hover:bg-white/8 transition-all"
-              >
-                <X className="w-3 h-3" />
-              </button>
-            </div>
-            <div className="grid grid-cols-4 gap-1 p-2">
-              {REACTIONS.map((r) => (
-                <button
+          <>
+            {/* Click-outside dismissal */}
+            <div className="fixed inset-0 z-40" onClick={() => setOpen(false)} />
+
+            <motion.div
+              initial={{ opacity: 0, y: 12, scale: 0.85 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 12, scale: 0.85 }}
+              transition={{ type: 'spring', damping: 22, stiffness: 320 }}
+              className="absolute bottom-full mb-3 left-1/2 -translate-x-1/2 z-50 grid grid-cols-[repeat(8,2.75rem)] gap-1 p-2 bg-zinc-950/90 backdrop-blur-2xl border border-white/12 rounded-2xl shadow-2xl shadow-black/80"
+            >
+              {REACTIONS.map((r, i) => (
+                <motion.button
                   key={r.emoji}
                   type="button"
                   onClick={() => pick(r.emoji)}
                   title={r.label}
-                  className="w-10 h-10 text-xl rounded-xl hover:bg-white/8 active:scale-90 transition-all duration-150 flex items-center justify-center"
+                  initial={{ opacity: 0, scale: 0.4, y: 8 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  transition={{ delay: i * 0.025, type: 'spring', stiffness: 420, damping: 18 }}
+                  whileHover={{ scale: 1.45, y: -6 }}
+                  whileTap={{ scale: 0.8 }}
+                  className="w-11 h-11 text-2xl rounded-xl hover:bg-white/8 flex items-center justify-center transition-colors duration-100"
                 >
                   {r.emoji}
-                </button>
+                </motion.button>
               ))}
-            </div>
-          </motion.div>
+            </motion.div>
+          </>
         )}
       </AnimatePresence>
     </div>
@@ -94,20 +108,33 @@ export function ReactionsBar({ sessionId }: { sessionId: string }) {
 }
 
 // ─── Floating overlay ────────────────────────────────────────────────────────
-// Renders incoming REACTION events as bubbles that drift upward and fade.
-// Each bubble is keyed by the event id so multiple simultaneous reactions
-// animate independently. The layer is pointer-events-none so it never blocks
-// clicks on the underlying video tiles.
+// Each reaction lands at a column derived from the actor's identity (so two
+// users clapping at once spawn from different horizontal positions, not on
+// top of each other) plus small per-bubble jitter for variety. Vertical start
+// height + drift distance are randomized so simultaneous claps from the same
+// person don't stack into a single visual line.
 
 interface FloatingBubble {
   id: string
   emoji: string
-  /// Horizontal launch position, 0–1 fraction of layer width. Random per
-  /// bubble so multiple reactions don't pile on the same vertical line.
   x: number
+  bottomPct: number
+  rotate: number
+  rise: number
+  duration: number
 }
 
-const BUBBLE_TTL_MS = 3500
+/// Hash actorId → stable [0.15, 0.85] horizontal column. Same person's
+/// reactions consistently launch from roughly the same column, so the grid
+/// reads as "this user is reacting from over there".
+function actorColumn(actorId: string | null): number {
+  if (!actorId) return 0.15 + Math.random() * 0.7
+  let h = 0
+  for (let i = 0; i < actorId.length; i++) {
+    h = ((h << 5) - h + actorId.charCodeAt(i)) | 0
+  }
+  return 0.12 + (Math.abs(h) % 1000) / 1000 * 0.76
+}
 
 export function FloatingReactionsLayer({ sessionId }: { sessionId: string }) {
   const [bubbles, setBubbles] = useState<FloatingBubble[]>([])
@@ -116,15 +143,21 @@ export function FloatingReactionsLayer({ sessionId }: { sessionId: string }) {
     if (e.eventType !== 'REACTION') return
     const emoji = (e.details as { emoji?: string } | null)?.emoji
     if (!emoji) return
+    const baseX = actorColumn(e.actorId)
+    const jitter = (Math.random() - 0.5) * 0.1
     const bubble: FloatingBubble = {
       id: e.id,
       emoji,
-      x: 0.18 + Math.random() * 0.64,
+      x: Math.max(0.04, Math.min(0.96, baseX + jitter)),
+      bottomPct: 12 + Math.random() * 14,
+      rotate: -20 + Math.random() * 40,
+      rise: 320 + Math.random() * 140,
+      duration: 3.2 + Math.random() * 0.8,
     }
     setBubbles((prev) => [...prev, bubble])
     window.setTimeout(() => {
       setBubbles((prev) => prev.filter((b) => b.id !== bubble.id))
-    }, BUBBLE_TTL_MS)
+    }, (bubble.duration + 0.2) * 1000)
   }
 
   useSessionEvents({ sessionId, filter: ['REACTION'], onEvent })
@@ -135,12 +168,17 @@ export function FloatingReactionsLayer({ sessionId }: { sessionId: string }) {
         {bubbles.map((b) => (
           <motion.div
             key={b.id}
-            initial={{ y: 0, opacity: 0, scale: 0.6 }}
-            animate={{ y: -340, opacity: [0, 1, 1, 0], scale: [0.6, 1.1, 1, 0.9] }}
+            initial={{ y: 0, opacity: 0, scale: 0.4, rotate: b.rotate }}
+            animate={{
+              y: -b.rise,
+              opacity: [0, 1, 1, 0],
+              scale: [0.4, 1.25, 1.1, 0.8],
+              rotate: [b.rotate, b.rotate * 0.4, -b.rotate * 0.5, b.rotate * 0.2],
+            }}
             exit={{ opacity: 0 }}
-            transition={{ duration: BUBBLE_TTL_MS / 1000, ease: 'easeOut' }}
-            style={{ left: `${b.x * 100}%`, bottom: '20%' }}
-            className="absolute text-4xl select-none"
+            transition={{ duration: b.duration, ease: 'easeOut' }}
+            style={{ left: `${b.x * 100}%`, bottom: `${b.bottomPct}%` }}
+            className="absolute text-5xl select-none drop-shadow-lg"
           >
             {b.emoji}
           </motion.div>

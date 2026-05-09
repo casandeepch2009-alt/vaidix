@@ -51,30 +51,25 @@ export async function POST(req: Request) {
     if (
       user.role !== Role.PROGRAM_DIRECTOR &&
       user.role !== Role.ADMIN &&
-      user.role !== Role.FACULTY
+      user.role !== Role.FACULTY &&
+      user.role !== Role.RESIDENT
     ) {
-      return jsonError('FORBIDDEN', 'Only Faculty, Program Directors, and Admins can schedule sessions', 403);
+      return jsonError('FORBIDDEN', 'Only Faculty, PDs, Admins, and Residents can schedule sessions', 403);
     }
 
     const body = await parseBody(req, createSessionSchema);
     if (!body.ok) return body.response;
 
-    const session = await createSession(body.data, user.id, user.role, user.activeProgramId);
-    return jsonOk({ session }, { status: 201 });
+    const { session, hostConflicts } = await createSession(body.data, user.id, user.role, user.activeProgramId);
+    // Overlapping host calendars are non-blocking (Teams parity). The client
+    // surfaces hostConflicts as a soft warning after creation succeeds.
+    return jsonOk({ session, warnings: { hostConflicts } }, { status: 201 });
   } catch (err) {
     const msg = (err as Error).message;
     if (msg === 'HOST_NOT_FOUND') return jsonError('HOST_NOT_FOUND', 'Host user not found or inactive', 404);
-    if (msg === 'HOST_NOT_FACULTY') return jsonError('HOST_NOT_FACULTY', 'Host must be Faculty, PD, or Admin', 400);
+    if (msg === 'HOST_NOT_FACULTY') return jsonError('HOST_NOT_FACULTY', 'Host must be Faculty, PD, Admin, or yourself (residents can host their own peer sessions)', 400);
     if (msg === 'COHORT_NOT_FOUND') return jsonError('COHORT_NOT_FOUND', 'Cohort not found', 404);
     if (msg === 'COHORT_PROGRAM_MISMATCH') return jsonError('COHORT_PROGRAM_MISMATCH', 'Cohort belongs to a different program', 400);
-    if (msg === 'HOST_CONFLICT') {
-      return jsonError(
-        'HOST_CONFLICT',
-        'Host has another approved session overlapping this time',
-        409,
-        (err as Error & { conflicts?: unknown }).conflicts
-      );
-    }
     if (msg === 'FORBIDDEN_PROPOSER_ROLE') return jsonError('FORBIDDEN', 'Role cannot propose sessions', 403);
     return handleUnexpected(err);
   }

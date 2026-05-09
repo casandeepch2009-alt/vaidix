@@ -22,6 +22,7 @@ const ForgeBody = z
     documentId: z.string().min(1).optional(),
     recordingId: z.string().min(1).optional(),
     inputTitle: z.string().min(1).max(120).optional(),
+    learnerLevel: z.string().min(1).max(80).optional(),
   })
   .refine((v) => Boolean(v.documentId || v.recordingId), {
     message: 'Either documentId or recordingId must be provided',
@@ -66,6 +67,7 @@ export async function POST(req: Request) {
       documentId: parsed.data.documentId ?? null,
       recordingId: parsed.data.recordingId ?? null,
       inputTitle: parsed.data.inputTitle,
+      learnerLevel: parsed.data.learnerLevel,
       requestedById: auth.user.id,
     });
 

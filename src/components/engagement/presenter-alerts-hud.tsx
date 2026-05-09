@@ -3,11 +3,13 @@
 // ════════════════════════════════════════════════════════════════════════════
 // PresenterAlertsHud — Stream D #5
 // ════════════════════════════════════════════════════════════════════════════
-// Host-only HUD that subscribes to /api/classroom/sessions/[id]/presenter-alerts
-// SSE stream. Shows incoming alerts in a stack; clicking ack POSTs to /ack.
+// Host-only HUD that subscribes to the room client's presenter-alerts stream
+// (default LMS impl uses SSE on /api/classroom/sessions/[id]/presenter-alerts).
+// Shows incoming alerts in a stack; clicking ack calls client.ackPresenterAlert.
 // Hidden from learners.
 
 import { useEffect, useRef, useState } from 'react';
+import { useVideoRoomClient } from '@/components/classroom/video-room-client';
 
 interface AlertItem {
   id: string;
@@ -30,39 +32,24 @@ export function PresenterAlertsHud({
   sessionId: string;
   isHost: boolean;
 }) {
+  const client = useVideoRoomClient();
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
   const seenIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!isHost) return;
-    const url = `/api/classroom/sessions/${sessionId}/presenter-alerts`;
-    const es = new EventSource(url, { withCredentials: true });
-    es.addEventListener('alert', (ev) => {
-      try {
-        const alert = JSON.parse((ev as MessageEvent).data) as AlertItem;
-        if (seenIds.current.has(alert.id)) return;
-        seenIds.current.add(alert.id);
-        setAlerts((prev) => [alert, ...prev].slice(0, 5));
-      } catch {
-        /* ignore malformed events */
-      }
+    const unsubscribe = client.subscribePresenterAlerts(sessionId, (alert) => {
+      if (seenIds.current.has(alert.id)) return;
+      seenIds.current.add(alert.id);
+      setAlerts((prev) => [alert as AlertItem, ...prev].slice(0, 5));
     });
-    es.addEventListener('error', () => {
-      // Browser auto-reconnects on connection drops; nothing to do here.
-    });
-    return () => es.close();
-  }, [sessionId, isHost]);
+    return unsubscribe;
+  }, [sessionId, isHost, client]);
 
   async function ack(id: string) {
     setAlerts((prev) => prev.filter((a) => a.id !== id));
-    try {
-      await fetch(
-        `/api/classroom/sessions/${sessionId}/presenter-alerts/${id}/ack`,
-        { method: 'POST', credentials: 'include' }
-      );
-    } catch {
-      // If ack fails the next SSE tick re-delivers — UI removed it optimistically.
-    }
+    // If ack fails the next SSE tick re-delivers — UI removed it optimistically.
+    await client.ackPresenterAlert(sessionId, id).catch(() => {/* swallow */});
   }
 
   if (!isHost || alerts.length === 0) return null;

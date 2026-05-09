@@ -119,6 +119,8 @@ export const AUDIT_EVENTS = {
   DECK_FORGE_FAILED: 'deck_forge.failed',
   DECK_SLIDE_UPDATED: 'deck.slide.updated',
   DECK_EXPORTED_PPTX: 'deck.exported.pptx',
+  BLUEPRINT_GENERATED: 'blueprint.generated',
+  BLUEPRINT_DELETED: 'blueprint.deleted',
 
   // Stream D — Engagement / Hooks / Alerts
   LIVE_HOOK_CREATED: 'live_hook.created',

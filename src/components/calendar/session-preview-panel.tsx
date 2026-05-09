@@ -6,8 +6,9 @@ import {
   X, Clock, Users, RefreshCw, ExternalLink, BookOpen, Activity,
   Search, BookMarked, Wrench, ClipboardList, ChevronDown, ChevronUp,
   ArrowRight, Zap, Video, CheckCircle2, Circle, Radio,
-  MessageSquare, BarChart3,
+  MessageSquare, BarChart3, CalendarClock,
 } from 'lucide-react'
+import Link from 'next/link'
 import { format, differenceInMinutes } from 'date-fns'
 import { cn } from '@/lib/utils'
 
@@ -584,6 +585,20 @@ export function SessionPreviewPanel({ event, allEvents, onClose, onNavigate }: S
                           </>
                         )}
                       </button>
+                      {/* Reschedule — visible for non-ended sessions. The
+                          /edit page already gates write access server-side
+                          (host / proposer / ADMIN / PROGRAM_DIRECTOR), so
+                          surfacing the link to everyone is safe — non-
+                          authorized users get redirected back. */}
+                      {preview.status !== 'ENDED' && preview.status !== 'CANCELLED' && (
+                        <Link
+                          href={`/classroom/${preview.id}/edit`}
+                          className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-accent active:scale-95"
+                        >
+                          <CalendarClock className="size-3.5" />
+                          Reschedule
+                        </Link>
+                      )}
                       <button
                         onClick={() => onNavigate(preview.id)}
                         className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-accent active:scale-95"

@@ -59,7 +59,14 @@ interface InitialState {
   maxParticipants: number
   objectives: Array<{ id: string; text: string; blooms: number }>
   metadata: unknown
+  /// RRULE string when this session is part of a recurring series. The
+  /// edit form shows the Teams/Outlook scope picker only when this is set.
+  recurrenceRule?: string | null
 }
+
+/// Edit-scope for recurring sessions — mirrors the Outlook/Teams choices
+/// the user sees when editing one occurrence of a series.
+type EditScope = 'occurrence' | 'this_and_following' | 'series'
 
 interface Props {
   sessionId: string
@@ -144,6 +151,12 @@ export function EditSessionForm({ sessionId, initial, faculty, topics, currentUs
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
+  // Recurring-edit scope (Teams/Outlook style). Only relevant when
+  // initial.recurrenceRule is set. Default to 'series' so the host can
+  // hit Save without explicitly choosing if they meant the whole series.
+  const isRecurring = !!initial.recurrenceRule
+  const [editScope, setEditScope] = useState<EditScope>('series')
+
   const hostIsSelf = hostId === currentUserId
   const visibilityInfo = VISIBILITY_DISPLAY[initial.visibility]
   const VisibilityIcon = visibilityInfo.icon
@@ -220,17 +233,25 @@ export function EditSessionForm({ sessionId, initial, faculty, topics, currentUs
           body: JSON.stringify({
             scheduledStart: toIsoFromLocal(start),
             scheduledEnd: toIsoFromLocal(end),
+            // TODO(recurring-scope): wire this to backend when occurrence /
+            // this-and-following modes are implemented. Today the API
+            // rewrites the master record only, which corresponds to 'series'.
+            scope: editScope,
           }),
         })
         const rJson = await rRes.json()
         if (!rJson.ok) {
-          if (rJson.error?.code === 'HOST_CONFLICT') {
-            const c = rJson.error.details?.[0]
-            throw new Error(
-              c ? `Host has a conflict with "${c.title}" (${new Date(c.scheduledStart).toLocaleString()})` : rJson.error.message
-            )
-          }
           throw new Error(rJson.error?.message ?? 'Failed to reschedule')
+        }
+        // Teams-style: warn but don't block on overlapping host calendar.
+        const conflicts = (rJson.data?.warnings?.hostConflicts ?? []) as Array<{
+          title: string; scheduledStart: string
+        }>
+        if (conflicts.length > 0) {
+          const c = conflicts[0]
+          if (typeof window !== 'undefined') {
+            window.alert(`Heads up: host already has "${c.title}" at ${new Date(c.scheduledStart).toLocaleString()}. Rescheduled anyway.`)
+          }
         }
       }
 
@@ -375,6 +396,9 @@ export function EditSessionForm({ sessionId, initial, faculty, topics, currentUs
 
       {/* Section 2: When */}
       <Section title="When" subtitle="Date and time" icon={CalendarIcon}>
+        {isRecurring && (
+          <RecurringScopePicker value={editScope} onChange={setEditScope} />
+        )}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <DateTimePicker
             label="Start"
@@ -616,5 +640,105 @@ function Label({ children, required }: { children: React.ReactNode; required?: b
       {children}
       {required && <span className="text-destructive">*</span>}
     </label>
+  )
+}
+
+// ─── Recurring scope picker ──────────────────────────────────────────────────
+// Mirrors the prompt Outlook / Teams shows when you edit one occurrence of
+// a recurring meeting. Three radio options:
+//
+//   1. Just this occurrence       — apply only to this date
+//   2. This and following          — split the series at this date
+//   3. Entire series               — apply to every occurrence (default)
+//
+// Backend support for occurrence/this-and-following is not yet built (the
+// API currently rewrites the master record only). Those options are
+// marked "coming soon" and disabled to prevent confusing user expectations.
+
+const SCOPE_OPTIONS: Array<{
+  value: EditScope
+  label: string
+  desc: string
+  enabled: boolean
+}> = [
+  {
+    value: 'occurrence',
+    label: 'Just this occurrence',
+    desc: 'Only this single date is changed; the rest of the series is unaffected.',
+    enabled: false,
+  },
+  {
+    value: 'this_and_following',
+    label: 'This and following',
+    desc: 'Split the series — this date and every later occurrence pick up the change.',
+    enabled: false,
+  },
+  {
+    value: 'series',
+    label: 'Entire series',
+    desc: 'Apply the change to every occurrence in the series.',
+    enabled: true,
+  },
+]
+
+function RecurringScopePicker({
+  value,
+  onChange,
+}: {
+  value: EditScope
+  onChange: (v: EditScope) => void
+}) {
+  return (
+    <div className="rounded-xl border border-amber-300/40 bg-amber-50 p-3 dark:border-amber-500/30 dark:bg-amber-500/5">
+      <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+        <CalendarIcon className="size-3.5" />
+        Recurring session — what should change?
+      </div>
+      <p className="mt-1 text-[11px] text-muted-foreground">
+        This session is part of a series. Pick which occurrences inherit your edits.
+      </p>
+      <div className="mt-3 space-y-1.5">
+        {SCOPE_OPTIONS.map((opt) => {
+          const active = value === opt.value
+          const disabled = !opt.enabled
+          return (
+            <button
+              key={opt.value}
+              type="button"
+              disabled={disabled}
+              onClick={() => onChange(opt.value)}
+              className={`flex w-full items-start gap-3 rounded-lg border-2 px-3 py-2 text-left transition ${
+                active
+                  ? 'border-amber-500 bg-amber-100/70 dark:bg-amber-500/15'
+                  : 'border-transparent hover:border-amber-300/60 hover:bg-amber-100/40 dark:hover:bg-amber-500/10'
+              } ${disabled ? 'cursor-not-allowed opacity-55' : ''}`}
+            >
+              <span
+                className={`mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border-2 ${
+                  active
+                    ? 'border-amber-600 bg-amber-600'
+                    : 'border-muted-foreground/40 bg-card'
+                }`}
+              >
+                {active && <span className="size-1.5 rounded-full bg-white" />}
+              </span>
+              <span className="flex-1 min-w-0">
+                <span className="flex items-center gap-2 text-xs font-semibold text-foreground">
+                  {opt.label}
+                  {disabled && (
+                    <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-muted-foreground">
+                      Coming soon
+                    </span>
+                  )}
+                </span>
+                <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+                  {opt.desc}
+                </span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
   )
 }

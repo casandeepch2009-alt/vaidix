@@ -9,6 +9,7 @@ import {
 } from 'date-fns'
 import { enUS } from 'date-fns/locale'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { motion } from 'framer-motion'
 import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { cn } from '@/lib/utils'
@@ -454,6 +455,36 @@ function SessionCard({
           </>
         )}
       </div>
+
+      {/* Direct Join button — skips the preview-panel intermediate step
+          ("3 clicks to join" was the user complaint). Visible for any
+          session that's joinable (LIVE / scheduled). Hidden for past +
+          cancelled. Clicking it does NOT trigger the row's onSelect — the
+          row still opens the preview if the user wants details. */}
+      {(label === 'LIVE' || label === 'PENDING' || (!label && r.status !== 'ENDED' && r.status !== 'CANCELLED')) && (
+        <Link
+          href={`/classroom/${event.sessionId}`}
+          onClick={(e) => e.stopPropagation()}
+          className={cn(
+            'shrink-0 mr-2 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold transition-all active:scale-95',
+            label === 'LIVE'
+              ? 'bg-green-500 text-white shadow-sm shadow-green-500/40 hover:bg-green-400'
+              : 'bg-primary/10 text-primary hover:bg-primary/20 border border-primary/20',
+          )}
+        >
+          {label === 'LIVE' ? (
+            <>
+              <span className="relative flex size-1.5">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-white opacity-75" />
+                <span className="relative inline-flex size-1.5 rounded-full bg-white" />
+              </span>
+              Join now
+            </>
+          ) : (
+            <>Join</>
+          )}
+        </Link>
+      )}
 
       {/* Arrow — far right */}
       <div className="shrink-0 pr-3 pl-1">
