@@ -12,7 +12,8 @@ export default async function CalendarPage() {
   const canCreate =
     session.user.role === Role.PROGRAM_DIRECTOR ||
     session.user.role === Role.ADMIN ||
-    session.user.role === Role.FACULTY
+    session.user.role === Role.FACULTY ||
+    session.user.role === Role.RESIDENT
 
   return (
     <div className="space-y-6">
@@ -23,7 +24,7 @@ export default async function CalendarPage() {
             <Video className="size-5 text-primary" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-foreground">Live Classes</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-foreground">Calendar</h1>
             <p className="text-sm text-muted-foreground">
               {canCreate
                 ? 'Schedule and manage teaching sessions for your programme'

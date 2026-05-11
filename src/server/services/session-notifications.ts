@@ -17,7 +17,8 @@ import {
 } from '@/lib/email-templates';
 import { buildSessionIcs, sessionJoinUrl } from './ics-service';
 import { env } from '@/lib/env';
-import { NotificationChannel, SessionVisibility, UserStatus } from '@prisma/client';
+import { NotificationChannel, UserStatus } from '@prisma/client';
+import { emit, emitToMany } from './notifications-service';
 
 const CALENDAR_URL = `${env.NEXTAUTH_URL.replace(/\/$/, '')}/calendar`;
 const APPROVAL_INBOX_URL = `${env.NEXTAUTH_URL.replace(/\/$/, '')}/inbox/approvals`;
@@ -71,46 +72,38 @@ function sharedVarsFor(session: NonNullable<SessionWithRels>) {
 }
 
 // ----------------------------------------------------------------------------
-// Recipient resolution — mirrors calendar visibility rules but returns users,
-// not prisma-where clauses, so we can email them.
+// Recipient resolution — union of explicit audiences (cohort members + named
+// invitees), deduped. `openToAll` deliberately does NOT add recipients: a
+// link-only session has no broadcast list. If a host wants to email a wide
+// group they must also pick a cohort (or invite individuals). This stops the
+// silent "blast every resident + faculty in the institution" path the old
+// OPEN_TO_ALL default had.
 // ----------------------------------------------------------------------------
 async function resolveAttendees(
   session: NonNullable<SessionWithRels>
 ): Promise<{ id: string; name: string; email: string }[]> {
-  if (session.visibility === SessionVisibility.PRIVATE) {
-    return [];
-  }
+  const byId = new Map<string, { id: string; name: string; email: string }>();
 
-  if (session.visibility === SessionVisibility.INVITE_ONLY) {
-    const invites = await db.sessionInvite.findMany({
-      where: { sessionId: session.id, status: { in: ['INVITED', 'ACCEPTED'] } },
-      include: { user: { select: { id: true, name: true, email: true, status: true } } },
-    });
-    return invites
-      .filter((i) => i.user.status === UserStatus.ACTIVE)
-      .map((i) => ({ id: i.user.id, name: i.user.name, email: i.user.email }));
-  }
-
-  if (session.visibility === SessionVisibility.COHORT && session.cohortId) {
+  if (session.cohortId) {
     const members = await db.cohortMember.findMany({
       where: { cohortId: session.cohortId, user: { status: UserStatus.ACTIVE } },
       include: { user: { select: { id: true, name: true, email: true } } },
     });
-    return members.map((m) => ({ id: m.user.id, name: m.user.name, email: m.user.email }));
+    for (const m of members) {
+      byId.set(m.user.id, { id: m.user.id, name: m.user.name, email: m.user.email });
+    }
   }
 
-  // OPEN_TO_ALL — residents + faculty in institution. Keep the blast radius
-  // honest: large lectures should be COHORT-scoped. Here we email every ACTIVE
-  // RESIDENT and FACULTY member except the host.
-  const users = await db.user.findMany({
-    where: {
-      status: UserStatus.ACTIVE,
-      role: { in: ['RESIDENT', 'FACULTY'] },
-      id: { not: session.host.id },
-    },
-    select: { id: true, name: true, email: true },
+  const invites = await db.sessionInvite.findMany({
+    where: { sessionId: session.id, status: { in: ['INVITED', 'ACCEPTED'] } },
+    include: { user: { select: { id: true, name: true, email: true, status: true } } },
   });
-  return users;
+  for (const i of invites) {
+    if (i.user.status !== UserStatus.ACTIVE) continue;
+    byId.set(i.user.id, { id: i.user.id, name: i.user.name, email: i.user.email });
+  }
+
+  return Array.from(byId.values());
 }
 
 // ----------------------------------------------------------------------------
@@ -223,6 +216,14 @@ export async function notifySessionRejected(sessionId: string, reason: string) {
     reason,
   });
   await safeSend(session.proposer.email, subject, html);
+
+  await emit({
+    userId: session.proposer.id,
+    kind: 'session.rejected',
+    title: `${session.host.name} declined your session`,
+    body: `${session.title} — ${session.scheduledStart.toLocaleString()}${reason ? `: ${reason}` : ''}`,
+    payload: { sessionId: session.id, reason },
+  });
 }
 
 export async function notifySessionRescheduled(
@@ -234,6 +235,15 @@ export async function notifySessionRescheduled(
   if (!session) return;
   const attachment = icsAttachmentForSession(session);
   const shared = sharedVarsFor(session);
+
+  const notifPayload = {
+    sessionId: session.id,
+    previousStart: previous.start.toISOString(),
+    previousEnd: previous.end.toISOString(),
+    scheduledStart: session.scheduledStart.toISOString(),
+    scheduledEnd: session.scheduledEnd.toISOString(),
+    requiresApproval,
+  };
 
   // Host gets one
   if (session.host.status === UserStatus.ACTIVE) {
@@ -247,11 +257,17 @@ export async function notifySessionRescheduled(
       approvalUrl: APPROVAL_INBOX_URL,
     });
     await safeSend(session.host.email, subject, html, [attachment]);
+    await emit({
+      userId: session.host.id,
+      kind: 'session.rescheduled',
+      title: `Session rescheduled: ${session.title}`,
+      body: `New time: ${session.scheduledStart.toLocaleString()}`,
+      payload: notifPayload,
+    });
   }
 
-  // Attendees only see the updated .ics if the session is already APPROVED
-  // (i.e. visibility rules have them on the attendee list). If requiresApproval,
-  // wait until re-approval to re-notify attendees.
+  // Attendees only see the updated .ics if the session is already APPROVED.
+  // If requiresApproval, wait until re-approval to notify attendees.
   if (!requiresApproval) {
     const attendees = await resolveAttendees(session);
     await Promise.all(
@@ -266,6 +282,15 @@ export async function notifySessionRescheduled(
         });
         return safeSend(u.email, subject, html, [attachment]);
       })
+    );
+    await emitToMany(
+      attendees.map((u) => ({
+        userId: u.id,
+        kind: 'session.rescheduled',
+        title: `Session rescheduled: ${session.title}`,
+        body: `New time: ${session.scheduledStart.toLocaleString()}`,
+        payload: notifPayload,
+      }))
     );
   }
 }
@@ -305,6 +330,20 @@ export async function notifySessionCancelled(sessionId: string, reason?: string 
       return safeSend(u.email, subject, html, [attachment]);
     })
   );
+
+  await emitToMany(
+    toNotify.map((u) => ({
+      userId: u.id,
+      kind: 'session.cancelled',
+      title: `Session cancelled: ${session.title}`,
+      body: reason ?? `Scheduled for ${session.scheduledStart.toLocaleString()}`,
+      payload: {
+        sessionId: session.id,
+        scheduledStart: session.scheduledStart.toISOString(),
+        reason: reason ?? null,
+      },
+    }))
+  );
 }
 
 export async function notifySessionReminder(sessionId: string, leadTime: '24H' | '15MIN') {
@@ -314,12 +353,12 @@ export async function notifySessionReminder(sessionId: string, leadTime: '24H' |
   if (session.status === 'CANCELLED' || session.status === 'ENDED') return;
 
   const shared = sharedVarsFor(session);
-  const recipients: { name: string; email: string }[] = [];
+  const recipients: { id: string; name: string; email: string }[] = [];
   if (session.host.status === UserStatus.ACTIVE) {
-    recipients.push({ name: session.host.name, email: session.host.email });
+    recipients.push({ id: session.host.id, name: session.host.name, email: session.host.email });
   }
   const attendees = await resolveAttendees(session);
-  recipients.push(...attendees.map((a) => ({ name: a.name, email: a.email })));
+  recipients.push(...attendees);
 
   await Promise.all(
     recipients.map((u) => {
@@ -330,5 +369,21 @@ export async function notifySessionReminder(sessionId: string, leadTime: '24H' |
       });
       return safeSend(u.email, subject, html);
     })
+  );
+
+  const leadLabel = leadTime === '24H' ? '24 hours' : '15 minutes';
+  await emitToMany(
+    recipients.map((u) => ({
+      userId: u.id,
+      kind: 'session.reminder',
+      title: `${session.title} starts in ${leadLabel}`,
+      body: `Hosted by ${session.host.name} — ${session.scheduledStart.toLocaleString()}`,
+      payload: {
+        sessionId: session.id,
+        scheduledStart: session.scheduledStart.toISOString(),
+        scheduledEnd: session.scheduledEnd.toISOString(),
+        leadTime,
+      },
+    }))
   );
 }

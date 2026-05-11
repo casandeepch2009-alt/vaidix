@@ -24,7 +24,6 @@ import {
   SessionApprovalStatus,
   SessionApprovalAction,
   SessionStatus,
-  SessionVisibility,
   Role,
   Prisma,
 } from '@prisma/client';
@@ -34,6 +33,7 @@ import type {
   UpdateSessionInput,
   ObjectiveInput,
 } from '@/lib/validation/session';
+import { isInScheduledWindow } from '@/lib/sessions/scheduled-window';
 
 // Stamps a server-generated id on every objective lacking one. Curators can
 // reorder freely on the client; the id is what resident achievements key on.
@@ -90,17 +90,27 @@ export async function findHostConflicts(opts: {
 // Create session (PD drafts)
 // Auto-approve when the proposer is also the host.
 // ----------------------------------------------------------------------------
-export async function createSession(input: CreateSessionInput, proposedBy: string, proposerRole: Role) {
+export async function createSession(
+  input: CreateSessionInput,
+  proposedBy: string,
+  proposerRole: Role,
+  programId: string,
+) {
   const start = new Date(input.scheduledStart);
   const end = new Date(input.scheduledEnd);
 
-  // FACULTY / PD / ADMIN may propose; host must be FACULTY, PD, or ADMIN.
-  // Faculty proposing for themselves auto-approves below; faculty proposing
-  // for another faculty goes to PENDING_FACULTY for the host to approve.
+  // FACULTY / PD / ADMIN / RESIDENT may propose. Host rules:
+  //   • FACULTY / PD / ADMIN host — anyone above may propose (faculty hosting
+  //     themselves auto-approves; resident-proposed goes to PENDING_FACULTY).
+  //   • RESIDENT host — only allowed when proposer == host (peer-led journal
+  //     club / case presentation), and auto-approves. A resident cannot
+  //     schedule a session *for* another resident — there is no faculty
+  //     approver in that path.
   if (
     proposerRole !== Role.FACULTY &&
     proposerRole !== Role.PROGRAM_DIRECTOR &&
-    proposerRole !== Role.ADMIN
+    proposerRole !== Role.ADMIN &&
+    proposerRole !== Role.RESIDENT
   ) {
     throw new Error('FORBIDDEN_PROPOSER_ROLE');
   }
@@ -110,29 +120,35 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
     select: { id: true, role: true, status: true, name: true, email: true },
   });
   if (!host || host.status !== 'ACTIVE') throw new Error('HOST_NOT_FOUND');
-  if (host.role !== Role.FACULTY && host.role !== Role.PROGRAM_DIRECTOR && host.role !== Role.ADMIN) {
+  const hostIsStaff =
+    host.role === Role.FACULTY ||
+    host.role === Role.PROGRAM_DIRECTOR ||
+    host.role === Role.ADMIN;
+  const hostIsSelfResident = host.role === Role.RESIDENT && host.id === proposedBy;
+  if (!hostIsStaff && !hostIsSelfResident) {
     throw new Error('HOST_NOT_FACULTY');
   }
 
-  // Cohort / invitee validation
-  if (input.visibility === SessionVisibility.COHORT && input.cohortId) {
-    const cohort = await db.cohort.findUnique({ where: { id: input.cohortId }, select: { id: true } });
+  // W6.11 — cohort must belong to the same program; defense-in-depth against
+  // a PD with two memberships submitting a Cornea cohort id while active in MS.
+  if (input.cohortId) {
+    const cohort = await db.cohort.findUnique({
+      where: { id: input.cohortId },
+      select: { id: true, programId: true },
+    });
     if (!cohort) throw new Error('COHORT_NOT_FOUND');
+    if (cohort.programId !== programId) throw new Error('COHORT_PROGRAM_MISMATCH');
   }
 
   // Auto-approve when proposer == host
   const autoApprove = proposedBy === input.hostId;
   const approvalStatus = autoApprove ? SessionApprovalStatus.APPROVED : SessionApprovalStatus.PENDING_FACULTY;
 
-  // Pre-check host conflicts only if auto-approving; pending sessions don't lock time.
-  if (autoApprove) {
-    const conflicts = await findHostConflicts({ hostId: input.hostId, start, end });
-    if (conflicts.length > 0) {
-      const err = new Error('HOST_CONFLICT');
-      (err as Error & { conflicts?: unknown }).conflicts = conflicts;
-      throw err;
-    }
-  }
+  // Detect overlapping APPROVED sessions on this host's calendar so we can
+  // warn the proposer (Teams-style). Non-blocking: with the DB exclusion
+  // constraint dropped (migration 20260509150000), we let the schedule
+  // through and surface the conflict in the response.
+  const hostConflicts = await findHostConflicts({ hostId: input.hostId, start, end });
 
   const session = await db.$transaction(async (tx) => {
     const created = await tx.teachingSession.create({
@@ -142,11 +158,12 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
         sessionType: input.sessionType,
         hostId: input.hostId,
         proposedBy,
+        programId,
         status: SessionStatus.SCHEDULED,
         approvalStatus,
         approvedBy: autoApprove ? proposedBy : null,
         approvedAt: autoApprove ? new Date() : null,
-        visibility: input.visibility,
+        openToAll: input.openToAll,
         cohortId: input.cohortId ?? null,
         scheduledStart: start,
         scheduledEnd: end,
@@ -158,14 +175,21 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
         topicId: input.topicId ?? null,
         tags: input.tags,
         objectives: normaliseObjectives(input.objectives) ?? Prisma.JsonNull,
-        // Prereq config lives under metadata.prereq so we don't add columns
-        // for a feature that isn't queried from SQL.
-        metadata: input.prereq ? { prereq: input.prereq } : Prisma.JsonNull,
+        // Metadata bag for session features that aren't queried from SQL:
+        // prereq config + recurrence exception list (Teams-style "skip these
+        // dates" — the RRULE itself doesn't carry exclusions).
+        metadata: (() => {
+          const m: Record<string, unknown> = {};
+          if (input.prereq) m.prereq = input.prereq;
+          if (input.excludedDates?.length) m.excludedDates = input.excludedDates;
+          if (input.captionsProfile) m.captionsProfile = input.captionsProfile;
+          return Object.keys(m).length > 0 ? (m as Prisma.InputJsonValue) : Prisma.JsonNull;
+        })(),
       },
     });
 
-    // Invitees for INVITE_ONLY
-    if (input.visibility === SessionVisibility.INVITE_ONLY && input.inviteeIds?.length) {
+    // Invitees — orthogonal to openToAll/cohort; the host can mix them.
+    if (input.inviteeIds?.length) {
       await tx.sessionInvite.createMany({
         data: input.inviteeIds.map((userId) => ({
           sessionId: created.id,
@@ -204,7 +228,7 @@ export async function createSession(input: CreateSessionInput, proposedBy: strin
     runSideEffects(notifySessionProposed(session.id), 'notify proposed');
   }
 
-  return session;
+  return { session, hostConflicts };
 }
 
 // ----------------------------------------------------------------------------
@@ -231,40 +255,30 @@ export async function approveSession(sessionId: string, actorId: string, actorRo
     throw new Error('NOT_DESIGNATED_HOST');
   }
 
-  // Conflict check at approval time (hard — Postgres exclusion constraint will enforce)
-  const conflicts = await findHostConflicts({
+  // Detect overlap (warning only — DB constraint was dropped in migration
+  // 20260509150000 to permit Teams-style overlapping schedules). The caller
+  // surfaces this back to the approver so they can choose to cancel one of
+  // the conflicting sessions afterwards.
+  const hostConflicts = await findHostConflicts({
     hostId: session.hostId,
     start: session.scheduledStart,
     end: session.scheduledEnd,
     excludeSessionId: sessionId,
   });
-  if (conflicts.length > 0) {
-    const err = new Error('HOST_CONFLICT');
-    (err as Error & { conflicts?: unknown }).conflicts = conflicts;
-    throw err;
-  }
 
-  try {
-    await db.$transaction([
-      db.teachingSession.update({
-        where: { id: sessionId },
-        data: {
-          approvalStatus: SessionApprovalStatus.APPROVED,
-          approvedBy: actorId,
-          approvedAt: new Date(),
-        },
-      }),
-      db.sessionApprovalAudit.create({
-        data: { sessionId, actorId, action: SessionApprovalAction.APPROVED },
-      }),
-    ]);
-  } catch (e) {
-    // Postgres exclusion constraint violation (race with another approval)
-    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2010') {
-      throw new Error('HOST_CONFLICT');
-    }
-    throw e;
-  }
+  await db.$transaction([
+    db.teachingSession.update({
+      where: { id: sessionId },
+      data: {
+        approvalStatus: SessionApprovalStatus.APPROVED,
+        approvedBy: actorId,
+        approvedAt: new Date(),
+      },
+    }),
+    db.sessionApprovalAudit.create({
+      data: { sessionId, actorId, action: SessionApprovalAction.APPROVED },
+    }),
+  ]);
 
   await audit({
     actorId,
@@ -277,7 +291,8 @@ export async function approveSession(sessionId: string, actorId: string, actorRo
   runSideEffects(notifySessionApproved(sessionId), 'notify approved');
   runSideEffects(scheduleSessionReminders(sessionId), 'schedule reminders (approved)');
 
-  return db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  const updated = await db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  return { session: updated, hostConflicts };
 }
 
 export async function rejectSession(sessionId: string, actorId: string, actorRole: Role, reason: string) {
@@ -337,7 +352,17 @@ export async function rescheduleSession(
     },
   });
   if (!session) throw new Error('SESSION_NOT_FOUND');
-  if (session.proposedBy !== actorId && actorRole !== Role.ADMIN) throw new Error('NOT_PROPOSER');
+  // Host of the session may also reschedule their own slot — the edit-session
+  // form surfaces date/time edits for hosts, and refusing them here forces an
+  // awkward "ask the original proposer to move it" round-trip. Auto-approve
+  // logic below already short-circuits for the host case.
+  if (
+    session.proposedBy !== actorId &&
+    session.hostId !== actorId &&
+    actorRole !== Role.ADMIN
+  ) {
+    throw new Error('NOT_PROPOSER');
+  }
   if (session.approvalStatus === SessionApprovalStatus.CANCELLED) throw new Error('ALREADY_CANCELLED');
 
   const start = new Date(input.scheduledStart);
@@ -345,6 +370,15 @@ export async function rescheduleSession(
   const autoApprove = actorId === session.hostId;
   const previousStart = session.scheduledStart;
   const previousEnd = session.scheduledEnd;
+
+  // Warning-only host conflict detection at the new slot — same Teams-style
+  // contract as createSession/approveSession.
+  const hostConflicts = await findHostConflicts({
+    hostId: session.hostId,
+    start,
+    end,
+    excludeSessionId: sessionId,
+  });
 
   await db.$transaction([
     db.teachingSession.update({
@@ -390,7 +424,8 @@ export async function rescheduleSession(
     runSideEffects(scheduleSessionReminders(sessionId), 'schedule reminders (rescheduled)');
   }
 
-  return db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  const updated = await db.teachingSession.findUniqueOrThrow({ where: { id: sessionId } });
+  return { session: updated, hostConflicts };
 }
 
 // ----------------------------------------------------------------------------
@@ -484,7 +519,7 @@ export async function getEffectiveSessionRole(
     select: {
       hostId: true,
       proposedBy: true,
-      visibility: true,
+      openToAll: true,
       cohortId: true,
       approvalStatus: true,
     },
@@ -504,21 +539,23 @@ export async function getEffectiveSessionRole(
   });
   if (part?.role === 'CO_HOST') return 'CO_HOST';
 
-  // Visibility check
-  if (session.visibility === SessionVisibility.OPEN_TO_ALL) return 'PARTICIPANT';
-
-  if (session.visibility === SessionVisibility.COHORT && session.cohortId) {
+  // Audience checks — any match grants PARTICIPANT. Order is cheapest-first
+  // (cohort lookup hits an index; invite is a single-row by-pk read).
+  if (session.cohortId) {
     const myCohorts = await getUserCohortIds(userId);
     if (myCohorts.includes(session.cohortId)) return 'PARTICIPANT';
   }
 
-  if (session.visibility === SessionVisibility.INVITE_ONLY) {
-    const invite = await db.sessionInvite.findUnique({
-      where: { sessionId_userId: { sessionId, userId } },
-      select: { id: true },
-    });
-    if (invite) return 'PARTICIPANT';
-  }
+  const invite = await db.sessionInvite.findUnique({
+    where: { sessionId_userId: { sessionId, userId } },
+    select: { id: true },
+  });
+  if (invite) return 'PARTICIPANT';
+
+  // openToAll = anyone-with-link can join. Granted last so cohort/invite take
+  // precedence (no functional difference for PARTICIPANT, but keeps the
+  // mental model "explicit audience first, public fallback last").
+  if (session.openToAll) return 'PARTICIPANT';
 
   // PD who proposed the session — treat as viewer (auditing role, not host)
   if (session.proposedBy === userId) return 'VIEWER';
@@ -527,15 +564,86 @@ export async function getEffectiveSessionRole(
 }
 
 /**
+ * Flip session status SCHEDULED → LIVE *only when `now` is inside the
+ * session's scheduled window* (see `isInScheduledWindow`). Returns whether
+ * the flip happened — callers use that signal to gate side-effects like
+ * starting the recording egress.
+ *
+ * Why a shared helper: the same flip-and-record decision is needed from at
+ * least three places — `recordParticipantJoin`, the LiveKit `room_started`
+ * webhook, and the `participant_joined` webhook (which catches the case
+ * where a host pre-flighted the room and the window opened while they were
+ * waiting). Centralising it ensures all three honour the same window rule.
+ *
+ * Recurring: a recurring session whose master row is ENDED from a prior
+ * occurrence is also flipped back to LIVE if `now` is inside the *next*
+ * occurrence's window. Without this, only the first occurrence of a series
+ * would ever go LIVE — every subsequent occurrence would silently stay in
+ * pre-flight mode because the where clause kept rejecting ENDED rows.
+ */
+export async function maybeFlipToLive(
+  sessionId: string,
+  actorId: string | null,
+  now: Date = new Date(),
+): Promise<{ flipped: boolean; reason: 'NOT_FOUND' | 'ALREADY_LIVE' | 'OUT_OF_WINDOW' | 'WRONG_STATUS' | 'CANCELLED' | 'FLIPPED' }> {
+  const session = await db.teachingSession.findUnique({
+    where: { id: sessionId },
+    select: {
+      id: true,
+      status: true,
+      scheduledStart: true,
+      scheduledEnd: true,
+      recurrenceRule: true,
+      recurrenceUntil: true,
+      deletedAt: true,
+    },
+  });
+  if (!session || session.deletedAt) return { flipped: false, reason: 'NOT_FOUND' };
+  if (session.status === SessionStatus.LIVE) return { flipped: false, reason: 'ALREADY_LIVE' };
+  if (session.status === SessionStatus.CANCELLED) return { flipped: false, reason: 'CANCELLED' };
+  if (!isInScheduledWindow(session, now)) return { flipped: false, reason: 'OUT_OF_WINDOW' };
+
+  // SCHEDULED → LIVE always; ENDED → LIVE only for recurring (next occurrence).
+  const allowFromEnded = !!session.recurrenceRule;
+  const allowedFrom: SessionStatus[] = allowFromEnded
+    ? [SessionStatus.SCHEDULED, SessionStatus.ENDED]
+    : [SessionStatus.SCHEDULED];
+
+  const updated = await db.teachingSession.updateMany({
+    where: { id: sessionId, status: { in: allowedFrom } },
+    data: {
+      status: SessionStatus.LIVE,
+      actualStart: now,
+      // Reset actualEnd so the previous occurrence's end-stamp doesn't carry
+      // over into the new live row. Only matters for recurring sessions.
+      ...(allowFromEnded ? { actualEnd: null } : {}),
+    },
+  });
+  if (updated.count === 0) return { flipped: false, reason: 'WRONG_STATUS' };
+
+  await sessionAudit({
+    sessionId,
+    eventType: SESSION_AUDIT.SESSION_STARTED,
+    actorId,
+  });
+  return { flipped: true, reason: 'FLIPPED' };
+}
+
+/**
  * Upserts a SessionParticipant row when a user enters the LiveKit room.
- * Also starts the session (SCHEDULED → LIVE) on first join if host.
+ * Returns whether the join also triggered a SCHEDULED→LIVE flip — webhook
+ * caller uses that to decide whether to kick off recording egress.
+ *
+ * The flip happens on *any* role join (not just host), because the host may
+ * already be in the room (pre-flight) when a participant arrives at the
+ * start time and triggers the window check. Host-only would miss that.
  */
 export async function recordParticipantJoin(args: {
   sessionId: string;
   userId: string;
   livekitIdentity: string;
   role: 'HOST' | 'CO_HOST' | 'PARTICIPANT' | 'VIEWER';
-}) {
+}): Promise<{ flippedToLive: boolean }> {
   await db.sessionParticipant.upsert({
     where: { sessionId_userId: { sessionId: args.sessionId, userId: args.userId } },
     create: {
@@ -553,34 +661,17 @@ export async function recordParticipantJoin(args: {
     },
   });
 
-  // Start session on host join
-  if (args.role === 'HOST') {
-    const updated = await db.teachingSession.updateMany({
-      where: {
-        id: args.sessionId,
-        status: SessionStatus.SCHEDULED,
-      },
-      data: {
-        status: SessionStatus.LIVE,
-        actualStart: new Date(),
-      },
-    });
-    if (updated.count > 0) {
-      await sessionAudit({
-        sessionId: args.sessionId,
-        eventType: SESSION_AUDIT.SESSION_STARTED,
-        actorId: args.userId,
-      });
-    }
-  }
+  const flip = await maybeFlipToLive(args.sessionId, args.userId);
 
   await sessionAudit({
     sessionId: args.sessionId,
     eventType: SESSION_AUDIT.PARTICIPANT_JOINED,
     actorId: args.userId,
     targetUserId: args.userId,
-    details: { role: args.role },
+    details: { role: args.role, preflight: flip.reason === 'OUT_OF_WINDOW' },
   });
+
+  return { flippedToLive: flip.flipped };
 }
 
 export async function recordParticipantLeave(args: {
@@ -768,7 +859,7 @@ export async function updateSession(
 ) {
   const session = await db.teachingSession.findUnique({
     where: { id: sessionId },
-    select: { hostId: true, proposedBy: true, title: true, metadata: true },
+    select: { hostId: true, proposedBy: true, title: true, metadata: true, programId: true },
   });
   if (!session) throw new Error('SESSION_NOT_FOUND');
   if (
@@ -777,6 +868,20 @@ export async function updateSession(
     actorRole !== Role.ADMIN
   ) {
     throw new Error('NOT_AUTHORIZED');
+  }
+
+  // Audience axes — orthogonal flags, all independently editable post-create.
+  //   openToAll : undefined → leave alone; boolean → set
+  //   cohortId  : undefined → leave alone; null → clear; string → set (after
+  //               verifying the cohort belongs to the session's program, same
+  //               defense-in-depth check createSession runs).
+  if (input.cohortId !== undefined && input.cohortId !== null) {
+    const cohort = await db.cohort.findUnique({
+      where: { id: input.cohortId },
+      select: { id: true, programId: true },
+    });
+    if (!cohort) throw new Error('COHORT_NOT_FOUND');
+    if (cohort.programId !== session.programId) throw new Error('COHORT_PROGRAM_MISMATCH');
   }
 
   // Objectives semantic: undefined → leave untouched; null or [] → clear; array → replace.
@@ -813,6 +918,9 @@ export async function updateSession(
       recordingEnabled: input.recordingEnabled ?? undefined,
       consentRequired: input.consentRequired ?? undefined,
       tags: input.tags ?? undefined,
+      topicId: input.topicId === undefined ? undefined : input.topicId,
+      openToAll: input.openToAll === undefined ? undefined : input.openToAll,
+      cohortId: input.cohortId === undefined ? undefined : input.cohortId,
       ...objectivesPatch,
       ...metadataPatch,
     },
@@ -835,12 +943,11 @@ export async function updateSession(
 async function assertInviteEditor(sessionId: string, actorId: string, actorRole: Role) {
   const session = await db.teachingSession.findUnique({
     where: { id: sessionId },
-    select: { id: true, hostId: true, proposedBy: true, visibility: true },
+    select: { id: true, hostId: true, proposedBy: true },
   });
   if (!session) throw new Error('SESSION_NOT_FOUND');
-  if (session.visibility !== SessionVisibility.INVITE_ONLY) {
-    throw new Error('NOT_INVITE_ONLY');
-  }
+  // Audience axes are orthogonal under the new model — a host can layer
+  // specific invitees on top of cohort-scoped or openToAll sessions.
   if (
     session.hostId !== actorId &&
     session.proposedBy !== actorId &&

@@ -55,8 +55,23 @@ export async function POST(
     });
     return jsonOk(result);
   } catch (err) {
-    if (err instanceof Error && /not found|closed/.test(err.message)) {
-      return jsonError('CONFLICT', err.message, 409);
+    // Map service-layer Error messages to specific status codes so the
+    // resident UI can give actionable feedback instead of a generic 500.
+    if (err instanceof Error) {
+      const m = err.message;
+      if (/not found/i.test(m)) return jsonError('NOT_FOUND', m, 404);
+      // Closed = was open, now isn't (e.g. host closed it mid-session).
+      // Conflict is the right semantic here.
+      if (/closed/i.test(m)) return jsonError('CONFLICT', m, 409);
+      // Hook never opened (no firedAt, no prePublishedAt) — the resident UI
+      // never should have shown this row. Treat as a stale-state conflict.
+      if (/not yet open/i.test(m)) return jsonError('NOT_OPEN', m, 409);
+      // Submitted option is not in the declared set — a validation issue
+      // that the route schema can't catch (it doesn't know the hook's
+      // options). 400 is the right code.
+      if (/offered options|one of the/i.test(m)) {
+        return jsonError('VALIDATION', m, 400);
+      }
     }
     return handleUnexpected(err);
   }

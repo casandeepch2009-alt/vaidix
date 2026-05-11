@@ -289,7 +289,19 @@ export async function tagDocumentToSession(
 ): Promise<void> {
   const doc = await db.document.findUnique({ where: { id: documentId }, select: { uploadedById: true } });
   if (!doc) throw new DocumentAccessError('NOT_FOUND', 'Document not found');
-  if (!canManage(actor, doc)) throw new DocumentAccessError('FORBIDDEN', 'Cannot tag this document');
+
+  // Session hosts may tag any document to their own session (they're curating
+  // content for their class, not managing someone else's library record).
+  // Ownership check still applies for all other mutation paths.
+  if (!canManage(actor, doc)) {
+    const session = await db.teachingSession.findUnique({
+      where: { id: sessionId, deletedAt: null },
+      select: { hostId: true },
+    });
+    if (session?.hostId !== actor.userId) {
+      throw new DocumentAccessError('FORBIDDEN', 'Cannot tag this document');
+    }
+  }
 
   // PHI gate: documents flagged BLOCKED by the scanner cannot be tagged to a
   // session unless the actor is an admin/PD AND explicitly passes phiOverride.

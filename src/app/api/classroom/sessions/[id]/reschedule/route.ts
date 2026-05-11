@@ -11,8 +11,8 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const body = await parseBody(req, rescheduleSchema);
     if (!body.ok) return body.response;
 
-    const session = await rescheduleSession(id, gate.user.id, gate.user.role, body.data);
-    return jsonOk({ session });
+    const { session, hostConflicts } = await rescheduleSession(id, gate.user.id, gate.user.role, body.data);
+    return jsonOk({ session, warnings: { hostConflicts } });
   } catch (err) {
     const msg = (err as Error).message;
     if (msg === 'SESSION_NOT_FOUND') return jsonError('NOT_FOUND', 'Session not found', 404);

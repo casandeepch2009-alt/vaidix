@@ -19,6 +19,7 @@ import { authConfig } from './auth.config';
 import { loginSchema } from './lib/validation/auth';
 import { verifyCredentials } from './server/services/auth-service';
 import { audit, AUDIT_EVENTS } from './server/services/audit';
+import { loadProgramsForUser } from './server/services/program-service';
 
 function hashIdentifier(canonical: string): string {
   // Truncated SHA-256: enough to correlate repeat attempts in audit logs
@@ -93,12 +94,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           },
         });
 
+        // W6.11: load the user's program memberships + active program here
+        // so the JWT carries them from sign-in onwards. No edge-runtime DB
+        // imports leak into auth.config (this file is Node-only).
+        const { programs, activeProgramId } = await loadProgramsForUser(result.user.id);
+
         return {
           id: result.user.id,
           email: result.user.email,
           name: result.user.name,
           role: result.user.role,
           passwordVersion: result.user.passwordVersion,
+          programs,
+          activeProgramId,
         };
       },
     }),

@@ -5,6 +5,8 @@
 
 import { z } from 'zod';
 import { env } from '@/lib/env';
+import { db } from '@/lib/db';
+import { SessionStatus } from '@prisma/client';
 import { redis } from '@/lib/redis';
 import { handleUnexpected, jsonError, jsonOk, parseBody } from '@/server/services/api-helpers';
 import { liveCaptionChannel, type LiveCaptionSegment } from '@/server/services/captions/captions-pubsub';
@@ -38,6 +40,20 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const { id: sessionId } = await ctx.params;
 
   try {
+    // Captions are gated to LIVE sessions only. If the host is pre-flighting
+    // (status=SCHEDULED) or the session has ended, drop the segments — we
+    // don't want pre-flight chatter to leak into transcripts or appear in
+    // viewers' caption overlays. The LiveKit Agent will still POST while it's
+    // attached to the room, so we silently accept-and-discard rather than 4xx
+    // (which would put the agent into a noisy retry loop).
+    const session = await db.teachingSession.findUnique({
+      where: { id: sessionId },
+      select: { status: true },
+    });
+    if (!session || session.status !== SessionStatus.LIVE) {
+      return jsonOk({ published: 0, dropped: body.data.segments.length, reason: 'NOT_LIVE' });
+    }
+
     const channel = liveCaptionChannel(sessionId);
     let published = 0;
     for (const seg of body.data.segments) {

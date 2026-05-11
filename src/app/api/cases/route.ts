@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { CaseDifficulty } from '@prisma/client';
 import {
   jsonOk,
-  requireAuth,
+  requireAuthWithProgram,
   handleUnexpected,
   parseQuery,
 } from '@/server/services/api-helpers';
@@ -19,11 +19,12 @@ const querySchema = z.object({
 
 export async function GET(req: Request) {
   try {
-    const gate = await requireAuth();
+    // W6.11 — case bank is per-program.
+    const gate = await requireAuthWithProgram();
     if (!gate.ok) return gate.response;
     const q = await parseQuery(req, querySchema);
     if (!q.ok) return q.response;
-    const items = await listCaseTemplates(q.data);
+    const items = await listCaseTemplates({ ...q.data, programId: gate.user.activeProgramId });
     return jsonOk({ items });
   } catch (err) {
     return handleUnexpected(err);

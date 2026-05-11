@@ -9,7 +9,6 @@ import { buildApprovalGate, buildSessionVisibilityWhere } from './sessions/visib
 import {
   SessionApprovalStatus,
   SessionStatus,
-  SessionVisibility,
   Role,
   type TeachingSession,
 } from '@prisma/client';
@@ -22,7 +21,7 @@ export interface CalendarEvent {
   end: string;                 // ISO
   status: SessionStatus;
   approvalStatus: SessionApprovalStatus;
-  visibility: SessionVisibility;
+  openToAll: boolean;
   sessionType: string;
   host: { id: string; name: string; role: string } | null;
   isRecurring: boolean;
@@ -40,13 +39,15 @@ export interface CalendarEvent {
 // ADMIN / PD bypass approvalStatus too (they need to see drafts/pending in
 // the calendar to approve them); other roles see APPROVED only.
 // ----------------------------------------------------------------------------
-async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: Date) {
-  const visibility = await buildSessionVisibilityWhere({ userId, role });
+async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: Date, activeProgramId?: string) {
+  const visibility = await buildSessionVisibilityWhere({ userId, role, activeProgramId });
   const approvalGate = buildApprovalGate({ userId, role });
 
   // Compose under `AND` so the two independent OR-clauses (time-window vs.
   // visibility) don't collide on a shared top-level `OR` key.
   return {
+    // W6.11 — narrow to the actor's active program. Defensive when missing.
+    ...(activeProgramId ? { programId: activeProgramId } : {}),
     deletedAt: null,
     scheduledStart: { lt: to },
     AND: [
@@ -65,7 +66,7 @@ async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: 
 function expandOccurrences(
   session: Pick<
     TeachingSession,
-    'id' | 'title' | 'sessionType' | 'scheduledStart' | 'scheduledEnd' | 'recurrenceRule' | 'recurrenceUntil' | 'status' | 'approvalStatus' | 'visibility' | 'cohortId'
+    'id' | 'title' | 'sessionType' | 'scheduledStart' | 'scheduledEnd' | 'recurrenceRule' | 'recurrenceUntil' | 'status' | 'approvalStatus' | 'openToAll' | 'cohortId'
   > & { host: { id: string; name: string; role: string } | null; cohortName: string | null },
   from: Date,
   to: Date
@@ -84,7 +85,7 @@ function expandOccurrences(
         end: session.scheduledEnd.toISOString(),
         status: session.status,
         approvalStatus: session.approvalStatus,
-        visibility: session.visibility,
+        openToAll: session.openToAll,
         sessionType: session.sessionType,
         host: session.host,
         isRecurring: false,
@@ -118,7 +119,7 @@ function expandOccurrences(
       end: occEnd.toISOString(),
       status: session.status,
       approvalStatus: session.approvalStatus,
-      visibility: session.visibility,
+      openToAll: session.openToAll,
       sessionType: session.sessionType,
       host: session.host,
       isRecurring: true,
@@ -151,9 +152,10 @@ export async function listCalendarEvents(
   userId: string,
   role: Role,
   from: Date,
-  to: Date
+  to: Date,
+  activeProgramId?: string,
 ): Promise<CalendarEvent[]> {
-  const where = await buildVisibilityWhere(userId, role, from, to);
+  const where = await buildVisibilityWhere(userId, role, from, to, activeProgramId);
   const sessions = await db.teachingSession.findMany({
     where,
     select: {
@@ -166,7 +168,7 @@ export async function listCalendarEvents(
       recurrenceUntil: true,
       status: true,
       approvalStatus: true,
-      visibility: true,
+      openToAll: true,
       cohortId: true,
       hostId: true,
     },

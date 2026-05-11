@@ -49,7 +49,30 @@ const envSchema = z.object({
   SARVAM_API_KEY: z.string().optional(),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default('gemini-2.5-flash'),
+  /// Image generation model (router: aiGenerateImage). "Nano Banana" /
+  /// Gemini 2.5 Flash Image. Override to imagen-3.0-generate-002 for
+  /// higher-quality medical illustrations at higher cost.
+  GEMINI_IMAGE_MODEL: z.string().default('gemini-2.5-flash-image'),
   SARVAM_STT_MODEL: z.string().default('saaras:v3'),
+  // Deepgram — live captions for English-only sessions (Phase 1).
+  // Indic / code-mix sessions still route to Sarvam Saaras (Phase 2).
+  DEEPGRAM_API_KEY: z.string().optional(),
+  DEEPGRAM_MODEL: z.string().default('nova-3'),
+  // Anthropic Claude — multi-model routing.
+  // ANTHROPIC_MODEL is the default fallback (legacy callers like
+  // post-session content). New code uses the router (`./router.ts`) which
+  // picks ANTHROPIC_OPUS_MODEL for reasoning ops (clinical review, content
+  // depth) and ANTHROPIC_SONNET_MODEL for design/structure ops.
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-6'),
+  ANTHROPIC_OPUS_MODEL: z.string().default('claude-opus-4-7'),
+  ANTHROPIC_SONNET_MODEL: z.string().default('claude-sonnet-4-6'),
+  // DeepSeek — second-tier fallback when Anthropic is unreachable (no key,
+  // no credit). 'deepseek-chat' (V3) is the cheap reasoning model;
+  // 'deepseek-reasoner' (R1) trades latency for harder reasoning. We default
+  // to V3 because forge/review needs throughput, not chain-of-thought.
+  DEEPSEEK_API_KEY: z.string().optional(),
+  DEEPSEEK_MODEL: z.string().default('deepseek-chat'),
 
   // Provider selectors (W4-Sprint)
   TRANSCRIPTION_PROVIDER: z.enum(['sarvam', 'self_hosted']).default('sarvam'),

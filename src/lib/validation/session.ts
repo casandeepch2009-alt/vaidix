@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 
 import { z } from 'zod';
-import { SessionType, SessionVisibility } from '@prisma/client';
+import { SessionType } from '@prisma/client';
 import { cuidSchema } from './primitives';
 
 const isoDateTime = z.string().datetime({ offset: true });
@@ -49,6 +49,19 @@ export type ObjectiveAchievementInput = z.infer<typeof objectiveAchievementSchem
 // the "Join now" button unlocks. Stored under TeachingSession.metadata.prereq
 // (existing JSON field) so we don't add columns for a feature that isn't
 // queried from SQL. `mode = NONE` is default and matches legacy behaviour.
+// Live captions profile — picks which ASR provider runs during the session.
+// Stored under TeachingSession.metadata.captionsProfile (existing JSON column,
+// no SQL queries against this value, so no schema migration needed).
+//   'english-only' → Deepgram Nova-3 (Phase 1, English single-feed mic)
+//   'indic-mix'    → Sarvam Saaras V3 (Phase 2, Indic + code-mix). Currently
+//                    a stub: the UI accepts it but no live producer runs;
+//                    the post-recording transcribe-worker handles transcription
+//                    after the session ends, and the live overlay shows
+//                    "Live captions arriving after class" instead of streaming.
+//   'off'          → no captions; overlay hidden entirely.
+export const CAPTIONS_PROFILES = ['english-only', 'indic-mix', 'off'] as const;
+export type CaptionsProfile = (typeof CAPTIONS_PROFILES)[number];
+
 export const PREREQ_MODES = ['NONE', 'OPTIONAL', 'MANDATORY'] as const;
 export const prereqConfigSchema = z.object({
   mode: z.enum(PREREQ_MODES).default('NONE'),
@@ -75,31 +88,40 @@ export const createSessionSchema = z
     hostId: cuidSchema,
     scheduledStart: isoDateTime,
     scheduledEnd: isoDateTime,
-    visibility: z.nativeEnum(SessionVisibility).default('OPEN_TO_ALL'),
+    // Audience flags — orthogonal, any combination allowed. Validation below
+    // requires at least one to be set so a session always has *some* audience.
+    //   openToAll  : anyone with the share-link can join the live call + chat
+    //   cohortId   : cohort members get list visibility + materials access
+    //   inviteeIds : these specific users get list visibility + materials access
+    openToAll: z.boolean().default(false),
     cohortId: cuidSchema.optional(),
     inviteeIds: z.array(cuidSchema).max(500).optional(),
     recurrenceRule: rruleSchema,
     recurrenceUntil: isoDateTime.optional(),
-    maxParticipants: z.number().int().min(2).max(500).default(100),
+    maxParticipants: z.number().int().min(2).max(1000).default(100),
     recordingEnabled: z.boolean().default(true),
     consentRequired: z.boolean().default(true),
     topicId: cuidSchema.optional(),
     tags: z.array(z.string().min(1).max(50)).max(20).default([]),
     objectives: objectivesArraySchema,
     prereq: prereqConfigSchema.optional(),
+    // YYYY-MM-DD strings — dates the recurrence should skip (Teams-style
+    // exception list). Persisted under metadata.excludedDates; not a column
+    // because nothing queries it from SQL.
+    excludedDates: z.array(z.string().regex(/^\d{4}-\d{2}-\d{2}$/)).max(100).optional(),
+    // Live captions provider for this session. Persisted under
+    // metadata.captionsProfile. Defaults to 'english-only' on the client form;
+    // the server doesn't force a default so existing legacy sessions stay
+    // captionless until edited.
+    captionsProfile: z.enum(CAPTIONS_PROFILES).optional(),
   })
   .refine((v) => new Date(v.scheduledEnd) > new Date(v.scheduledStart), {
     message: 'scheduledEnd must be after scheduledStart',
     path: ['scheduledEnd'],
-  })
-  .refine((v) => v.visibility !== 'COHORT' || !!v.cohortId, {
-    message: 'cohortId is required when visibility is COHORT',
-    path: ['cohortId'],
-  })
-  .refine((v) => v.visibility !== 'INVITE_ONLY' || (v.inviteeIds && v.inviteeIds.length > 0), {
-    message: 'At least one invitee is required for INVITE_ONLY',
-    path: ['inviteeIds'],
   });
+// Note: "no audience at all" (openToAll=false, no cohort, no invitees) is a
+// valid state — it's the "Private" mode where only host + proposer can see /
+// join the session. The UI exposes this as the Private option.
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
 
@@ -127,12 +149,22 @@ export const cancelSessionSchema = z.object({
 export const updateSessionSchema = z.object({
   title: z.string().min(3).max(200).optional(),
   description: z.string().max(2000).nullable().optional(),
-  maxParticipants: z.number().int().min(2).max(500).optional(),
+  maxParticipants: z.number().int().min(2).max(1000).optional(),
   recordingEnabled: z.boolean().optional(),
   consentRequired: z.boolean().optional(),
   tags: z.array(z.string().min(1).max(50)).max(20).optional(),
+  // null clears the topic; absent leaves it untouched.
+  topicId: cuidSchema.nullable().optional(),
   objectives: objectivesArraySchema,
   prereq: prereqConfigSchema.optional(),
+  // Audience flags — editable post-create under the orthogonal-audience
+  // model. Each is independently optional: `undefined` means "leave alone",
+  // `null` (for cohortId) means "clear", a boolean (for openToAll) or value
+  // means "set". Invitees are diffed via the separate /invites POST + DELETE
+  // routes — they don't ride on this PATCH because the contract there is
+  // delta-based (add these, remove those), not replace.
+  openToAll: z.boolean().optional(),
+  cohortId: cuidSchema.nullable().optional(),
 });
 
 export type UpdateSessionInput = z.infer<typeof updateSessionSchema>;

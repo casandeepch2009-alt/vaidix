@@ -34,6 +34,20 @@ export type UserWithProfile = PrismaUser & {
   profile?: PrismaUserProfile | null
 }
 
+/**
+ * W6.11 — lightweight membership shape passed to the client. Mirrors
+ * SessionProgramMembership in src/types/next-auth.d.ts but uses the lowercase
+ * UserRole the UI works in. Kept in `Identity` (not on a separate context)
+ * so the existing RoleProvider stays the single source for "who is this and
+ * which program are they viewing".
+ */
+export interface IdentityProgramMembership {
+  programId: string
+  slug: string
+  name: string
+  role: UserRole
+}
+
 /** UI-facing identity object. Stable shape the RoleContext exposes. */
 export interface Identity {
   id: string
@@ -45,6 +59,10 @@ export interface Identity {
   department: string | null
   yearOfTraining: string | null
   specialization: string | null
+  /** W6.11 — programs the user is a member of (active filtered). */
+  programs: IdentityProgramMembership[]
+  /** W6.11 — currently selected program. Null only for users with zero memberships. */
+  activeProgramId: string | null
 }
 
 /**
@@ -71,8 +89,18 @@ export function mapPrismaRoleToUserRole(role: PrismaRole): UserRole {
  * Build the UI `Identity` from a Prisma user row.
  * Pass `{ include: { profile: true } }` when querying so the profile-derived
  * fields populate; without it they fall back to null.
+ *
+ * `programs` and `activeProgramId` are sourced from the JWT (the (platform)
+ * layout reads them off the session and passes them in) — we do NOT re-query
+ * memberships here, since the layout already has them.
  */
-export function mapUserToIdentity(user: UserWithProfile): Identity {
+export function mapUserToIdentity(
+  user: UserWithProfile,
+  programInfo: { programs: IdentityProgramMembership[]; activeProgramId: string | null } = {
+    programs: [],
+    activeProgramId: null,
+  },
+): Identity {
   const role = mapPrismaRoleToUserRole(user.role)
   const profile = user.profile ?? null
 
@@ -91,5 +119,7 @@ export function mapUserToIdentity(user: UserWithProfile): Identity {
     department: profile?.subspecialty ?? null,
     yearOfTraining,
     specialization: profile?.subspecialty ?? null,
+    programs: programInfo.programs,
+    activeProgramId: programInfo.activeProgramId,
   }
 }

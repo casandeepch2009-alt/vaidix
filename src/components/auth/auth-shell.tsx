@@ -49,29 +49,31 @@ export function AuthShell({
             transition={{ duration: 0.5 }}
             className="flex items-center gap-3"
           >
-            <div
-              className="flex h-12 w-12 items-center justify-center rounded-2xl"
-              style={{
-                background:
-                  'linear-gradient(135deg, rgba(20,184,166,0.35) 0%, rgba(124,58,237,0.25) 100%)',
-                border: '1.5px solid rgba(94,234,212,0.5)',
-                boxShadow: '0 0 20px rgba(20,184,166,0.3), inset 0 1px 0 rgba(255,255,255,0.2)',
-              }}
-            >
-              <svg viewBox="0 0 36 36" fill="none" width="22" height="22">
-                <circle cx="18" cy="18" r="14" stroke="url(#vlogo)" strokeWidth="3" fill="none" />
-                <circle cx="18" cy="18" r="6" fill="url(#vlogo2)" />
-                <defs>
-                  <linearGradient id="vlogo" x1="4" y1="4" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#5EEAD4" />
-                    <stop offset="1" stopColor="#A78BFA" />
-                  </linearGradient>
-                  <linearGradient id="vlogo2" x1="12" y1="12" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#FCD34D" />
-                    <stop offset="1" stopColor="#5EEAD4" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div className="relative flex h-12 w-12 items-center justify-center">
+              {/* Pulsing radial halo — anchors the mark on the dark gradient */}
+              <motion.span
+                aria-hidden
+                className="absolute -inset-3 rounded-full"
+                style={{
+                  background:
+                    'radial-gradient(circle, rgba(94,234,212,0.55) 0%, rgba(96,165,250,0.35) 45%, transparent 72%)',
+                  filter: 'blur(10px)',
+                }}
+                animate={{ opacity: [0.55, 0.95, 0.55], scale: [1, 1.08, 1] }}
+                transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="Vaidix"
+                width={48}
+                height={48}
+                className="relative h-12 w-12 object-contain"
+                style={{
+                  filter:
+                    'drop-shadow(0 0 1px rgba(255,255,255,0.95)) drop-shadow(0 0 5px rgba(255,255,255,0.45)) drop-shadow(0 0 14px rgba(94,234,212,0.6)) drop-shadow(0 0 22px rgba(96,165,250,0.45))',
+                }}
+              />
             </div>
             <div>
               <span className="text-2xl font-bold tracking-tight text-white">

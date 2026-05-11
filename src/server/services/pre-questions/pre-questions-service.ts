@@ -16,14 +16,20 @@ import { db } from '@/lib/db';
 import {
   PreSessionQuestionUrgency,
   Role,
+  UserStatus,
   type Prisma,
 } from '@prisma/client';
 import { getQueue, QUEUES } from '@/lib/queue';
 import { audit, AUDIT_EVENTS } from '@/server/services/audit';
+import { emit } from '@/server/services/notifications-service';
 import {
   clusterPreQuestions,
   type ClusterInputQuestion,
 } from './cluster-questions';
+import {
+  userCanSeeSession as sharedUserCanSeeSession,
+  userIsHostOrPrivileged as sharedUserIsHostOrPrivileged,
+} from '@/server/services/sessions/visibility';
 
 export class PreQuestionError extends Error {
   constructor(
@@ -55,6 +61,18 @@ export interface PreQuestionView {
   votedByMe: boolean;
   themeId: string | null;
   themeLabel: string | null;
+  parentId: string | null;
+  isPresenter: boolean; // True when the author hosts this session — replies get a distinct visual treatment.
+  createdAt: string;
+  replies: PreQuestionReplyView[];
+}
+
+export interface PreQuestionReplyView {
+  id: string;
+  userId: string;
+  authorName: string;
+  content: string;
+  isPresenter: boolean;
   createdAt: string;
 }
 
@@ -70,45 +88,19 @@ export interface ThemeView {
 const RECLUSTER_DEBOUNCE_MS = 30_000;
 
 // ─── Visibility ──────────────────────────────────────────────────────────────
-// Mirrors recording-service.userCanViewSession but we don't need the full
-// participant/admission graph — visibility is the same set that can see the
-// session on the calendar (W3 rules).
+// Delegate to the shared helpers in sessions/visibility.ts so pre-questions,
+// study-pack, readiness, and the classroom list always agree on who can see
+// a session. Previously this file carried a duplicated implementation that
+// drifted across refactors.
 async function userCanSeeSession(actor: PreQuestionActor, sessionId: string): Promise<boolean> {
-  if (actor.role === Role.ADMIN || actor.role === Role.PROGRAM_DIRECTOR) return true;
-  const session = await db.teachingSession.findUnique({
-    where: { id: sessionId },
-    select: {
-      hostId: true,
-      proposedBy: true,
-      visibility: true,
-      cohortId: true,
-      invites: { where: { userId: actor.userId }, select: { userId: true } },
-    },
-  });
-  if (!session) return false;
-  if (session.hostId === actor.userId || session.proposedBy === actor.userId) return true;
-  if (session.visibility === 'OPEN_TO_ALL') return true;
-  if (session.visibility === 'COHORT' && session.cohortId) {
-    const member = await db.cohortMember.findUnique({
-      where: { cohortId_userId: { cohortId: session.cohortId, userId: actor.userId } },
-      select: { userId: true },
-    });
-    if (member) return true;
-  }
-  if (session.visibility === 'INVITE_ONLY' && session.invites.length > 0) return true;
-  return actor.role === Role.FACULTY;
+  return sharedUserCanSeeSession(actor, sessionId);
 }
 
 async function userIsHostOrPrivileged(
   actor: PreQuestionActor,
   sessionId: string
 ): Promise<boolean> {
-  if (actor.role === Role.ADMIN || actor.role === Role.PROGRAM_DIRECTOR) return true;
-  const session = await db.teachingSession.findUnique({
-    where: { id: sessionId },
-    select: { hostId: true },
-  });
-  return !!session && session.hostId === actor.userId;
+  return sharedUserIsHostOrPrivileged(actor, sessionId);
 }
 
 // ─── Submit / list / vote ────────────────────────────────────────────────────
@@ -134,6 +126,23 @@ export async function submitQuestion(
     select: { id: true },
   });
   await scheduleRecluster(sessionId);
+
+  // Notify the session host (faculty) that a new pre-conference question was
+  // posted. Skip if the submitter IS the host (they know what they wrote).
+  const session = await db.teachingSession.findUnique({
+    where: { id: sessionId },
+    select: { hostId: true, title: true, host: { select: { status: true } } },
+  });
+  if (session && session.hostId !== actor.userId && session.host.status === UserStatus.ACTIVE) {
+    await emit({
+      userId: session.hostId,
+      kind: 'prequestion.posted',
+      title: `New pre-class question for "${session.title}"`,
+      body: content.length > 100 ? `${content.slice(0, 97)}…` : content,
+      payload: { sessionId, questionId: created.id, urgency: input.urgency ?? 'NORMAL' },
+    });
+  }
+
   return created;
 }
 
@@ -144,16 +153,55 @@ export async function listQuestions(
   if (!(await userCanSeeSession(actor, sessionId))) {
     throw new PreQuestionError('SESSION_NOT_VISIBLE', 'No visibility into this session');
   }
-  const rows = await db.preSessionQuestion.findMany({
-    where: { sessionId },
-    orderBy: [{ voteCount: 'desc' }, { createdAt: 'asc' }],
-    include: {
-      user: { select: { id: true, name: true } },
-      theme: { select: { id: true, label: true } },
-      votes: { where: { userId: actor.userId }, select: { id: true } },
-    },
-  });
-  return rows.map((r) => ({
+
+  // One round-trip for both top-level questions and their replies. We sort
+  // in JS afterwards so we keep the conventional "top-level by votes, replies
+  // by chronology" ordering without two separate queries.
+  const [rows, session] = await Promise.all([
+    db.preSessionQuestion.findMany({
+      where: { sessionId },
+      include: {
+        user: { select: { id: true, name: true } },
+        theme: { select: { id: true, label: true } },
+        votes: { where: { userId: actor.userId }, select: { id: true } },
+      },
+    }),
+    db.teachingSession.findUnique({
+      where: { id: sessionId },
+      select: { hostId: true },
+    }),
+  ]);
+  const hostId = session?.hostId ?? null;
+
+  // Partition into top-level + replies (keyed by parentId).
+  const replyMap = new Map<string, PreQuestionReplyView[]>();
+  for (const r of rows) {
+    if (!r.parentId) continue;
+    const view: PreQuestionReplyView = {
+      id: r.id,
+      userId: r.userId,
+      authorName: r.user.name,
+      content: r.content,
+      isPresenter: hostId === r.userId,
+      createdAt: r.createdAt.toISOString(),
+    };
+    const arr = replyMap.get(r.parentId) ?? [];
+    arr.push(view);
+    replyMap.set(r.parentId, arr);
+  }
+  // Replies chronological under each parent.
+  for (const arr of replyMap.values()) {
+    arr.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  }
+
+  const topLevel = rows
+    .filter((r) => r.parentId === null)
+    .sort((a, b) => {
+      if (b.voteCount !== a.voteCount) return b.voteCount - a.voteCount;
+      return a.createdAt.getTime() - b.createdAt.getTime();
+    });
+
+  return topLevel.map((r) => ({
     id: r.id,
     sessionId: r.sessionId,
     userId: r.userId,
@@ -164,7 +212,10 @@ export async function listQuestions(
     votedByMe: r.votes.length > 0,
     themeId: r.themeId,
     themeLabel: r.theme?.label ?? null,
+    parentId: null,
+    isPresenter: hostId === r.userId,
     createdAt: r.createdAt.toISOString(),
+    replies: replyMap.get(r.id) ?? [],
   }));
 }
 
@@ -179,11 +230,15 @@ export async function setVote(
   }
   const q = await db.preSessionQuestion.findUnique({
     where: { id: questionId },
-    select: { id: true, sessionId: true, userId: true },
+    select: { id: true, sessionId: true, userId: true, parentId: true },
   });
   if (!q) throw new PreQuestionError('NOT_FOUND', 'Question not found');
   if (q.sessionId !== sessionId) {
     throw new PreQuestionError('INVALID', 'Question does not belong to this session');
+  }
+  if (q.parentId !== null) {
+    // Replies are conversation, not ranked content — voting is for top-level only.
+    throw new PreQuestionError('INVALID', 'Replies cannot be voted on');
   }
   if (q.userId === actor.userId) {
     // Authors can't upvote their own question. Soft 400 instead of silent.
@@ -209,6 +264,70 @@ export async function setVote(
     });
     return { voteCount: count };
   });
+}
+
+// ─── Replies ────────────────────────────────────────────────────────────────
+// Single-level threads (mirrors the QaItem pattern): a reply (parentId != null)
+// cannot itself have replies. Service-level guard rejects nested replies; the
+// FK cascade keeps orphans cleaned up on parent delete.
+
+export async function postReply(
+  actor: PreQuestionActor,
+  sessionId: string,
+  parentId: string,
+  input: { content: string }
+): Promise<{ id: string }> {
+  if (!(await userCanSeeSession(actor, sessionId))) {
+    throw new PreQuestionError('SESSION_NOT_VISIBLE', 'No visibility into this session');
+  }
+  const content = input.content.trim();
+  if (content.length < 2 || content.length > 2000) {
+    throw new PreQuestionError('INVALID', 'Reply must be 2–2000 characters');
+  }
+
+  const parent = await db.preSessionQuestion.findUnique({
+    where: { id: parentId },
+    select: { id: true, sessionId: true, userId: true, parentId: true, content: true },
+  });
+  if (!parent) throw new PreQuestionError('NOT_FOUND', 'Parent question not found');
+  if (parent.sessionId !== sessionId) {
+    throw new PreQuestionError('INVALID', 'Parent belongs to a different session');
+  }
+  if (parent.parentId !== null) {
+    throw new PreQuestionError('INVALID', 'Replies cannot have replies');
+  }
+
+  const created = await db.preSessionQuestion.create({
+    data: {
+      sessionId,
+      userId: actor.userId,
+      content,
+      urgency: PreSessionQuestionUrgency.NORMAL,
+      parentId: parent.id,
+    },
+    select: { id: true },
+  });
+
+  // Notify the parent author so they know their question got a response. Skip
+  // self-replies (the author already knows they typed it). Mirrors the host
+  // notification on submitQuestion so the same emit() surface handles both.
+  if (parent.userId !== actor.userId) {
+    const author = await db.user.findUnique({
+      where: { id: parent.userId },
+      select: { status: true },
+    });
+    if (author?.status === UserStatus.ACTIVE) {
+      await emit({
+        userId: parent.userId,
+        kind: 'prequestion.replied',
+        title: 'New reply to your pre-class question',
+        body: content.length > 100 ? `${content.slice(0, 97)}…` : content,
+        payload: { sessionId, parentId: parent.id, replyId: created.id },
+      });
+    }
+  }
+
+  return created;
 }
 
 // ─── Themes / presenter dashboard ────────────────────────────────────────────
@@ -343,8 +462,10 @@ export async function forceRecluster(
  * safe to re-run; old themes are deleted in the same transaction.
  */
 export async function runClusterJob(sessionId: string): Promise<{ themeCount: number; assigned: number; unthemed: number }> {
+  // Only top-level questions get clustered — replies are conversation, not
+  // themable content. Filtering at the DB keeps the LLM payload tight.
   const questions = await db.preSessionQuestion.findMany({
-    where: { sessionId },
+    where: { sessionId, parentId: null },
     select: { id: true, content: true, voteCount: true },
   });
   if (questions.length === 0) {

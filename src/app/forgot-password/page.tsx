@@ -22,7 +22,7 @@ export default function ForgotPasswordPage() {
     const parsed = forgotPasswordSchema.safeParse({ identifier });
     if (!parsed.success) {
       const flat = parsed.error.flatten().fieldErrors as Record<string, string[] | undefined>;
-      setFieldError(flat.identifier?.[0] ?? 'Invalid email, mobile, or username');
+      setFieldError(flat.identifier?.[0] ?? 'Invalid email or mobile number');
       return;
     }
 
@@ -79,7 +79,7 @@ export default function ForgotPasswordPage() {
               }}
               className="font-medium text-teal-600 hover:text-teal-700"
             >
-              try a different identifier
+              try a different email or mobile number
             </button>
             .
           </p>
@@ -94,7 +94,7 @@ export default function ForgotPasswordPage() {
         <>
           <h2 className="text-3xl font-black tracking-tight text-slate-900">Reset password</h2>
           <p className="mt-1.5 text-sm text-slate-500">
-            Enter your email, mobile, or username. The reset link is sent to the email on file.
+            Enter your email or mobile number. The reset link is sent to the email on file.
           </p>
 
           {formError && (
@@ -108,7 +108,7 @@ export default function ForgotPasswordPage() {
             <AuthInput
               id="identifier"
               type="text"
-              label="Email, mobile, or username"
+              label="Email or mobile number"
               value={identifier}
               onChange={(v) => {
                 setIdentifier(v);
@@ -121,9 +121,9 @@ export default function ForgotPasswordPage() {
                   return;
                 }
                 const flat = r.error.flatten().fieldErrors as Record<string, string[] | undefined>;
-                setFieldError(flat.identifier?.[0] ?? 'Invalid email, mobile, or username');
+                setFieldError(flat.identifier?.[0] ?? 'Invalid email or mobile number');
               }}
-              placeholder="you@lvpei.org / 9XXXXXXXXX / username"
+              placeholder="you@lvpei.org / 98765 43210"
               error={fieldError ?? undefined}
               disabled={loading}
               icon={AtSign}

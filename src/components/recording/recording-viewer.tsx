@@ -1,25 +1,36 @@
 'use client'
 
 // ════════════════════════════════════════════════════════════════════════════
-// RecordingViewer — YouTube-style recording page
+// RecordingViewer — redesigned with hero card, unified Q&A, Goals tab
 // ════════════════════════════════════════════════════════════════════════════
-// Layout (desktop):  [video + meta + tabs (Pearls | Transcript)]  [Q&A panel]
-// Layout (mobile):   [video] [meta] [Discussion | Pearls | Transcript] tabs
+// Desktop layout:  [Hero] / [video + tabs (Goals|Pearls|Transcript)]  [Q&A panel]
+// Mobile layout:   [Hero] / [video] [Questions|Goals|Pearls|Transcript] tabs
 
 import { useRef, useState, useTransition } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { RecordingPlayer } from './recording-player'
+import { RecordingReplayLayer } from './recording-replay-layer'
 import { QaSidebar } from '@/components/classroom/qa-sidebar'
 import { SessionPearlsTab, type SessionPearl } from './session-pearls-tab'
 import { TranscriptTab } from './transcript-tab'
+import { ObjectivesChecklist, type ChecklistObjective } from '@/components/classroom/objectives-checklist'
+import { PreSessionTab } from './pre-session-tab'
 import {
   ThumbsUp, Bookmark, Share2, Gem, BookOpen, MessageSquare,
-  User, Calendar, Clock, Captions, X, Copy, Check, Lock, Loader2, ExternalLink,
+  User, Calendar, Clock, Captions, X, Copy, Check, Lock,
+  Loader2, ExternalLink, Sparkles, VideoOff, Target, ClipboardList,
 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { cn } from '@/lib/utils'
-import { toggleRecordingBookmarkAction, createRecordingShareAction } from '@/app/(platform)/classroom/[id]/recording/actions'
+import { csrfHeaders } from '@/lib/csrf-client'
+import {
+  toggleRecordingBookmarkAction,
+  createRecordingShareAction,
+} from '@/app/(platform)/classroom/[id]/recording/actions'
+
+const FACULTY_LIKE_ROLES = new Set(['FACULTY', 'PROGRAM_DIRECTOR', 'ADMIN'])
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -36,7 +47,7 @@ interface Props {
   scheduledStart: Date | string
   durationSec?: number | null
 
-  hlsUrl: string
+  hlsUrl: string | null
   posterUrl?: string | null
   tracks: CaptionTrack[]
 
@@ -49,6 +60,7 @@ interface Props {
   canShare: boolean
 
   pearls: SessionPearl[]
+  objectives?: ChecklistObjective[]
 }
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -57,13 +69,7 @@ const LANGUAGE_LABEL: Record<string, string> = {
   en: 'EN', hi: 'हि', te: 'తె', ta: 'த', kn: 'ಕ', ml: 'മ', mr: 'म', bn: 'বা', ur: 'اردو',
 }
 
-const TABS = [
-  { id: 'pearls', label: 'Pearls', icon: Gem },
-  { id: 'transcript', label: 'Transcript', icon: BookOpen },
-  { id: 'discussion', label: 'Discussion', icon: MessageSquare },
-] as const
-
-type TabId = (typeof TABS)[number]['id']
+type TabId = 'questions' | 'presession' | 'goals' | 'pearls' | 'transcript'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -81,6 +87,17 @@ function formatDate(d: Date | string) {
   })
 }
 
+// ─── Stat pill for hero card ──────────────────────────────────────────────────
+
+function StatPill({ icon, label }: { icon: React.ReactNode; label: string }) {
+  return (
+    <span className="flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 text-xs font-semibold backdrop-blur-sm ring-1 ring-white/20">
+      {icon}
+      {label}
+    </span>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function RecordingViewer({
@@ -89,11 +106,11 @@ export function RecordingViewer({
   currentUser, canPin, canAnswer,
   recordingId, initialBookmarked, canShare,
   pearls,
+  objectives = [],
 }: Props) {
   const [currentTimeSec, setCurrentTimeSec] = useState(0)
   const seekRef = useRef<((sec: number) => void) | null>(null)
 
-  // Caption lang lives here so the action bar can control it
   const [activeLang, setActiveLang] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const stored = window.localStorage.getItem('vaidix.captionLang')
@@ -102,11 +119,59 @@ export function RecordingViewer({
     return tracks.find((t) => t.language === 'en')?.language ?? tracks[0]?.language ?? 'off'
   })
 
-  const [activeTab, setActiveTab] = useState<TabId>('pearls')
+  // Default to Goals (self-assess) for residents, Pre-session context for others
+  const defaultTab: TabId = objectives.length > 0 ? 'goals' : 'presession'
+  const [activeTab, setActiveTab] = useState<TabId>(defaultTab)
   const [bookmarked, setBookmarked] = useState(initialBookmarked)
   const [liked, setLiked] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
   const [isPending, startTransition] = useTransition()
+  const [forging, setForging] = useState(false)
+  const [forgeError, setForgeError] = useState<string | null>(null)
+  const router = useRouter()
+
+  const canForgeFromTranscript = FACULTY_LIKE_ROLES.has(currentUser.role) && tracks.length > 0
+  const hasTracks = tracks.length > 0
+  const completedObjectives = objectives.filter((o) => o.myStatus !== null).length
+
+  // Build the tab list dynamically
+  const TABS: { id: TabId; label: string; icon: typeof Gem }[] = [
+    // Questions tab — mobile only (desktop Q&A lives in right panel)
+    { id: 'questions', label: 'Questions', icon: MessageSquare },
+    // Pre-session — always shown, even when empty
+    { id: 'presession', label: 'Pre-session', icon: ClipboardList },
+    // Goals tab — only if objectives exist (RESIDENT / EXTERNAL_LEARNER)
+    ...(objectives.length > 0
+      ? [{ id: 'goals' as TabId, label: 'Goals', icon: Target }]
+      : []),
+    { id: 'pearls', label: 'Pearls', icon: Gem },
+    { id: 'transcript', label: 'Transcript', icon: BookOpen },
+  ]
+
+  async function handleForgeFromTranscript() {
+    setForging(true)
+    setForgeError(null)
+    try {
+      const res = await fetch('/api/decks/forge', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ recordingId }),
+      })
+      const json = (await res.json()) as {
+        ok: boolean
+        data?: { jobId: string }
+        error?: { message: string }
+      }
+      if (!json.ok || !json.data) {
+        throw new Error(json.error?.message ?? `Forge failed (${res.status})`)
+      }
+      router.push(`/faculty/decks/${json.data.jobId}`)
+    } catch (err) {
+      setForgeError((err as Error).message)
+    } finally {
+      setForging(false)
+    }
+  }
 
   function handleLangChange(lang: string) {
     setActiveLang(lang)
@@ -129,25 +194,144 @@ export function RecordingViewer({
     })
   }
 
-  const hasTracks = tracks.length > 0
-
   return (
     <>
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_380px]">
-        {/* ════════ Left column ════════ */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* Compact hero strip — title + meta + actions in 2 tight rows         */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      <div className="premium-hero relative mb-4 overflow-hidden rounded-2xl px-5 py-4 text-white">
+        {/* Grain texture */}
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.04]"
+          style={{ backgroundImage: 'radial-gradient(circle, white 1px, transparent 1px)', backgroundSize: '18px 18px' }}
+        />
+        <div className="relative z-10 flex items-start gap-4">
+          {/* Left: status chips + title + meta */}
+          <div className="min-w-0 flex-1">
+            {/* Row 1: status badge + inline stats */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wider ring-1 ring-white/20">
+                Completed
+              </span>
+              {durationSec != null && durationSec > 0 && (
+                <span className="flex items-center gap-1 text-[11px] text-white/60">
+                  <Clock className="size-3" />{formatDuration(durationSec)}
+                </span>
+              )}
+              {objectives.length > 0 && (
+                <span className="flex items-center gap-1 text-[11px] text-white/60">
+                  <Target className="size-3" />{completedObjectives}/{objectives.length} goals
+                </span>
+              )}
+              {pearls.length > 0 && (
+                <span className="flex items-center gap-1 text-[11px] text-white/60">
+                  <Gem className="size-3" />{pearls.length} pearls
+                </span>
+              )}
+            </div>
+            {/* Row 2: title */}
+            <h1 className="mt-1 truncate text-lg font-bold leading-tight tracking-tight sm:text-xl">
+              {sessionTitle}
+            </h1>
+            {/* Row 3: meta */}
+            <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-white/60">
+              {hostName && (
+                <span className="flex items-center gap-1">
+                  <User className="size-3" />{hostName}
+                </span>
+              )}
+              <span className="flex items-center gap-1">
+                <Calendar className="size-3" />{formatDate(scheduledStart)}
+              </span>
+            </div>
+          </div>
+
+          {/* Right: action buttons */}
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-1.5">
+            <motion.button
+              onClick={() => setLiked((v) => !v)}
+              whileTap={{ scale: 0.93 }}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold backdrop-blur-sm ring-1 transition-all',
+                liked ? 'bg-white text-primary ring-white' : 'bg-white/15 text-white ring-white/20 hover:bg-white/25',
+              )}
+            >
+              <ThumbsUp className={cn('size-3.5 transition-transform', liked && 'fill-current -rotate-6')} />
+              Helpful
+            </motion.button>
+
+            <motion.button
+              onClick={handleBookmark}
+              disabled={isPending}
+              whileTap={{ scale: 0.93 }}
+              className={cn(
+                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold backdrop-blur-sm ring-1 transition-all',
+                bookmarked ? 'bg-amber-400/90 text-amber-900 ring-amber-400/50' : 'bg-white/15 text-white ring-white/20 hover:bg-white/25',
+              )}
+            >
+              <Bookmark className={cn('size-3.5', bookmarked && 'fill-current')} />
+              {bookmarked ? 'Saved' : 'Save'}
+            </motion.button>
+
+            {canShare && (
+              <motion.button
+                onClick={() => setShareOpen(true)}
+                whileTap={{ scale: 0.93 }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm ring-1 ring-white/20 transition-all hover:bg-white/25"
+              >
+                <Share2 className="size-3.5" />
+                Share
+              </motion.button>
+            )}
+
+            {canForgeFromTranscript && (
+              <motion.button
+                onClick={handleForgeFromTranscript}
+                disabled={forging}
+                whileTap={{ scale: 0.93 }}
+                className="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-xs font-semibold text-white backdrop-blur-sm ring-1 ring-white/20 transition-all hover:bg-white/25 disabled:opacity-50"
+              >
+                {forging ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                {forging ? 'Forging…' : 'Forge slides'}
+              </motion.button>
+            )}
+          </div>
+        </div>
+        {forgeError && (
+          <p className="relative z-10 mt-2 text-xs text-rose-300">{forgeError}</p>
+        )}
+      </div>
+
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      {/* Main grid                                                           */}
+      {/* ════════════════════════════════════════════════════════════════════ */}
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,2fr)_390px]">
+
+        {/* ════ Left column ════ */}
         <div className="min-w-0 space-y-4">
 
           {/* Video */}
-          <RecordingPlayer
-            hlsUrl={hlsUrl}
-            posterUrl={posterUrl}
-            tracks={tracks}
-            onTimeUpdate={setCurrentTimeSec}
-            seekRef={seekRef}
-            activeLang={activeLang}
-          />
+          <div className="relative">
+            {hlsUrl ? (
+              <RecordingPlayer
+                hlsUrl={hlsUrl}
+                posterUrl={posterUrl}
+                tracks={tracks}
+                onTimeUpdate={setCurrentTimeSec}
+                seekRef={seekRef}
+                activeLang={activeLang}
+              />
+            ) : (
+              <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl bg-zinc-900 text-white/80">
+                <VideoOff className="size-10 opacity-50" />
+                <p className="text-sm font-medium">No video recorded for this session</p>
+                <p className="text-xs text-white/40">Transcript and discussion are still available.</p>
+              </div>
+            )}
+            <RecordingReplayLayer sessionId={sessionId} currentTimeSec={currentTimeSec} />
+          </div>
 
-          {/* Caption language row */}
+          {/* Caption language selector */}
           {hasTracks && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="flex items-center gap-1 text-[11px] font-medium text-muted-foreground">
@@ -160,7 +344,7 @@ export function RecordingViewer({
                   'rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-all',
                   activeLang === 'off'
                     ? 'bg-foreground text-background'
-                    : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+                    : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground',
                 )}
               >
                 Off
@@ -174,7 +358,7 @@ export function RecordingViewer({
                     'rounded-full px-2.5 py-0.5 text-[11px] font-semibold transition-all disabled:opacity-40',
                     activeLang === t.language
                       ? 'bg-primary text-primary-foreground shadow-sm'
-                      : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground'
+                      : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground',
                   )}
                 >
                   {LANGUAGE_LABEL[t.language] ?? t.language.toUpperCase()}
@@ -183,89 +367,20 @@ export function RecordingViewer({
             </div>
           )}
 
-          {/* Title + metadata */}
-          <div className="space-y-2">
-            <h1 className="text-xl font-bold leading-tight tracking-tight">{sessionTitle}</h1>
-            <div className="flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-              {hostName && (
-                <span className="flex items-center gap-1.5">
-                  <User className="size-3.5" />
-                  {hostName}
-                </span>
-              )}
-              <span className="flex items-center gap-1.5">
-                <Calendar className="size-3.5" />
-                {formatDate(scheduledStart)}
-              </span>
-              {durationSec != null && durationSec > 0 && (
-                <span className="flex items-center gap-1.5">
-                  <Clock className="size-3.5" />
-                  {formatDuration(durationSec)}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* ─── Action bar ─── */}
-          <div className="flex flex-wrap items-center gap-2 border-y border-border/70 py-3">
-            {/* Like */}
-            <motion.button
-              onClick={() => setLiked((v) => !v)}
-              whileTap={{ scale: 0.93 }}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all',
-                liked
-                  ? 'bg-primary/10 text-primary ring-1 ring-primary/30'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground'
-              )}
-            >
-              <ThumbsUp className={cn('size-4 transition-transform', liked && 'fill-current -rotate-6')} />
-              Helpful
-            </motion.button>
-
-            {/* Save / bookmark */}
-            <motion.button
-              onClick={handleBookmark}
-              disabled={isPending}
-              whileTap={{ scale: 0.93 }}
-              className={cn(
-                'inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-sm font-semibold transition-all',
-                bookmarked
-                  ? 'bg-amber-500/10 text-amber-700 ring-1 ring-amber-500/30 dark:text-amber-400'
-                  : 'bg-muted text-muted-foreground hover:bg-muted/70 hover:text-foreground'
-              )}
-            >
-              <Bookmark className={cn('size-4', bookmarked && 'fill-current')} />
-              {bookmarked ? 'Saved' : 'Save'}
-            </motion.button>
-
-            {/* Share */}
-            {canShare && (
-              <motion.button
-                onClick={() => setShareOpen(true)}
-                whileTap={{ scale: 0.93 }}
-                className="inline-flex items-center gap-1.5 rounded-full bg-muted px-3.5 py-1.5 text-sm font-semibold text-muted-foreground transition-all hover:bg-muted/70 hover:text-foreground"
-              >
-                <Share2 className="size-4" />
-                Share
-              </motion.button>
-            )}
-          </div>
-
           {/* ─── Tab bar ─── */}
           <div>
-            <div className="flex items-center border-b border-border/60">
+            <div className="flex items-center gap-0.5 border-b border-border/60">
               {TABS.map((tab) => (
                 <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
                     'relative flex items-center gap-1.5 px-4 pb-3 pt-1 text-sm font-semibold transition-colors',
-                    // Discussion tab hidden on desktop (Q&A lives in right panel)
-                    tab.id === 'discussion' && 'xl:hidden',
+                    // Questions tab: visible only on mobile (right panel handles desktop)
+                    tab.id === 'questions' && 'xl:hidden',
                     activeTab === tab.id
                       ? 'text-foreground'
-                      : 'text-muted-foreground hover:text-foreground/70'
+                      : 'text-muted-foreground hover:text-foreground/70',
                   )}
                 >
                   <tab.icon className="size-3.5" />
@@ -273,6 +388,16 @@ export function RecordingViewer({
                   {tab.id === 'pearls' && pearls.length > 0 && (
                     <span className="ml-0.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">
                       {pearls.length}
+                    </span>
+                  )}
+                  {tab.id === 'goals' && objectives.length > 0 && (
+                    <span className={cn(
+                      'ml-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold',
+                      completedObjectives === objectives.length
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                        : 'bg-primary/10 text-primary',
+                    )}>
+                      {completedObjectives}/{objectives.length}
                     </span>
                   )}
                   {activeTab === tab.id && (
@@ -296,7 +421,32 @@ export function RecordingViewer({
                 transition={{ duration: 0.18, ease: 'easeOut' }}
                 className="pt-4"
               >
-                {activeTab === 'pearls' && <SessionPearlsTab pearls={pearls} />}
+                {activeTab === 'questions' && (
+                  <div className="h-[60vh] min-h-96 xl:hidden">
+                    <div className="h-full overflow-hidden rounded-2xl border border-border shadow-sm">
+                      <QaSidebar
+                        sessionId={sessionId}
+                        currentUser={currentUser}
+                        currentTimeSec={currentTimeSec}
+                        onSeek={(sec) => seekRef.current?.(sec)}
+                        canPin={canPin}
+                        canAnswer={canAnswer}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'presession' && (
+                  <PreSessionTab sessionId={sessionId} objectives={objectives} />
+                )}
+
+                {activeTab === 'goals' && (
+                  <ObjectivesChecklist sessionId={sessionId} initial={objectives} />
+                )}
+
+                {activeTab === 'pearls' && (
+                  <SessionPearlsTab pearls={pearls} />
+                )}
 
                 {activeTab === 'transcript' && (
                   <TranscriptTab
@@ -305,49 +455,22 @@ export function RecordingViewer({
                     onSeek={(sec) => seekRef.current?.(sec)}
                   />
                 )}
-
-                {/* Discussion tab — mobile only */}
-                {activeTab === 'discussion' && (
-                  <div className="h-[60vh] min-h-100 xl:hidden">
-                    <QaSidebar
-                      sessionId={sessionId}
-                      currentUser={currentUser}
-                      currentTimeSec={currentTimeSec}
-                      onSeek={(sec) => seekRef.current?.(sec)}
-                      canPin={canPin}
-                      canAnswer={canAnswer}
-                    />
-                  </div>
-                )}
               </motion.div>
             </AnimatePresence>
           </div>
         </div>
 
-        {/* ════════ Right column — Q&A (desktop only) ════════ */}
+        {/* ════ Right column — unified Q&A panel (desktop only) ════ */}
         <aside className="hidden xl:flex xl:flex-col">
-          <div className="sticky top-4 flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-            {/* Panel header */}
-            <div className="flex items-center gap-2 border-b border-border/60 bg-muted/30 px-4 py-3">
-              <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10">
-                <MessageSquare className="size-3.5 text-primary" />
-              </div>
-              <div>
-                <p className="text-sm font-semibold">Live Discussion</p>
-                <p className="text-[10px] text-muted-foreground">Ask questions · Timestamped to playhead</p>
-              </div>
-            </div>
-            {/* Q&A sidebar fills the rest */}
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <QaSidebar
-                sessionId={sessionId}
-                currentUser={currentUser}
-                currentTimeSec={currentTimeSec}
-                onSeek={(sec) => seekRef.current?.(sec)}
-                canPin={canPin}
-                canAnswer={canAnswer}
-              />
-            </div>
+          <div className="sticky top-4 flex h-[calc(100vh-7rem)] flex-col overflow-hidden rounded-2xl border border-border shadow-sm">
+            <QaSidebar
+              sessionId={sessionId}
+              currentUser={currentUser}
+              currentTimeSec={currentTimeSec}
+              onSeek={(sec) => seekRef.current?.(sec)}
+              canPin={canPin}
+              canAnswer={canAnswer}
+            />
           </div>
         </aside>
       </div>
@@ -355,17 +478,14 @@ export function RecordingViewer({
       {/* ─── Share modal ─── */}
       <AnimatePresence>
         {shareOpen && (
-          <ShareModal
-            recordingId={recordingId}
-            onClose={() => setShareOpen(false)}
-          />
+          <ShareModal recordingId={recordingId} onClose={() => setShareOpen(false)} />
         )}
       </AnimatePresence>
     </>
   )
 }
 
-// ─── Share modal (self-contained) ────────────────────────────────────────────
+// ─── Share modal ──────────────────────────────────────────────────────────────
 
 function ShareModal({ recordingId, onClose }: { recordingId: string; onClose: () => void }) {
   const [ttlDays, setTtlDays] = useState(7)
@@ -418,7 +538,6 @@ function ShareModal({ recordingId, onClose }: { recordingId: string; onClose: ()
         className="w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
         <div className="flex items-start justify-between border-b border-border/60 px-5 py-4">
           <div className="flex items-center gap-2.5">
             <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
@@ -429,7 +548,10 @@ function ShareModal({ recordingId, onClose }: { recordingId: string; onClose: ()
               <p className="text-[11px] text-muted-foreground">Audited link — read-only access</p>
             </div>
           </div>
-          <button onClick={onClose} className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted/60 transition-colors">
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-muted/60"
+          >
             <X className="size-4" />
           </button>
         </div>
@@ -447,7 +569,7 @@ function ShareModal({ recordingId, onClose }: { recordingId: string; onClose: ()
                       'rounded-full border px-3 py-1 text-xs font-semibold transition-colors',
                       ttlDays === d
                         ? 'border-primary bg-primary/10 text-primary'
-                        : 'border-border text-muted-foreground hover:bg-muted'
+                        : 'border-border text-muted-foreground hover:bg-muted',
                     )}
                   >
                     {d === 1 ? '1 day' : `${d} days`}
@@ -493,14 +615,18 @@ function ShareModal({ recordingId, onClose }: { recordingId: string; onClose: ()
             )}
 
             <div className="flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={onClose} disabled={creating}>Cancel</Button>
+              <Button variant="outline" size="sm" onClick={onClose} disabled={creating}>
+                Cancel
+              </Button>
               <Button
                 size="sm"
                 onClick={handleCreate}
                 disabled={creating || (usePassword && password.trim().length < 6)}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
               >
-                {creating ? <><Loader2 className="size-3.5 mr-1.5 animate-spin" />Creating…</> : 'Create link'}
+                {creating
+                  ? <><Loader2 className="mr-1.5 size-3.5 animate-spin" />Creating…</>
+                  : 'Create link'
+                }
               </Button>
             </div>
           </div>
@@ -512,8 +638,10 @@ function ShareModal({ recordingId, onClose }: { recordingId: string; onClose: ()
             <div className="flex items-center gap-2">
               <Input value={link} readOnly className="font-mono text-xs" />
               <Button size="sm" onClick={handleCopy} className="shrink-0">
-                {copied ? <Check className="size-3.5 mr-1" /> : <Copy className="size-3.5 mr-1" />}
-                {copied ? 'Copied' : 'Copy'}
+                {copied
+                  ? <><Check className="mr-1 size-3.5" />Copied</>
+                  : <><Copy className="mr-1 size-3.5" />Copy</>
+                }
               </Button>
             </div>
             <a

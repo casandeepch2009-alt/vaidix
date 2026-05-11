@@ -41,6 +41,17 @@ const DEMO_USER_EMAILS = [
   'priya.sharma@vaidix.local',
 ];
 
+// Demo users seeded by prisma/seed.demo.ts (separate set, different IDs).
+// Cleanup needs to sweep these too — they share the same 1:1 child tables
+// (UserProfile / UserPreferences / UserStats) that can orphan if a previous
+// seed run partially failed.
+const DEMO_SEED_USER_IDS = [
+  'demo-user-resident',
+  'demo-user-faculty',
+  'demo-user-pd',
+  'demo-user-external',
+];
+
 const DEMO_COHORT_NAME = 'PGY-1 Residents 2026–27';
 
 const DEMO_COURSE_SLUGS = [
@@ -53,13 +64,41 @@ async function main() {
   const banner = APPLY ? '🧹 APPLY mode — deletions will run' : '🔍 DRY-RUN — nothing will be deleted (pass --apply to execute)';
   console.log(`\n${banner}\n`);
 
-  // ─── 1) Demo users ──────────────────────────────────────────────────────
+  // ─── 1) Demo users (both base seed + demo seed) ─────────────────────────
   const demoUsers = await prisma.user.findMany({
     where: { email: { in: DEMO_USER_EMAILS } },
     select: { id: true, email: true, name: true, role: true },
   });
-  console.log(`👥 Demo users: ${demoUsers.length}`);
+  console.log(`👥 Demo users (base seed): ${demoUsers.length}`);
   for (const u of demoUsers) console.log(`   - ${u.email} (${u.name}, ${u.role})`);
+
+  const demoSeedUsers = await prisma.user.findMany({
+    where: { id: { in: DEMO_SEED_USER_IDS } },
+    select: { id: true, email: true, name: true, role: true },
+  });
+  console.log(`\n👥 Demo users (seed.demo.ts): ${demoSeedUsers.length}`);
+  for (const u of demoSeedUsers) console.log(`   - ${u.email} (${u.name}, ${u.role})`);
+
+  // ─── 1a) 1:1 child rows for known demo users ─────────────────────────────
+  // Profile / Preferences / Stats are cascade-on-delete from User but can
+  // orphan if a prior run was interrupted, or if someone wiped the users
+  // table via raw SQL. The apply phase below sweeps them unconditionally
+  // for every known demo userId so a fresh seed isn't blocked by a stale
+  // child row's unique-userId constraint.
+  const knownDemoUserIds = [
+    ...demoUsers.map((u) => u.id),
+    ...DEMO_SEED_USER_IDS,
+  ];
+  const [profileCount, prefCount, statCount] = await Promise.all([
+    prisma.userProfile.count({ where: { userId: { in: knownDemoUserIds } } }),
+    prisma.userPreferences.count({ where: { userId: { in: knownDemoUserIds } } }),
+    prisma.userStats.count({ where: { userId: { in: knownDemoUserIds } } }),
+  ]);
+  const childCount = profileCount + prefCount + statCount;
+  if (childCount > 0) {
+    console.log(`\n🧟 1:1 child rows on known demo userIds: ${childCount}`);
+    console.log(`   - profiles: ${profileCount}, preferences: ${prefCount}, stats: ${statCount}`);
+  }
 
   // ─── 2) Demo cohort ─────────────────────────────────────────────────────
   const demoCohorts = await prisma.cohort.findMany({
@@ -129,7 +168,33 @@ async function main() {
     const delUsers = await tx.user.deleteMany({
       where: { email: { in: DEMO_USER_EMAILS } },
     });
-    console.log(`   ✓ ${delUsers.count} demo users deleted`);
+    console.log(`   ✓ ${delUsers.count} base-seed demo users deleted`);
+
+    // 4g. Demo-seed-only users (separate set with `demo-user-*` IDs).
+    const delDemoSeedUsers = await tx.user.deleteMany({
+      where: { id: { in: DEMO_SEED_USER_IDS } },
+    });
+    console.log(`   ✓ ${delDemoSeedUsers.count} seed.demo.ts users deleted`);
+
+    // 4h. Sweep any 1:1 child rows for the known demo userIds.
+    // FK cascade *should* have taken care of these on the user.deleteMany
+    // calls above, but we run the sweep unconditionally so re-applying
+    // cleanup on a half-cleaned DB (e.g. raw SQL delete on `users` without
+    // cascade) doesn't leave the unique-userId constraint armed against the
+    // next seed run.
+    const knownDemoIds = [
+      ...demoUsers.map((u) => u.id),
+      ...DEMO_SEED_USER_IDS,
+    ];
+    if (knownDemoIds.length > 0) {
+      const [delProf, delPref, delStat] = await Promise.all([
+        tx.userProfile.deleteMany({ where: { userId: { in: knownDemoIds } } }),
+        tx.userPreferences.deleteMany({ where: { userId: { in: knownDemoIds } } }),
+        tx.userStats.deleteMany({ where: { userId: { in: knownDemoIds } } }),
+      ]);
+      const swept = delProf.count + delPref.count + delStat.count;
+      if (swept > 0) console.log(`   ✓ ${swept} stale profile/preferences/stats rows swept`);
+    }
   });
 
   console.log('\n✅ Cleanup complete. Admin user, real invitees, and admin-created');

@@ -108,6 +108,7 @@ export async function evaluatePresenterAlerts(sessionId: string): Promise<{
 
   const agg = await aggregateSessionEngagement(sessionId, 5);
   const alerts: { kind: PresenterAlertKind; severity: PresenterAlertSeverity; message: string }[] = [];
+  const sessionAgeMs = session.actualStart ? Date.now() - session.actualStart.getTime() : 0;
 
   if (agg.engagementScore < 30) {
     alerts.push({
@@ -123,12 +124,74 @@ export async function evaluatePresenterAlerts(sessionId: string): Promise<{
       message: `${agg.attentionDropEvents} attention-drop signals in last 5 min — try a poll or T/F prompt.`,
     });
   }
-  if (agg.recentChat === 0 && agg.recentHooks === 0 && agg.recentHandRaises === 0 && agg.participants > 0) {
-    alerts.push({
-      kind: PresenterAlertKind.ASK_QUESTION,
-      severity: PresenterAlertSeverity.INFO,
-      message: 'Total silence in last 5 min. Ask a question to re-engage.',
+  // ASK_QUESTION: fires only when a real discussion dropped off.
+  // Requires >1 participant (host alone doesn't count), current 5-min silence,
+  // AND at least one interaction recorded in the 5–30 min window before the
+  // silence started (so post-session lingerers and never-started lectures don't trigger it).
+  if (agg.participants > 1 && agg.recentChat === 0 && agg.recentHooks === 0 && agg.recentHandRaises === 0) {
+    const priorWindowStart = new Date(Date.now() - 30 * 60_000);
+    const priorWindowEnd   = new Date(Date.now() -  5 * 60_000);
+    const hadPriorDiscussion = await db.engagementSignal.count({
+      where: {
+        sessionId,
+        kind: { in: [EngagementSignalKind.HOOK_RESPONSE, EngagementSignalKind.HAND_RAISE, EngagementSignalKind.CHAT_MESSAGE] },
+        createdAt: { gte: priorWindowStart, lt: priorWindowEnd },
+      },
     });
+    if (hadPriorDiscussion > 0) {
+      alerts.push({
+        kind: PresenterAlertKind.ASK_QUESTION,
+        severity: PresenterAlertSeverity.INFO,
+        message: 'Discussion has gone quiet in the last 5 min. Ask a question to re-engage.',
+      });
+    }
+  }
+
+  // TOO_MUCH_LECTURE — W8.2: no interactive signals in 15 min, session > 20 min old.
+  if (agg.participants > 0 && sessionAgeMs > 20 * 60_000) {
+    const fifteenMinsAgo = new Date(Date.now() - 15 * 60_000);
+    const recentInteractive = await db.engagementSignal.count({
+      where: {
+        sessionId,
+        kind: {
+          in: [
+            EngagementSignalKind.HOOK_RESPONSE,
+            EngagementSignalKind.HAND_RAISE,
+            EngagementSignalKind.CHAT_MESSAGE,
+          ],
+        },
+        createdAt: { gte: fifteenMinsAgo },
+      },
+    });
+    if (recentInteractive === 0) {
+      alerts.push({
+        kind: PresenterAlertKind.TOO_MUCH_LECTURE,
+        severity: PresenterAlertSeverity.WARN,
+        message: 'No participant interaction in 15 min — consider a break or a quick question.',
+      });
+    }
+  }
+
+  // SILENT_PARTICIPANTS — W8.2: hook response rate < 25% over last 30 min (≥2 hooks, ≥5 participants).
+  if (agg.participants >= 5) {
+    const thirtyMinsAgo = new Date(Date.now() - 30 * 60_000);
+    const [firedCount, responseCount] = await Promise.all([
+      db.liveHook.count({ where: { sessionId, firedAt: { gte: thirtyMinsAgo } } }),
+      db.liveHookResponse.count({
+        where: { hook: { sessionId }, createdAt: { gte: thirtyMinsAgo } },
+      }),
+    ]);
+    if (firedCount >= 2) {
+      const responseRate = responseCount / (firedCount * agg.participants);
+      if (responseRate < 0.25) {
+        const silentEstimate = Math.round(agg.participants * (1 - responseRate));
+        alerts.push({
+          kind: PresenterAlertKind.SILENT_PARTICIPANTS,
+          severity: PresenterAlertSeverity.WARN,
+          message: `~${silentEstimate} of ${agg.participants} participants haven't responded to recent hooks. Prompt them individually.`,
+        });
+      }
+    }
   }
 
   // Suppress duplicates: if same kind exists unacknowledged and was created in last 4 min, skip.

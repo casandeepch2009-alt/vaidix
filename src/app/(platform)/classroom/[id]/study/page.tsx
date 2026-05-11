@@ -1,19 +1,9 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Study Pack — resident-facing pre-session prep page
-// ════════════════════════════════════════════════════════════════════════════
 // Route: /classroom/[id]/study
-//
-// Resident sees three sections:
-//   1. Pre-readings  (PDFs / docs / slides — opens signed URL in new tab)
-//   2. Pre-watch videos (inline preview + "Mark as viewed" check)
-//   3. Pre-cases (clicking "Start" sends them to /cases/[caseId])
-//
-// Server component does only auth + session lookup. The interactive list lives
-// in study-pack-list.tsx so view-tracking + Start handlers can use hooks.
+// ════════════════════════════════════════════════════════════════════════════
 
 import { notFound, redirect } from 'next/navigation'
-import { ClipboardList, ArrowLeft } from 'lucide-react'
-import Link from 'next/link'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
 import { StudyPackList } from '@/components/classroom/study-pack-list'
@@ -35,6 +25,9 @@ export default async function StudyPackPage({ params }: PageProps) {
       scheduledEnd: true,
       sessionType: true,
       hostId: true,
+      objectives: true,
+      metadata: true,
+      _count: { select: { preQuestions: true } },
     },
   })
   if (!s) notFound()
@@ -44,36 +37,38 @@ export default async function StudyPackPage({ params }: PageProps) {
     select: { name: true },
   })
 
-  const startStr = s.scheduledStart.toLocaleString('en-IN', {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
+  const isHost = session.user.id === s.hostId
+  const objectives = (Array.isArray(s.objectives) ? s.objectives : []) as Array<{ id: string; text: string; blooms: number; epaTag?: string | null }>
+  const meta = (s.metadata ?? {}) as Record<string, unknown>
+  const prereqs = (Array.isArray(meta.prereqItems) ? meta.prereqItems : []) as Array<{ id: string; text: string; required: boolean }>
+
+  // Surface the public promo flyer URL (if the presenter has minted one) so
+  // attendees can preview the session's flyer/social cards from the Objectives
+  // tab. The /p/[token] page is public by design — no role gate needed here.
+  const promoShare = await db.promoShare.findFirst({
+    where: { sessionId: id, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+    select: { token: true },
   })
+  const promoShareUrl =
+    promoShare && !promoShare.token.startsWith('legacy_')
+      ? `/p/${promoShare.token}`
+      : null
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6 py-6">
-      <Link
-        href={`/classroom/${id}`}
-        className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-      >
-        <ArrowLeft className="size-4" />
-        Back to session
-      </Link>
-
-      <header className="space-y-2">
-        <div className="flex items-center gap-2">
-          <ClipboardList className="size-6 text-primary" />
-          <h1 className="text-2xl font-bold tracking-tight">Study Pack</h1>
-        </div>
-        <p className="text-sm text-muted-foreground">
-          Prep for <span className="font-medium text-foreground">{s.title}</span>
-          {host?.name ? ` — hosted by ${host.name}` : ''} · {startStr}
-        </p>
-      </header>
-
-      <StudyPackList sessionId={id} />
-    </div>
+    <StudyPackList
+      sessionId={id}
+      sessionTitle={s.title}
+      hostName={host?.name ?? ''}
+      scheduledStart={s.scheduledStart.toISOString()}
+      sessionType={s.sessionType}
+      isHost={isHost}
+      currentUserId={session.user.id}
+      questionCount={s._count.preQuestions}
+      objectiveCount={objectives.length}
+      objectives={objectives}
+      prereqs={prereqs}
+      promoShareUrl={promoShareUrl}
+    />
   )
 }

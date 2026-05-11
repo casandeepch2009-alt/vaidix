@@ -17,19 +17,29 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
   if (
     session.user.role !== Role.PROGRAM_DIRECTOR &&
     session.user.role !== Role.ADMIN &&
-    session.user.role !== Role.FACULTY
+    session.user.role !== Role.FACULTY &&
+    session.user.role !== Role.RESIDENT
   ) {
     redirect('/calendar')
   }
 
   const params = await searchParams
 
-  const [faculty, cohorts, topics] = await Promise.all([
+  const [facultyList, currentUser, cohorts, topics] = await Promise.all([
     db.user.findMany({
       where: { role: { in: [Role.FACULTY, Role.PROGRAM_DIRECTOR] }, status: 'ACTIVE' },
       select: { id: true, name: true, email: true, role: true },
       orderBy: { name: 'asc' },
     }),
+    // Residents need themselves in the host list so the picker shows a "host
+    // myself" option alongside faculty. Faculty/PD already appear in the list
+    // above; this lookup just covers RESIDENT.
+    session.user.role === Role.RESIDENT
+      ? db.user.findUnique({
+          where: { id: session.user.id },
+          select: { id: true, name: true, email: true, role: true },
+        })
+      : Promise.resolve(null),
     db.cohort.findMany({
       where: { status: CohortStatus.ACTIVE, deletedAt: null },
       select: { id: true, name: true, _count: { select: { members: true } } },
@@ -40,6 +50,12 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
       orderBy: [{ subspecialty: 'asc' }, { displayOrder: 'asc' }, { name: 'asc' }],
     }),
   ])
+
+  // Resident proposers can host themselves (peer-led, auto-approves) or pick a
+  // faculty member (PENDING_FACULTY). Putting the resident at the top of the
+  // list makes self-host the natural default.
+  const faculty = currentUser ? [currentUser, ...facultyList] : facultyList
+  const isResident = session.user.role === Role.RESIDENT
 
   return (
     <div className="space-y-6">
@@ -54,7 +70,9 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Schedule Session</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Pick a faculty host — they get an approval request, then it appears on attendee calendars.
+              {isResident
+                ? 'Host it yourself for a peer-led session, or pick a faculty member to host — they’ll get an approval request first.'
+                : 'Pick a faculty host — they get an approval request, then it appears on attendee calendars.'}
             </p>
           </div>
         </div>
@@ -71,6 +89,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
             defaultStart={params.start}
             defaultEnd={params.end}
             currentUserId={session.user.id}
+            currentUserRole={session.user.role}
           />
         </div>
 
@@ -87,7 +106,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
                 {[
                   { label: 'Faculty gets notified', desc: 'An email + in-app approval request is sent immediately.' },
                   { label: 'Host approves', desc: 'One click — session moves to Published.' },
-                  { label: 'Calendars update', desc: 'Attendees see it on their Live Classes calendar.' },
+                  { label: 'Calendars update', desc: 'Attendees see it on their Calendar.' },
                   { label: 'Reminders go out', desc: '24 h and 1 h before the session starts.' },
                 ].map(({ label, desc }, i) => (
                   <li key={label} className="flex gap-3">
@@ -131,8 +150,8 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
                 Visibility guide
               </h3>
               <div className="space-y-1.5 text-xs text-muted-foreground">
-                <p><span className="font-semibold text-foreground">Open to all</span> — great for Grand Rounds, department-wide lectures.</p>
-                <p><span className="font-semibold text-foreground">Cohort</span> — batch-year or specialty-specific sessions.</p>
+                <p><span className="font-semibold text-foreground">Anyone with link</span> — share the URL and people can join. Doesn’t hit everyone’s calendar.</p>
+                <p><span className="font-semibold text-foreground">Cohort</span> — batch-year or specialty-specific sessions; appears on members’ calendars.</p>
                 <p><span className="font-semibold text-foreground">Invite only</span> — targeted small groups, mentoring sessions.</p>
                 <p><span className="font-semibold text-foreground">Private</span> — host-only planning or draft sessions.</p>
               </div>

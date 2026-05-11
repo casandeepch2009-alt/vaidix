@@ -65,11 +65,13 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru
+    # Password must match REDIS_PASSWORD in .env.local (default: devpassword).
+    # Mirrors prod (docker-compose.redis.yml) so client config behaves the same.
+    command: redis-server --appendonly yes --maxmemory 2gb --maxmemory-policy allkeys-lru --requirepass ${REDIS_PASSWORD:-devpassword}
     volumes:
       - E:/vaidix-data/redis-data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-devpassword}", "ping"]
       interval: 10s
       timeout: 3s
       retries: 5

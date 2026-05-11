@@ -18,6 +18,7 @@ import {
   fail,
   summarize,
   cleanupTestSessions,
+  TEST_PROGRAM_ID,
 } from './e2e-w4-helpers';
 import { gatherTeaserSources } from '../src/server/services/promo/teaser-sources';
 
@@ -44,6 +45,7 @@ async function main() {
       approvalStatus: 'APPROVED', visibility: 'OPEN_TO_ALL', status: 'SCHEDULED',
       scheduledStart: start, scheduledEnd: end,
       maxParticipants: 50, recordingEnabled: true, consentRequired: false,
+      programId: TEST_PROGRAM_ID,
       tags: ['cornea', 'anterior-segment'],
       objectives: [
         { id: 'obj-aaa', text: 'Identify the four hallmark slit-lamp findings of band keratopathy', blooms: 1, epaTag: null },

@@ -7,6 +7,7 @@
 
 import type { NextAuthConfig } from 'next-auth';
 import type { Role } from '@prisma/client';
+import type { SessionProgramMembership } from '@/types/next-auth';
 
 export const authConfig: NextAuthConfig = {
   pages: {
@@ -18,21 +19,54 @@ export const authConfig: NextAuthConfig = {
     maxAge: 60 * 60 * 8, // 8 hours
   },
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       if (user) {
         token.id = user.id;
+        // Explicit so the display name reaches the LiveKit token mint —
+        // Auth.js's default user→token copy isn't always reliable when
+        // the session object is custom-shaped.
+        token.name = (user as unknown as { name?: string | null }).name ?? token.name ?? null;
+        token.email = (user as unknown as { email?: string | null }).email ?? token.email ?? null;
         token.role = (user as unknown as { role: Role }).role;
         token.passwordVersion = (user as unknown as { passwordVersion: number }).passwordVersion;
+        // W6.11: hydrate programs[] + activeProgramId from the authorize()
+        // payload at sign-in. After this they live in the JWT for the
+        // session lifetime; only the switcher mutates activeProgramId via
+        // the `update` trigger below.
+        token.programs = (user as unknown as { programs?: SessionProgramMembership[] }).programs ?? [];
+        token.activeProgramId =
+          (user as unknown as { activeProgramId?: string | null }).activeProgramId ?? null;
       }
+
+      // W6.11: program switcher path. Client calls `update({ activeProgramId })`
+      // after the POST /api/me/active-program endpoint succeeds. We only allow
+      // switching to a program already in token.programs — the server endpoint
+      // is the authoritative gate; this is a defense-in-depth.
+      if (trigger === 'update' && session && typeof session === 'object') {
+        const next = (session as { activeProgramId?: unknown }).activeProgramId;
+        if (typeof next === 'string') {
+          const allowed = (token.programs as SessionProgramMembership[] | undefined)?.some(
+            (p) => p.programId === next,
+          );
+          if (allowed) token.activeProgramId = next;
+        }
+      }
+
       return token;
     },
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
+        // Explicit copy: Auth.js defaults rely on user→token→session passing
+        // intact, but our custom session.user augmentation can shadow it.
+        session.user.name = (token.name as string | null | undefined) ?? session.user.name ?? null;
+        session.user.email = (token.email as string | null | undefined) ?? session.user.email ?? null;
         session.user.role = token.role as Role;
         // Required by requireAuth() for the per-request passwordVersion
         // re-check (HARDENING-PLAN item #13).
         session.user.passwordVersion = (token.passwordVersion as number) ?? 0;
+        session.user.programs = (token.programs as SessionProgramMembership[] | undefined) ?? [];
+        session.user.activeProgramId = (token.activeProgramId as string | null | undefined) ?? null;
       }
       return session;
     },
@@ -61,6 +95,11 @@ export const authConfig: NextAuthConfig = {
         // route handler enforces token + optional password + expiry/revoke.
         /^\/api\/recordings\/share\/[^/]+$/.test(nextUrl.pathname) ||
         /^\/recordings\/share\/[^/]+$/.test(nextUrl.pathname) ||
+        // W9 — Promo share links (`/p/[token]` and `/api/p/[token]`) follow
+        // the same hashed-token model. The handler enforces expiry/revoke;
+        // middleware just needs to let the request through.
+        /^\/p\/[^/]+$/.test(nextUrl.pathname) ||
+        /^\/api\/p\/[^/]+$/.test(nextUrl.pathname) ||
         // Live-captions ingest is bearer-token authed inside the route handler
         // (LiveKit Agent uses a shared secret, not session cookies).
         /^\/api\/classroom\/sessions\/[^/]+\/live-captions\/ingest$/.test(nextUrl.pathname);

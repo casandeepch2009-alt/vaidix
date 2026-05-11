@@ -36,6 +36,12 @@ const listSchema = z.object({
     .optional()
     .transform((v) => v === 'true'),
   sinceMs: z.coerce.number().int().nonnegative().optional(),
+  // W9.4 — `prePublished=true` returns only pre-session-published polls
+  // (resident view). `prePublished=false` returns drafts only (host view).
+  // Omitted = no filter applied on the pre-publish dimension.
+  prePublished: z
+    .union([z.literal('true'), z.literal('false')])
+    .optional(),
 });
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
@@ -90,7 +96,15 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (!q.ok) return q.response;
   const { id: sessionId } = await ctx.params;
   try {
-    const hooks = await listLiveHooks(sessionId, { onlyFired: q.data.onlyFired, sinceMs: q.data.sinceMs });
+    const prePublished =
+      q.data.prePublished === 'true' ? true
+      : q.data.prePublished === 'false' ? false
+      : undefined;
+    const hooks = await listLiveHooks(sessionId, {
+      onlyFired: q.data.onlyFired,
+      sinceMs: q.data.sinceMs,
+      prePublished,
+    });
     return jsonOk({ hooks });
   } catch (err) {
     return handleUnexpected(err);

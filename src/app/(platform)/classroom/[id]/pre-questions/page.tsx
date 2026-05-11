@@ -33,27 +33,40 @@ export default async function PreQuestionsPage({ params }: PageProps) {
     session.user.role === Role.PROGRAM_DIRECTOR ||
     teaching.hostId === session.user.id;
 
+  const dateStr = new Date(teaching.scheduledStart).toLocaleDateString('en-IN', {
+    weekday: 'short', day: 'numeric', month: 'short',
+  })
+  const timeStr = new Date(teaching.scheduledStart).toLocaleTimeString('en-IN', {
+    hour: 'numeric', minute: '2-digit',
+  })
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6 py-8">
-      <header className="space-y-1">
-        <p className="text-xs uppercase tracking-wide text-muted-foreground">
-          Pre-Conference Questions
-        </p>
-        <h1 className="text-2xl font-semibold">{teaching.title}</h1>
-        <p className="text-sm text-muted-foreground">
-          Hosted by {teaching.host.name} · {new Date(teaching.scheduledStart).toLocaleString()}
-        </p>
-        {canViewDashboard ? (
-          <p className="text-sm">
-            <Link
-              href={`/classroom/${sessionId}/pre-questions/dashboard`}
-              className="text-primary hover:underline"
-            >
-              Open presenter dashboard →
+    <div className="mx-auto max-w-5xl px-4 py-5 space-y-5">
+      {/* Compact header strip */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Link href={`/classroom/${sessionId}/study`}
+            className="inline-flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground transition-colors">
+            ← Study Hub
+          </Link>
+          <span className="text-muted-foreground/40">·</span>
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">Pre-Conference Q&amp;A</p>
+            <p className="text-base font-black leading-tight">{teaching.title}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] text-muted-foreground">
+            {teaching.host.name} · {dateStr} · {timeStr}
+          </span>
+          {canViewDashboard && (
+            <Link href={`/classroom/${sessionId}/pre-questions/dashboard`}
+              className="inline-flex items-center gap-1 rounded-lg border border-border/60 bg-card px-3 py-1.5 text-[11px] font-semibold transition hover:border-primary/40 hover:text-primary">
+              Presenter view →
             </Link>
-          </p>
-        ) : null}
-      </header>
+          )}
+        </div>
+      </div>
 
       <PreQuestionsBoard sessionId={sessionId} currentUserId={session.user.id} />
     </div>

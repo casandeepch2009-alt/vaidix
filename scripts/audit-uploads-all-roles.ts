@@ -14,6 +14,7 @@ import {
   fail,
   summarize,
   cleanupTestSessions,
+  TEST_PROGRAM_ID,
 } from './e2e-w4-helpers';
 
 const PREFIX = 'uploadaudit';
@@ -70,6 +71,7 @@ async function main() {
       approvalStatus: 'APPROVED', visibility: 'OPEN_TO_ALL', status: 'SCHEDULED',
       scheduledStart: start, scheduledEnd: end,
       maxParticipants: 50, recordingEnabled: true, consentRequired: false,
+      programId: TEST_PROGRAM_ID,
     },
     select: { id: true },
   });

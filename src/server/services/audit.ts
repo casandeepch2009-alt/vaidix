@@ -114,11 +114,44 @@ export const AUDIT_EVENTS = {
   DOCUMENT_TAGGED_TO_SESSION: 'document.tagged_to_session',
   DOCUMENT_DELETED: 'document.deleted',
   DOCUMENT_ANALYZED: 'document.analyzed',
+  DECK_FORGE_REQUESTED: 'deck_forge.requested',
+  DECK_FORGE_COMPLETED: 'deck_forge.completed',
+  DECK_FORGE_FAILED: 'deck_forge.failed',
+  DECK_SLIDE_UPDATED: 'deck.slide.updated',
+  DECK_EXPORTED_PPTX: 'deck.exported.pptx',
+  DECK_ANALYZED: 'deck.analyzed',
+  DECK_SUGGESTION_APPLIED: 'deck.suggestion.applied',
+  DECK_SUGGESTION_DISMISSED: 'deck.suggestion.dismissed',
+  DECK_SLIDE_REFINED: 'deck.slide.refined',
+  BLUEPRINT_GENERATED: 'blueprint.generated',
+  BLUEPRINT_DELETED: 'blueprint.deleted',
+  CASE_FORGE_REQUESTED: 'case_forge.requested',
+  CASE_FORGE_COMPLETED: 'case_forge.completed',
+  CASE_FORGE_FAILED: 'case_forge.failed',
+  CASE_TEMPLATE_PUBLISHED: 'case_template.published',
+  CASE_TEMPLATE_ARCHIVED: 'case_template.archived',
+  CASE_TEMPLATE_EDITED: 'case_template.edited',
+
+  // ─── W7.4 — Live captions (Deepgram in Phase 1) ─────────────────────────
+  CAPTIONS_TOKEN_MINTED: 'captions.token.minted',
+  CAPTIONS_PUBLISHED: 'captions.published',
+  CAPTIONS_TRANSLATED: 'captions.translated',
+  CAPTIONS_TRANSCRIPT_FINALIZED: 'captions.transcript.finalized',
+  CAPTIONS_TRANSCRIPT_READ: 'captions.transcript.read',
+  // ─── W8.3 — Post-session content pack ───────────────────────────────────
+  TRANSCRIPT_PDF_EXPORTED: 'transcript.pdf.exported',
+  POST_SESSION_PACK_TRIGGERED: 'post_session.pack.triggered',
 
   // Stream D — Engagement / Hooks / Alerts
   LIVE_HOOK_CREATED: 'live_hook.created',
   LIVE_HOOK_FIRED: 'live_hook.fired',
   LIVE_HOOK_RESPONDED: 'live_hook.responded',
+  // W9.4 — Pre-session structured polls (extends LiveHook with prePublishedAt)
+  LIVE_HOOK_UPDATED: 'live_hook.updated',
+  LIVE_HOOK_DELETED: 'live_hook.deleted',
+  LIVE_HOOK_PRE_PUBLISHED: 'live_hook.pre_published',
+  LIVE_HOOK_PRE_UNPUBLISHED: 'live_hook.pre_unpublished',
+  LIVE_HOOK_SUGGESTED: 'live_hook.suggested',
   PRESENTER_ALERT_RAISED: 'presenter_alert.raised',
   PRESENTER_ALERT_ACKED: 'presenter_alert.acknowledged',
   KIRKPATRICK_RECORDED: 'kirkpatrick.recorded',
@@ -161,15 +194,25 @@ export const AUDIT_EVENTS = {
   PRE_QUESTION_SUBMITTED: 'pre_question.submitted',
   PRE_QUESTION_VOTED: 'pre_question.voted',
   PRE_QUESTION_UNVOTED: 'pre_question.unvoted',
+  PRE_QUESTION_REPLY_POSTED: 'pre_question.reply_posted',
   PRE_QUESTION_RECLUSTER_REQUESTED: 'pre_question.recluster_requested',
   PRE_QUESTION_THEMES_GENERATED: 'pre_question.themes_generated',
   PRE_QUESTION_CLUSTER_FAILED: 'pre_question.cluster_failed',
+  // W9.3 — presenter-published doubt prompts + AI-suggested drafts
+  PRE_QUESTION_PROMPTS_UPDATED: 'pre_question.prompts_updated',
+  PRE_QUESTION_PROMPTS_SUGGESTED: 'pre_question.prompts_suggested',
 
   // ─── W6.8 — Pre-Conference Polish ────────────────────────────────────
   // Promo teaser video (Feeddback #1, video form — extends SVG promo)
   PROMO_TEASER_REQUESTED: 'promo.teaser.requested',
   PROMO_TEASER_RENDERED: 'promo.teaser.rendered',
   PROMO_TEASER_FAILED: 'promo.teaser.failed',
+  // ─── W9 — Promo & Share ──────────────────────────────────────────────
+  PROMO_GENERATED: 'promo.generated',
+  PROMO_SHARE_CREATED: 'promo_share.created',
+  PROMO_SHARE_ACCESSED: 'promo_share.accessed',
+  PROMO_SHARE_REVOKED: 'promo_share.revoked',
+  OBJECTIVES_AI_SUGGESTED: 'objectives.ai_suggested',
   // Study Pack curation (Feeddback #3 — Study Material Hub pre-session surface)
   STUDY_PACK_DOC_ADDED: 'study_pack.doc.added',
   STUDY_PACK_DOC_REMOVED: 'study_pack.doc.removed',

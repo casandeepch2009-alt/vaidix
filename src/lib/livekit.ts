@@ -38,7 +38,7 @@ export type LiveKitRole = 'host' | 'co_host' | 'participant' | 'viewer';
 
 export interface TokenOptions {
   identity: string; // user id
-  name: string; // display name
+  name: string | null | undefined; // display name (DB users.name can be null)
   roomName: string;
   role: LiveKitRole;
   ttlSeconds?: number;
@@ -48,9 +48,15 @@ export interface TokenOptions {
 }
 
 export async function mintLiveKitToken(opts: TokenOptions): Promise<string> {
+  // Never let an empty/null name into the JWT — LiveKit then exposes
+  // `participant.name === ""` and our People panel shows a blank row.
+  // Fall back to identity so there's always *something* visible, and the
+  // UI still has a way to render initials.
+  const displayName = opts.name?.trim() || opts.identity;
+
   const at = new AccessToken(env.LIVEKIT_API_KEY, env.LIVEKIT_API_SECRET, {
     identity: opts.identity,
-    name: opts.name,
+    name: displayName,
     ttl: opts.ttlSeconds ?? 3600,
     metadata: opts.metadata ? JSON.stringify(opts.metadata) : undefined,
   });

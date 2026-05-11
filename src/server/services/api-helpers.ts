@@ -4,12 +4,14 @@
 // Consistent JSON responses, error handling, auth guards.
 
 import crypto from 'node:crypto';
+import { cache } from 'react';
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { ZodError, type ZodSchema } from 'zod';
 import { auth } from '@/auth';
 import { Role } from '@prisma/client';
 import { isUserCurrent } from '@/server/services/auth-service';
+import { db } from '@/lib/db';
 import { redis } from '@/lib/redis';
 
 export function jsonOk<T>(data: T, init?: ResponseInit): Response {
@@ -100,7 +102,20 @@ async function isSessionStillValid(userId: string, passwordVersion: number): Pro
   return current;
 }
 
-export async function requireAuth(): Promise<{ ok: true; user: { id: string; email: string; name: string; role: Role } } | { ok: false; response: Response }> {
+export interface AuthedUser {
+  id: string;
+  email: string;
+  name: string;
+  role: Role;
+  /**
+   * W6.11 — the user's currently selected program. Null only for users with
+   * zero memberships (impossible after seed but defensible). Routes that
+   * scope queries by tenant should pass this through.
+   */
+  activeProgramId: string | null;
+}
+
+export async function requireAuth(): Promise<{ ok: true; user: AuthedUser } | { ok: false; response: Response }> {
   const session = await auth();
   if (!session?.user) {
     return { ok: false, response: jsonError('UNAUTHORIZED', 'Authentication required', 401) };
@@ -123,11 +138,56 @@ export async function requireAuth(): Promise<{ ok: true; user: { id: string; ema
       email: session.user.email,
       name: session.user.name,
       role: session.user.role,
+      activeProgramId: session.user.activeProgramId ?? null,
     },
   };
 }
 
-export async function requireRole(...allowed: Role[]): Promise<{ ok: true; user: { id: string; email: string; name: string; role: Role } } | { ok: false; response: Response }> {
+/**
+ * W6.11 — DB-backed live read of users.activeProgramId. The JWT carries a
+ * cached value but the source of truth is the DB user row, so a switch via
+ * POST /api/me/active-program is reflected on the very next request without
+ * waiting for a JWT cookie rotation. React.cache() dedupes within a single
+ * server render so multiple services calling this share one query.
+ */
+const liveActiveProgramId = cache(async (userId: string): Promise<string | null> => {
+  const row = await db.user.findUnique({
+    where: { id: userId },
+    select: { activeProgramId: true },
+  });
+  return row?.activeProgramId ?? null;
+});
+
+/**
+ * W6.11 — variant for routes that genuinely cannot work without a tenant
+ * scope (cohort lists, session lists, case bank, etc.). Reads activeProgramId
+ * from the DB (not the JWT), so switches are immediate. Returns 409 if the
+ * user has no active program selected.
+ */
+export async function requireAuthWithProgram(): Promise<
+  | { ok: true; user: AuthedUser & { activeProgramId: string } }
+  | { ok: false; response: Response }
+> {
+  const gate = await requireAuth();
+  if (!gate.ok) return gate;
+  const live = await liveActiveProgramId(gate.user.id);
+  if (!live) {
+    return {
+      ok: false,
+      response: jsonError(
+        'NO_ACTIVE_PROGRAM',
+        'You have no active program — contact an administrator to be added to one.',
+        409,
+      ),
+    };
+  }
+  return {
+    ok: true,
+    user: { ...gate.user, activeProgramId: live },
+  };
+}
+
+export async function requireRole(...allowed: Role[]): Promise<{ ok: true; user: AuthedUser } | { ok: false; response: Response }> {
   const gate = await requireAuth();
   if (!gate.ok) return gate;
   if (!allowed.includes(gate.user.role)) {

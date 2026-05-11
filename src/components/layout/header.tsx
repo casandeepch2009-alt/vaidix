@@ -3,14 +3,15 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { signOut } from 'next-auth/react'
-import { Bell, Search, LogOut, User, ChevronDown, Settings, Shuffle, X } from 'lucide-react'
+import { Search, LogOut, User, ChevronDown, Settings, Shuffle, X } from 'lucide-react'
 import { useState, useRef, useEffect } from 'react'
 import { cn } from '@/lib/utils'
 import { useRole } from '@/contexts/role-context'
 import { SIDEBAR_NAV, ROLE_LABELS } from '@/lib/constants'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
-import { Button } from '@/components/ui/button'
 import { ThemeToggle } from '@/components/layout/theme-toggle'
+import { NotificationBell } from '@/components/layout/notification-bell'
+import { ProgramSwitcher } from '@/components/layout/program-switcher'
 import type { UserRole } from '@/lib/types'
 
 function getInitials(name: string): string {
@@ -75,7 +76,7 @@ export function Header() {
   const showRoleSwitcher = allRoles.length > 0
 
   return (
-    <header className="relative z-30 flex shrink-0 flex-col border-b border-border/70 bg-background/96 backdrop-blur-md">
+    <header className="relative z-30 flex shrink-0 flex-col border-b border-border/70 bg-background">
       {/* Impersonation banner — admin-only, only when actively switched */}
       {isImpersonating && (
         <div className="flex items-center justify-between gap-2 bg-amber-500/15 px-4 py-1.5 text-[11px] font-medium text-amber-900 dark:bg-amber-500/20 dark:text-amber-200 lg:px-6">
@@ -94,10 +95,13 @@ export function Header() {
 
       <div className="flex h-14 items-center gap-3 px-4 lg:px-6">
 
-      {/* Left: Page title */}
-      <div className="flex min-w-0 flex-1 items-center">
+      {/* Left: Page title + program switcher */}
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         <h1 className="text-sm font-semibold text-foreground md:hidden">Vaidix</h1>
         <h1 className="hidden text-sm font-semibold text-foreground md:block">{pageTitle}</h1>
+        {/* W6.11 — multi-program tenancy switcher. Hides itself when the user
+            has < 2 memberships, so single-tenant LVPEI accounts see no chrome. */}
+        <ProgramSwitcher />
       </div>
 
       {/* Center: Search */}
@@ -120,11 +124,8 @@ export function Header() {
         {/* Theme toggle — ghost, no visual noise */}
         <ThemeToggle />
 
-        {/* Notifications — subtle dot badge */}
-        <Button variant="ghost" size="icon" className="relative size-8" aria-label="Notifications">
-          <Bell className="size-4 text-muted-foreground" />
-          <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-teal-500" />
-        </Button>
+        {/* Notifications — popover backed by /api/notifications */}
+        <NotificationBell />
 
         {/* Divider */}
         <div className="mx-1.5 h-5 w-px bg-border/60" />

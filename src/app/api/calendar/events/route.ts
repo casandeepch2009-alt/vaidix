@@ -1,10 +1,11 @@
-import { jsonOk, jsonError, requireAuth, parseQuery, handleUnexpected } from '@/server/services/api-helpers';
+import { jsonOk, jsonError, requireAuthWithProgram, parseQuery, handleUnexpected } from '@/server/services/api-helpers';
 import { listCalendarEvents } from '@/server/services/calendar-service';
 import { calendarQuerySchema } from '@/lib/validation/session';
 
 export async function GET(req: Request) {
   try {
-    const gate = await requireAuth();
+    // W6.11 — calendar events are tenant-scoped.
+    const gate = await requireAuthWithProgram();
     if (!gate.ok) return gate.response;
 
     const q = await parseQuery(req, calendarQuerySchema);
@@ -18,7 +19,13 @@ export async function GET(req: Request) {
       return jsonError('RANGE_TOO_LARGE', 'Range cannot exceed 1 year', 400);
     }
 
-    const events = await listCalendarEvents(gate.user.id, gate.user.role, from, to);
+    const events = await listCalendarEvents(
+      gate.user.id,
+      gate.user.role,
+      from,
+      to,
+      gate.user.activeProgramId,
+    );
     return jsonOk({ events });
   } catch (err) {
     console.error('[GET /api/calendar/events] failed:', err);

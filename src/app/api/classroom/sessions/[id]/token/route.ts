@@ -29,9 +29,29 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     const url = new URL(req.url);
     const shareToken = url.searchParams.get('t');
 
+    // DB-authoritative display name. Auth.js's session.user.name can be
+    // stale on legacy JWTs, but the User table always carries a non-null
+    // `name` (column is NOT NULL in the schema). Fall back to email-prefix
+    // as a last defence; the LiveKit JWT then carries this as the `name`
+    // claim so peers see the registered Vaidix name.
+    const dbUser = await db.user.findUnique({
+      where: { id: user.id },
+      select: { name: true, email: true },
+    });
+    const displayName =
+      (dbUser?.name ?? '').trim() ||
+      (user.name ?? '').trim() ||
+      (dbUser?.email ?? user.email ?? '').split('@')[0];
+
     const session = await db.teachingSession.findUnique({
       where: { id: sessionId },
-      select: { id: true, status: true, approvalStatus: true, maxParticipants: true },
+      select: {
+        id: true,
+        status: true,
+        approvalStatus: true,
+        maxParticipants: true,
+        isWebinar: true,
+      },
     });
     if (!session) return jsonError('NOT_FOUND', 'Session not found', 404);
     if (session.approvalStatus !== 'APPROVED') {
@@ -53,7 +73,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         // Admin/Proposer auditing — skip admission, mint viewer token
         const token = await mintLiveKitToken({
           identity: user.id,
-          name: user.name,
+          name: displayName,
           roomName: sessionRoomName(sessionId),
           role: 'viewer',
         });
@@ -70,15 +90,24 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       const adm = await requestAdmission({
         sessionId,
         userId: user.id,
-        displayName: user.name,
+        displayName,
       });
       return jsonOk({ state: 'WAITING', admissionId: adm.id });
     }
 
-    // Visible — mint full token
+    // Webinar mode: only HOST/CO_HOST get publish privileges; everyone else
+    // is demoted to VIEWER regardless of their effectiveRole. This is the
+    // attendee/presenter split — we don't want a webinar registrant
+    // accidentally turning their camera on or chat-spamming via the
+    // PARTICIPANT capability set. The classroom UI already strips publish
+    // controls when role==='VIEWER'; this is the server-side enforcement.
+    const isPresenter = effectiveRole === 'HOST' || effectiveRole === 'CO_HOST';
+    const tokenRole = session.isWebinar && !isPresenter ? 'VIEWER' : effectiveRole;
+
     const lkRole =
-      effectiveRole === 'HOST' ? 'host'
-      : effectiveRole === 'CO_HOST' ? 'co_host'
+      tokenRole === 'HOST' ? 'host'
+      : tokenRole === 'CO_HOST' ? 'co_host'
+      : tokenRole === 'VIEWER' ? 'viewer'
       : 'participant';
 
     const token = await mintLiveKitToken({
@@ -86,10 +115,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       name: user.name,
       roomName: sessionRoomName(sessionId),
       role: lkRole,
-      metadata: { effectiveRole, userRole: user.role },
+      metadata: {
+        effectiveRole: tokenRole,
+        userRole: user.role,
+        isWebinarAttendee: session.isWebinar && !isPresenter,
+      },
     });
 
-    return jsonOk({ state: 'JOINED', token, url: env.LIVEKIT_URL, role: effectiveRole });
+    return jsonOk({ state: 'JOINED', token, url: env.LIVEKIT_URL, role: tokenRole });
   } catch (err) {
     const msg = (err as Error).message;
     if (msg === 'WAITING_ROOM_FULL') {

@@ -90,13 +90,17 @@ export function canonicaliseMobile(raw: string): string | null {
 }
 
 /**
- * Login identifier schema — accepts email | mobile | username, normalises
- * each into its canonical form. Returns the kind alongside so the auth
- * service can do the right lookup without re-detecting.
+ * Login identifier schema — accepts email or mobile, normalises each into
+ * its canonical form. Returns the kind alongside so the auth service can do
+ * the right lookup without re-detecting. Username login is intentionally
+ * NOT accepted: usernames are auto-generated from the email local-part at
+ * invitation accept and never surfaced in the invite email, so a user has
+ * no way to know their username before first login. The User.username
+ * column stays (display-only on the profile page).
  */
 export const loginIdentifierSchema = z
   .string()
-  .min(1, 'Email, mobile, or username is required')
+  .min(1, 'Email or mobile number is required')
   .max(254)
   .transform((raw, ctx) => {
     const kind = detectIdentifierKind(raw);
@@ -116,16 +120,9 @@ export const loginIdentifierSchema = z
       }
       return { kind: 'mobile' as const, value: m };
     }
-    // Username login is case-insensitive — lowercase BEFORE pattern check
-    // so 'AdminUser' resolves to 'adminuser' rather than being rejected.
-    // Note: 'admin'/'root'/etc. (RESERVED_USERNAMES) are still rejected as
-    // identifiers — but only because no real user owns them, so the lookup
-    // would 404 anyway. Reserved-name rejection is mostly a USERNAME CREATION
-    // concern (handled in usernameSchema at invitation accept).
-    const lower = raw.trim().toLowerCase();
-    if (!/^[a-z0-9._-]{3,32}$/.test(lower)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Invalid username format' });
-      return z.NEVER;
-    }
-    return { kind: 'username' as const, value: lower };
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Enter a valid email address or Indian mobile number',
+    });
+    return z.NEVER;
   });

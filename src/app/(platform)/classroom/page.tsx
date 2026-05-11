@@ -11,6 +11,7 @@ import {
   sweepStaleScheduledSessions,
 } from '@/server/services/sessions/auto-end'
 import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
+import { bucketSessions } from '@/lib/sessions/buckets'
 import pearlsData from '@/mock-data/pearls.json'
 
 interface MockPearl { tags: string[] }
@@ -18,6 +19,15 @@ interface MockPearl { tags: string[] }
 export default async function ClassroomListPage() {
   const s = await auth()
   if (!s?.user) redirect('/login')
+
+  // W6.11 — read activeProgramId live from the DB so a switcher change is
+  // reflected without re-auth.
+  const userRow = await db.user.findUnique({
+    where: { id: s.user.id },
+    select: { activeProgramId: true },
+  })
+  const activeProgramId = userRow?.activeProgramId ?? s.user.activeProgramId
+  if (!activeProgramId) redirect('/dashboard')
 
   const canSchedule =
     s.user.role === Role.PROGRAM_DIRECTOR ||
@@ -42,12 +52,15 @@ export default async function ClassroomListPage() {
   const visibility = await buildSessionVisibilityWhere({
     userId: s.user.id,
     role: s.user.role,
+    activeProgramId,
   })
 
-  const approvalGate = buildApprovalGate({ userId: s.user.id, role: s.user.role })
+  const approvalGate = buildApprovalGate({ userId: s.user.id, role: s.user.role, activeProgramId })
 
   const sessions = await db.teachingSession.findMany({
     where: {
+      // W6.11 — never list sessions outside the user's active program.
+      programId: activeProgramId,
       deletedAt: null,
       AND: [
         approvalGate,
@@ -70,7 +83,7 @@ export default async function ClassroomListPage() {
     },
     include: {
       host: { select: { id: true, name: true } },
-      _count: { select: { participants: true } },
+      _count: { select: { participants: true, documentLinks: { where: { isPreSession: true } }, preQuestions: true } },
       recording: { select: { thumbnailUrl: true, durationSec: true } },
     },
     orderBy: { scheduledStart: 'desc' },
@@ -124,6 +137,9 @@ export default async function ClassroomListPage() {
       scheduledEnd: displayEnd.toISOString(),
       host: x.host,
       participantCount: x._count.participants,
+      studyPackCount: x._count.documentLinks,
+      questionCount: x._count.preQuestions,
+      objectiveCount: Array.isArray(x.objectives) ? (x.objectives as unknown[]).length : 0,
       thumbnailUrl: x.recording?.thumbnailUrl ?? null,
       durationSec: x.recording?.durationSec ?? null,
       tags: x.tags,
@@ -149,9 +165,13 @@ export default async function ClassroomListPage() {
     return r
   })
 
-  const live     = projected.filter((r) => r.status === 'LIVE')
-  const upcoming = projected.filter((r) => r.status === 'SCHEDULED' && new Date(r.scheduledStart) > now)
-  const past     = projected.filter((r) => r.status === 'ENDED').slice(0, 40)
+  // Single source of truth: bucketSessions. Same helper is used by the
+  // /calendar Sessions feed and the dashboard upcoming widget so a row
+  // can never appear in one list and not another.
+  const buckets = bucketSessions(projected, nowMs)
+  const live = buckets.live
+  const upcoming = buckets.upcoming
+  const past = buckets.past.slice(0, 40)
 
   return (
     <ClassroomFeed
@@ -160,6 +180,7 @@ export default async function ClassroomListPage() {
       past={past}
       nowMs={nowMs}
       canSchedule={canSchedule}
+      userId={s.user.id}
     />
   )
 }

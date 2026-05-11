@@ -43,11 +43,20 @@ async function ensureFacultyId(facultyId: string | null | undefined): Promise<st
   return u.id;
 }
 
-export async function listCohorts(opts?: { includeArchived?: boolean }) {
+/**
+ * W6.11 multi-tenancy: callers MUST pass the active programId. Cohorts are
+ * tenant-scoped — a PD viewing the MS Ophthalmology dashboard should never
+ * see Cornea Fellowship cohorts even if they have membership in both.
+ */
+export async function listCohorts(opts: {
+  programId: string
+  includeArchived?: boolean
+}) {
   return db.cohort.findMany({
     where: {
+      programId: opts.programId,
       deletedAt: null,
-      status: opts?.includeArchived ? undefined : CohortStatus.ACTIVE,
+      status: opts.includeArchived ? undefined : CohortStatus.ACTIVE,
     },
     include: {
       faculty: { select: FACULTY_REF_SELECT },
@@ -71,7 +80,7 @@ export async function getCohort(id: string) {
   });
 }
 
-export async function createCohort(input: CreateCohortInput, createdBy: string) {
+export async function createCohort(input: CreateCohortInput, createdBy: string, programId: string) {
   const facultyId = await ensureFacultyId(input.facultyId);
   const cohort = await db.cohort.create({
     data: {
@@ -80,6 +89,7 @@ export async function createCohort(input: CreateCohortInput, createdBy: string) 
       academicYear: input.academicYear ?? null,
       facultyId,
       createdBy,
+      programId,
     },
     include: { faculty: { select: FACULTY_REF_SELECT } },
   });

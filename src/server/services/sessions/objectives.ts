@@ -14,6 +14,7 @@
 import { db } from '@/lib/db';
 import { Role, type ObjectiveAchievementStatus } from '@prisma/client';
 import { userCanSeeSession } from './visibility';
+import { emit } from '@/server/services/notifications-service';
 
 export interface SessionObjective {
   id: string;
@@ -107,6 +108,18 @@ export async function markObjectiveAchievement(opts: {
     throw new ObjectivesAccessError('OBJECTIVE_NOT_FOUND');
   }
 
+  const prior = await db.sessionObjectiveAchievement.findUnique({
+    where: {
+      sessionId_userId_objectiveId: {
+        sessionId: opts.sessionId,
+        userId: opts.actor.userId,
+        objectiveId: opts.objectiveId,
+      },
+    },
+    select: { id: true },
+  });
+  const isFirstMark = !prior;
+
   const upserted = await db.sessionObjectiveAchievement.upsert({
     where: {
       sessionId_userId_objectiveId: {
@@ -134,6 +147,25 @@ export async function markObjectiveAchievement(opts: {
       updatedAt: true,
     },
   });
+
+  // Notify the resident on their first mark for this objective so they get
+  // an in-app confirmation. Repeat upserts (status changes) are silent.
+  if (isFirstMark) {
+    const objective = raw.find((o) => o.id === opts.objectiveId);
+    if (objective) {
+      await emit({
+        userId: opts.actor.userId,
+        kind: 'objective.achieved',
+        title: `Objective marked as ${opts.status.toLowerCase().replace('_', ' ')}`,
+        body: objective.text.length > 100 ? `${objective.text.slice(0, 97)}…` : objective.text,
+        payload: {
+          sessionId: opts.sessionId,
+          objectiveId: opts.objectiveId,
+          status: opts.status,
+        },
+      });
+    }
+  }
 
   return {
     achievementId: upserted.id,

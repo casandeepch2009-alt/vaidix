@@ -13,7 +13,9 @@ import {
   Clock,
   Ban,
   Pencil,
+  FileSpreadsheet,
 } from 'lucide-react';
+import Link from 'next/link';
 import { motion } from 'framer-motion';
 import type { Role } from '@prisma/client';
 import { InviteModal, type InviteModalEditData } from './_components/invite-modal';
@@ -251,12 +253,21 @@ export default function InvitationsPage() {
             Invite faculty and residents, track acceptance, manage access.
           </p>
         </div>
-        <button
-          onClick={() => setInviteOpen(true)}
-          className="flex items-center gap-2 rounded-xl bg-linear-to-br from-teal-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-teal-500/20 transition hover:shadow-xl"
-        >
-          <UserPlus className="size-4" /> Invite user
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/admin/invitations/bulk"
+            data-testid="bulk-invite-link"
+            className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+          >
+            <FileSpreadsheet className="size-4" /> Bulk import
+          </Link>
+          <button
+            onClick={() => setInviteOpen(true)}
+            className="flex items-center gap-2 rounded-xl bg-linear-to-br from-teal-600 to-blue-600 px-4 py-2.5 text-sm font-semibold text-white shadow-lg shadow-teal-500/20 transition hover:shadow-xl"
+          >
+            <UserPlus className="size-4" /> Invite user
+          </button>
+        </div>
       </header>
 
       {/* Summary cards */}

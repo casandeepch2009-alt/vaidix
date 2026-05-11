@@ -58,10 +58,20 @@ export async function attachPreCase(
   }
   const tpl = await db.caseTemplate.findUnique({
     where: { id: input.caseTemplateId },
-    select: { id: true, publishedAt: true },
+    select: { id: true, publishedAt: true, programId: true },
   });
   if (!tpl) {
     throw new PreCaseAccessError('NOT_FOUND', 'Case template not found');
+  }
+  // W6.11 — the template must belong to the session's program. Cross-tenant
+  // attachment would let a Cornea Fellowship faculty pull MS Ophthalmology
+  // templates into their session, leaking content.
+  const sess = await db.teachingSession.findUnique({
+    where: { id: input.sessionId },
+    select: { programId: true },
+  });
+  if (!sess || sess.programId !== tpl.programId) {
+    throw new PreCaseAccessError('NOT_FOUND', 'Case template is from a different program');
   }
   // Idempotent guard — the unique index would also enforce this, but a clean
   // 409 with the existing id is friendlier than a Prisma exception.
@@ -340,11 +350,17 @@ export async function startPreCaseAttempt(
   const preCase = await db.sessionPreCase.findFirst({
     where: { id: input.preCaseId, sessionId: input.sessionId },
     select: {
-      caseTemplate: { select: { id: true } },
+      caseTemplate: { select: { id: true, programId: true } },
+      session: { select: { programId: true } },
     },
   });
   if (!preCase) {
     throw new PreCaseAccessError('NOT_FOUND', 'Pre-case not found for this session');
+  }
+  // W6.11 — defense-in-depth. attachPreCase already validates this at write
+  // time, but re-check at read so a hand-edited DB row can't bypass tenancy.
+  if (preCase.caseTemplate.programId !== preCase.session.programId) {
+    throw new PreCaseAccessError('NOT_FOUND', 'Pre-case template program mismatch');
   }
 
   // If the resident already has an ACTIVE attempt of this template, reuse it
@@ -377,7 +393,8 @@ export async function startPreCaseAttempt(
   try {
     const created = await startCaseFromTemplate(
       { userId: input.actor.userId, role: input.actor.role },
-      preCase.caseTemplate.id
+      preCase.caseTemplate.id,
+      preCase.session.programId,
     );
     return { caseId: created.caseId, conversationId: created.conversationId, reused: false };
   } catch (err) {

@@ -16,7 +16,7 @@ import { getBookmarkState, getPearlLikeState } from '@/server/services/engagemen
 import { db } from '@/lib/db';
 import { RecordingStatus, Role } from '@prisma/client';
 import pearlsData from '@/mock-data/pearls.json';
-import { ObjectivesChecklist, type ChecklistObjective } from '@/components/classroom/objectives-checklist';
+import type { ChecklistObjective } from '@/components/classroom/objectives-checklist';
 
 interface StoredObjective { id: string; text: string; blooms: number }
 
@@ -42,6 +42,13 @@ const PROCESSING_STATES = new Set<RecordingStatus>([
   RecordingStatus.TRANSCODING,
 ]);
 
+const FAILED_STATES = new Set<RecordingStatus>([
+  RecordingStatus.RECORDING_FAILED,
+  RecordingStatus.TRANSCODING_FAILED,
+  RecordingStatus.TRANSCRIBING_FAILED,
+  RecordingStatus.AI_PROCESSING_FAILED,
+]);
+
 export default async function ClassroomRecordingPage({ params }: PageProps) {
   const [{ id: sessionId }, session] = await Promise.all([params, auth()]);
   if (!session?.user) redirect(`/login?next=/classroom/${sessionId}/recording`);
@@ -62,9 +69,40 @@ export default async function ClassroomRecordingPage({ params }: PageProps) {
       </div>
     );
   }
-  if (recordings.length === 0) notFound();
-
-  const rec = recordings[0];
+  // No recording artifact, but a transcript may exist. Synthesize a recording
+  // shape so the same RecordingViewer chrome renders — viewer shows a "no video"
+  // placeholder in the player frame and keeps tabs / sidebar / discussion intact.
+  let rec: typeof recordings[number] | {
+    id: string
+    hlsUrl: string | null
+    thumbnailUrl: string | null
+    durationSec: number | null
+    status: RecordingStatus
+    failureReason: string | null
+    transcripts: { language: string; source: string; vttUrl: string | null }[]
+  };
+  if (recordings.length === 0) {
+    const transcript = await db.sessionTranscript.findUnique({
+      where: { sessionId_language: { sessionId, language: 'en' } },
+      select: { id: true },
+    });
+    if (!transcript) notFound();
+    rec = {
+      id: `transcript:${transcript.id}`,
+      hlsUrl: null,
+      thumbnailUrl: null,
+      durationSec: null,
+      status: RecordingStatus.READY,
+      failureReason: null,
+      transcripts: [{
+        language: 'en',
+        source: 'deepgram',
+        vttUrl: `/api/classroom/sessions/${sessionId}/captions/transcript?format=vtt`,
+      }],
+    };
+  } else {
+    rec = recordings[0];
+  }
 
   const sessionMeta = await db.teachingSession.findUnique({
     where: { id: sessionId },
@@ -155,12 +193,15 @@ export default async function ClassroomRecordingPage({ params }: PageProps) {
         Back to sessions
       </Link>
 
-      {objectiveChecklist.length > 0 &&
-        (session.user.role === Role.RESIDENT || session.user.role === Role.EXTERNAL_LEARNER) && (
-          <ObjectivesChecklist sessionId={sessionId} initial={objectiveChecklist} />
-      )}
-
-      {rec.hlsUrl ? (
+      {/* Always render the RecordingViewer when we have any rec (real or synthetic).
+          The viewer renders a "no video" placeholder in the player frame when
+          hlsUrl is null, so the chrome (tabs / sidebar / discussion) stays consistent.
+          Processing/failed banners only fire for in-flight real recordings. */}
+      {!rec.hlsUrl && PROCESSING_STATES.has(rec.status) ? (
+        <ProcessingBanner status={rec.status} />
+      ) : !rec.hlsUrl && FAILED_STATES.has(rec.status) ? (
+        <FailedBanner reason={rec.failureReason} />
+      ) : (
         <RecordingViewer
           sessionId={sessionId}
           sessionTitle={sessionMeta?.title ?? 'Recording'}
@@ -181,11 +222,12 @@ export default async function ClassroomRecordingPage({ params }: PageProps) {
           initialBookmarked={isBookmarked}
           canShare={canShare}
           pearls={pearls}
+          objectives={
+            (session.user.role === Role.RESIDENT || session.user.role === Role.EXTERNAL_LEARNER)
+              ? objectiveChecklist
+              : []
+          }
         />
-      ) : PROCESSING_STATES.has(rec.status) ? (
-        <ProcessingBanner status={rec.status} />
-      ) : (
-        <FailedBanner reason={rec.failureReason} />
       )}
     </div>
   );
