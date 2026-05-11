@@ -260,14 +260,17 @@ export const updateUserModulesSchema = z.object({
 export type UpdateUserModulesInput = z.infer<typeof updateUserModulesSchema>;
 
 // ─── Admin: Update User Role / Status ───────────────────────────────────────
+// `reason` is optional to match the modal UI label ("Reason (optional, recorded
+// in audit log)"). When present it still must be 3-500 chars; absence is fine
+// — the audit row records null and the change still goes through.
 export const updateUserRoleSchema = z.object({
   role: z.nativeEnum(Role),
-  reason: z.string().min(3).max(500),
+  reason: z.string().min(3).max(500).optional(),
 });
 export type UpdateUserRoleInput = z.infer<typeof updateUserRoleSchema>;
 
 export const updateUserStatusSchema = z.object({
   status: z.enum(['ACTIVE', 'SUSPENDED', 'DEACTIVATED']),
-  reason: z.string().min(3).max(500),
+  reason: z.string().min(3).max(500).optional(),
 });
 export type UpdateUserStatusInput = z.infer<typeof updateUserStatusSchema>;

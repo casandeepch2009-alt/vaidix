@@ -76,8 +76,10 @@ export default function InvitationsPage() {
   const [actionRunning, setActionRunning] = useState(false);
   const [toast, setToast] = useState<{ kind: 'success' | 'error'; msg: string } | null>(null);
 
-  async function fetchList() {
-    setLoading(true);
+  // `silent` skips the loading placeholder so the table doesn't flicker
+  // during the 15s background poll. User-initiated fetches still show it.
+  async function fetchList(silent = false) {
+    if (!silent) setLoading(true);
     const params = new URLSearchParams();
     if (statusFilter) params.set('status', statusFilter);
     if (roleFilter) params.set('role', roleFilter);
@@ -93,9 +95,9 @@ export default function InvitationsPage() {
         setToast({ kind: 'error', msg: body.error?.message ?? 'Failed to load invitations' });
       }
     } catch {
-      setToast({ kind: 'error', msg: 'Network error' });
+      if (!silent) setToast({ kind: 'error', msg: 'Network error' });
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }
 
   useEffect(() => {
@@ -121,7 +123,7 @@ export default function InvitationsPage() {
   useEffect(() => {
     if (summary.pending === 0) return;
     const interval = setInterval(() => {
-      void fetchList();
+      void fetchList(true); // silent refresh — no flicker
     }, 15_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
