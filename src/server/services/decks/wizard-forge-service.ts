@@ -33,6 +33,7 @@ import {
   AiUnparseableError,
 } from '@/server/services/ai/router';
 import { getFacultyHistoryContext } from './faculty-analytics-history';
+import { persistDeckAsDocument } from './deck-pptx-renderer';
 
 // ─── Public types ──────────────────────────────────────────────────────────
 
@@ -318,6 +319,22 @@ PEDAGOGY RULES
 - Include EXACTLY ONE "Common pitfalls" / "Learner errors" slide near the end with 4-6 bullets.
 - briefing.localContext (LVPEI patient mix, adherence patterns) should show up in case discussion + pitfalls if relevant.
 
+TALK ARCHITECTURE — learner-centered principles
+- Slide 2 (right after the TITLE_ONLY hero) is an EMPOWERMENT PROMISE: title "By the end you will…" with ≤3 measurable verb-led bullets. If briefing.objectives exceeds 3 ideas, narrow to the 3 highest-yield.
+- Identify ONE CORE MESSAGE. Echo it in (a) the hero subtitle/notes, (b) at least one mid-deck slide title, (c) CLOSING bullet[0]. The single sentence the learner walks out with.
+- Plant up to 4 ATTENTION HOOKS across the deck (around slide 2-3, mid-deck, just before pitfalls, last content slide). Each hook is one of: thought-provoking question / striking stat / 1-line vignette / bold statement / brief quote. Mark with "HOOK:" prefix in speakerNotes.
+- The first slide of each major section starts with a TRANSITION bullet "From X → to Y" so the deck flows like a story.
+- CLOSING bullet[0] is an ACTIONABLE TAKE-HOME — the one clinically implementable thing the resident will change in clinic on Monday. Not "Thank you" alone.
+
+SPEAKER NOTES STYLE — voice + body
+- Use CAPS for emphasis, "/" for pauses, "..." for slow-down moments. Example: "AAC and PAC LOOK similar / but the cup-to-disc ratio in AAC is NORMAL ... that's the trap."
+- Respect prior knowledge. No "this is simple", "everyone knows", or absolute claims unless source justifies them.
+- For 3-4 key slides (opening, IMAGE_FOCUS, INTERACTION, CLOSING) append a "STAGE:" line: posture / gesture / eye-contact hint.
+- For IMAGE_FOCUS, speakerNotes MUST (1) name what to look for first, (2) include "...pause 3s..." for the visual scan, (3) note if a side-by-side comparison would teach better.
+
+TIME BUDGET
+- Allocate slide count and per-slide time so the total matches briefing.durationMin. Append "TIME: ~Xm" at the end of speakerNotes on non-trivial slides — TITLE 0.5m, content 2-3m, INTERACTION 3-5m, IMAGE_FOCUS 3-4m, CLOSING 1m.
+
 INITIAL SUGGESTIONS (deliberately small list)
 - Only flag things that genuinely need faculty judgment — not nitpicks. Examples:
   • CLINICAL: a guideline number that needs faculty verification.
@@ -542,6 +559,9 @@ export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardFo
         },
       });
     });
+
+    // Surface the forged deck in the faculty's documents library. Best-effort.
+    await persistDeckAsDocument({ jobId: created.id });
 
     return {
       jobId: created.id,

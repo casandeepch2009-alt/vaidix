@@ -133,10 +133,10 @@ You MUST output strict JSON ONLY (no preamble, no markdown fences, no commentary
 
 DESIGN PRIORITIES
 1. TEXT_OVERLOAD — bullets > 6, bullet length > 140 chars, walls of text. SEVERITY=high if a slide has both > 5 bullets AND avg bullet > 100 chars.
-2. INTERACTION_POINT — gap of > 8 consecutive slides without an INTERACTION layout. Flag the slide AFTER which a poll/T-F/case-vignette belongs.
-3. VISUAL_BALANCE — IMAGE_FOCUS slides without a meaningful image caption (bullet[0] should explain the image), TWO_COLUMN slides where one column dominates.
-4. READABILITY — speaker notes empty or < 30 chars on a content slide; titles > 90 chars; bullets ending in trailing punctuation.
-5. STRUCTURE — missing TITLE_ONLY hero, missing CLOSING, missing "Common pitfalls" slide near the end.
+2. INTERACTION_POINT — gap of > 8 consecutive slides without an INTERACTION layout. Flag the slide AFTER which a poll/T-F/case-vignette belongs. Also flag when the deck has ZERO "HOOK:" markers in speakerNotes (no attention hooks planted).
+3. VISUAL_BALANCE — IMAGE_FOCUS slides without a meaningful image caption (bullet[0] should explain the image), TWO_COLUMN slides where one column dominates. Also flag IMAGE_FOCUS speakerNotes that do NOT name "what to look for" first or are missing a "...pause 3s..." cue.
+4. READABILITY — speaker notes empty or < 30 chars on a content slide; titles > 90 chars; bullets ending in trailing punctuation. Also flag patronizing/absolute language ("very simple", "everyone knows", "obvious") in any speakerNotes. Also flag the deck-level absence of voice-modulation marks (CAPS for emphasis, "/" for pauses, "..." for slow-down) across ALL speakerNotes — note as deck-level slideId=null.
+5. STRUCTURE — missing TITLE_ONLY hero, missing CLOSING, missing "Common pitfalls" slide near the end. Also flag: (a) missing EMPOWERMENT PROMISE near slide 2 (a slide whose title begins "By the end you will…" with ≤3 verb-led bullets); (b) no identifiable CORE MESSAGE echoed across hero/mid-deck/CLOSING; (c) CLOSING bullet[0] is just "Thank you / Q&A" instead of an ACTIONABLE TAKE-HOME ("on Monday in clinic, do X"); (d) section boundaries lack a TRANSITION bullet ("From X → to Y"); (e) non-trivial slides missing a "TIME: ~Xm" budget tag so total session length can be checked.
 
 RULES
 - Be strict. Most decks should land 5-7 across the two scores; >8 only for genuinely excellent.

@@ -27,6 +27,7 @@ import {
   tryParseJson,
 } from '@/server/services/ai/gemini';
 import { env } from '@/lib/env';
+import { persistDeckAsDocument } from './deck-pptx-renderer';
 
 const SYSTEM_PROMPT = `You are an ophthalmology medical educator + instructional designer at LV Prasad Eye Institute.
 You convert source teaching material into a clean, lecture-ready slide outline for a 60-minute live session.
@@ -73,7 +74,37 @@ CONTENT RULES
   presents…" pablum.
 - Where source mentions an imaging modality, prefer IMAGE_FOCUS for that slide.
 - Where source mentions a classification system (e.g. ETDRS, Shaffer, Spaeth, AAO PPP), put the
-  classification on a TWO_COLUMN slide so it scans cleanly.`;
+  classification on a TWO_COLUMN slide so it scans cleanly.
+
+TALK ARCHITECTURE — learner-centered presentation principles
+- Slide 2 (right after the TITLE_ONLY hero) is an EMPOWERMENT PROMISE: title "By the end you will…"
+  with ≤3 measurable verb-led bullets (diagnose, classify, choose, manage). Skip a separate "Objectives"
+  slide if this covers them.
+- Identify ONE CORE MESSAGE for the deck. Echo it in (a) the hero subtitle/notes, (b) at least one
+  mid-deck slide title, (c) CLOSING bullet[0]. This is the single sentence the learner must walk out with.
+- Plant up to 4 ATTENTION HOOKS spread across the deck (around slide 2-3, mid-deck, just before the
+  pitfalls slide, last content slide). Each hook is one of: thought-provoking question / striking statistic
+  / 1-line clinical vignette / bold statement / brief quote. Mark each with a "HOOK:" prefix in speakerNotes
+  so the presenter spots it.
+- The first slide of each major section starts with a TRANSITION bullet phrased "From X → to Y" so the
+  deck flows like a story, not a stack.
+- CLOSING bullet[0] is an ACTIONABLE TAKE-HOME — the one clinically implementable thing the resident
+  will change in clinic on Monday. Not "Thank you" alone.
+
+SPEAKER NOTES STYLE — voice + body
+- Use CAPS for words to emphasize, "/" for a pause, "..." for a slow-down moment.
+  Example: "AAC and PAC LOOK similar / but the cup-to-disc ratio in AAC is NORMAL ... that's the trap."
+- Respect prior knowledge. No "this is simple", "everyone knows", or absolute claims unless the source
+  justifies them.
+- For 3-4 key slides (opening, IMAGE_FOCUS, INTERACTION, CLOSING) append a "STAGE:" line at the end of
+  speakerNotes with posture / gesture / eye-contact hint.
+  Example: "STAGE: step forward, hold eye contact with the back row, hand on the image."
+- For IMAGE_FOCUS, speakerNotes MUST (1) name what to look for first, (2) include "...pause 3s..." for
+  the visual scan, and (3) note if a side-by-side comparison would teach better.
+
+TIME BUDGET
+- Append "TIME: ~Xm" at the end of speakerNotes on non-trivial slides — TITLE 0.5m, content 2-3m,
+  INTERACTION 3-5m, IMAGE_FOCUS 3-4m, CLOSING 1m. The sum should approximate the target session length.`;
 
 interface RawSlide {
   layout?: string;
@@ -388,6 +419,11 @@ export async function forgeDeck(input: ForgeInput): Promise<ForgeOutcome> {
         },
       });
     });
+
+    // Surface the forged deck in the faculty's documents library. Best-effort:
+    // we already committed the slides above, so a render/upload failure must
+    // not propagate as a forge failure.
+    await persistDeckAsDocument({ jobId: job.id });
 
     return { jobId: job.id, deckTitle: result.deckTitle, slideCount: result.slides.length };
   } catch (err) {
