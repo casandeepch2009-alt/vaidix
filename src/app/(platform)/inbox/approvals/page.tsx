@@ -34,7 +34,7 @@ export default async function ApprovalsInboxPage() {
           scheduledStart: s.scheduledStart.toISOString(),
           scheduledEnd: s.scheduledEnd.toISOString(),
           recurrenceRule: s.recurrenceRule,
-          visibility: s.visibility,
+          openToAll: s.openToAll,
           cohort: s.cohort,
           inviteCount: s._count.invites,
           proposer: s.proposer,

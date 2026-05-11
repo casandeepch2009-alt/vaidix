@@ -10,7 +10,10 @@ import { useCallback, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
+import { Sparkles, Pencil } from 'lucide-react';
 import { SlideCanvas, type SlideViewModel } from '@/components/decks/slide-canvas';
+import { DeckAiCoach } from '@/components/decks/deck-ai-coach';
+import type { DeckAnalysisResult } from '@/server/services/decks/deck-analyze-service';
 import type { DeckForgeStatus, SlideLayout } from '@prisma/client';
 import { csrfHeaders } from '@/lib/csrf-client';
 
@@ -30,7 +33,10 @@ interface Props {
   status: DeckForgeStatus;
   sourceLabel: string;
   initialSlides: SlideViewModel[];
+  initialAnalysis: DeckAnalysisResult | null;
 }
+
+type RightTab = 'edit' | 'coach';
 
 export function DeckEditorClient({
   jobId,
@@ -38,6 +44,7 @@ export function DeckEditorClient({
   status,
   sourceLabel,
   initialSlides,
+  initialAnalysis,
 }: Props) {
   const router = useRouter();
   const [slides, setSlides] = useState<SlideViewModel[]>(initialSlides);
@@ -45,6 +52,7 @@ export function DeckEditorClient({
   const [savingId, setSavingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [rightTab, setRightTab] = useState<RightTab>('coach');
 
   const active = useMemo(
     () => slides.find((s) => s.id === activeId) ?? slides[0] ?? null,
@@ -256,17 +264,80 @@ export function DeckEditorClient({
           )}
         </main>
 
-        {/* Edit panel */}
-        <aside className="col-span-3 overflow-y-auto border-l border-border bg-card/50 p-4">
-          {active ? (
-            <SlideEditPanel
-              key={active.id}
-              slide={active}
-              saving={savingId === active.id}
-              onChange={(patch) => updateLocal(active.id, patch)}
-              onCommit={(patch) => persistSlide(active.id, patch)}
-            />
-          ) : null}
+        {/* Right panel — tabbed: Edit / AI Coach */}
+        <aside className="col-span-3 flex flex-col overflow-hidden border-l border-border bg-card/50">
+          {/* Tab strip */}
+          <div role="tablist" className="flex border-b border-border bg-card">
+            <button
+              role="tab"
+              type="button"
+              aria-selected={rightTab === 'edit'}
+              onClick={() => setRightTab('edit')}
+              className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium transition ${
+                rightTab === 'edit'
+                  ? 'border-b-2 border-foreground text-foreground'
+                  : 'border-b-2 border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid="tab-edit"
+            >
+              <Pencil className="h-3 w-3" /> Edit
+            </button>
+            <button
+              role="tab"
+              type="button"
+              aria-selected={rightTab === 'coach'}
+              onClick={() => setRightTab('coach')}
+              className={`flex flex-1 items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-medium transition ${
+                rightTab === 'coach'
+                  ? 'border-b-2 border-amber-500 text-foreground'
+                  : 'border-b-2 border-transparent text-muted-foreground hover:text-foreground'
+              }`}
+              data-testid="tab-coach"
+            >
+              <Sparkles className="h-3 w-3 text-amber-500" /> AI Coach
+            </button>
+          </div>
+
+          {/* Tab body */}
+          <div className="flex-1 overflow-hidden">
+            {rightTab === 'edit' ? (
+              <div className="h-full overflow-y-auto p-4">
+                {active ? (
+                  <SlideEditPanel
+                    key={active.id}
+                    slide={active}
+                    saving={savingId === active.id}
+                    onChange={(patch) => updateLocal(active.id, patch)}
+                    onCommit={(patch) => persistSlide(active.id, patch)}
+                  />
+                ) : null}
+              </div>
+            ) : (
+              <DeckAiCoach
+                jobId={jobId}
+                initialAnalysis={initialAnalysis}
+                slides={slides.map((s) => ({ id: s.id, order: s.order }))}
+                activeSlideId={active?.id ?? null}
+                onFocusSlide={(slideId) => setActiveId(slideId)}
+                onSlideCommitted={async (slideId, patch) => {
+                  // Mirror to local state so the canvas updates immediately,
+                  // then persist via PATCH.
+                  updateLocal(slideId, {
+                    title: patch.title,
+                    bullets: patch.bullets,
+                    speakerNotes: patch.speakerNotes,
+                    ...(patch.layout ? { layout: patch.layout as SlideLayout } : {}),
+                  });
+                  await persistSlide(slideId, {
+                    title: patch.title,
+                    bullets: patch.bullets,
+                    speakerNotes: patch.speakerNotes,
+                    ...(patch.layout ? { layout: patch.layout as SlideLayout } : {}),
+                  });
+                }}
+              />
+            )}
+          </div>
         </aside>
       </div>
     </div>

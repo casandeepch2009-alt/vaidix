@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import {
   ArrowLeft, CalendarDays, Clock, Video, Shield,
   ShieldCheck, MessageCircleQuestion, BookOpen, Target, CheckCircle2, Lock,
+  TestTube2, Play,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import type { PrereqStatus, PrereqCheck } from '@/server/services/sessions/prereq'
@@ -42,11 +44,58 @@ export function PreJoin({
   const end = new Date(session.scheduledEnd)
   const now = new Date()
   const startsInMs = start.getTime() - now.getTime()
-  // Hosts can open the room any time — a session can't go LIVE without the
-  // host, so blocking them by the 15-min window just locks them out of their
-  // own class.
+  const endedAgoMs = now.getTime() - end.getTime()
+  // Pre-flight mode: host (or co-host) is opening the room outside the
+  // scheduled window. The room is fully functional but state mutations are
+  // gated server-side — no SCHEDULED→LIVE flip, no recording, no captions
+  // persisted, no LIVE pill on the classroom feed. Used for A/V testing
+  // ahead of class. The 5/15-min grace mirrors the server-side defaults in
+  // `lib/sessions/scheduled-window.ts` so the UI text matches what the
+  // backend will actually do.
+  const EARLY_GRACE_MS = 5 * 60 * 1000
+  const LATE_GRACE_MS = 15 * 60 * 1000
+  const inWindow =
+    now.getTime() >= start.getTime() - EARLY_GRACE_MS &&
+    now.getTime() <= end.getTime() + LATE_GRACE_MS
+  const isPreflight = isHost && !inWindow && session.status !== 'LIVE'
+  // Anyone (host or not) can join while LIVE; non-hosts get the 15-min
+  // pre-window buffer they had before; hosts can join anytime.
   const liveStartingSoon = isHost || startsInMs <= 15 * 60 * 1000 || session.status === 'LIVE'
   const prereqBlocked = !isHost && !!prereqStatus && prereqStatus.hasGate && !prereqStatus.allMet
+  const [startingNow, setStartingNow] = useState(false)
+  const [startNowError, setStartNowError] = useState<string | null>(null)
+
+  async function handleStartNow() {
+    if (startingNow) return
+    setStartingNow(true)
+    setStartNowError(null)
+    try {
+      const durationMs = end.getTime() - start.getTime()
+      const newStart = new Date()
+      const newEnd = new Date(newStart.getTime() + durationMs)
+      const res = await fetch(`/api/classroom/sessions/${session.id}/reschedule`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          scheduledStart: newStart.toISOString(),
+          scheduledEnd: newEnd.toISOString(),
+          reason: 'Started ahead of schedule via Start session now',
+        }),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({})) as { error?: { message?: string } }
+        throw new Error(body.error?.message ?? 'Failed to reschedule')
+      }
+      // Reload the page so the server re-renders with the new window —
+      // the join button will switch from "pre-flight" to "Join now" and
+      // the next room_started/participant_joined event will flip status
+      // to LIVE.
+      window.location.reload()
+    } catch (e) {
+      setStartNowError((e as Error).message)
+      setStartingNow(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-2xl py-8">
@@ -110,14 +159,45 @@ export function PreJoin({
           </label>
         )}
 
-        {error && (
-          <div className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
-            {error}
+        {isPreflight && (
+          <div
+            className="mt-6 flex items-start gap-3 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900/50 dark:bg-amber-950/20"
+            data-testid="prejoin-preflight-banner"
+          >
+            <TestTube2 className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-400" />
+            <div className="space-y-1">
+              <p className="font-medium text-amber-900 dark:text-amber-200">
+                {endedAgoMs > LATE_GRACE_MS ? 'Outside scheduled window' : 'Pre-flight test mode'}
+              </p>
+              <p className="text-amber-800 dark:text-amber-300">
+                {endedAgoMs > LATE_GRACE_MS
+                  ? 'This session’s scheduled time has passed. Opening the room now will not appear as LIVE on the classroom feed and will not be recorded. To run the class now, click "Start session now" to reschedule.'
+                  : 'You can A/V-test the room. Recording, live captions, and the LIVE indicator will activate at the scheduled start time. Class participation does not count yet.'}
+              </p>
+            </div>
           </div>
         )}
 
-        <div className="mt-6 flex justify-end gap-2">
+        {(error || startNowError) && (
+          <div className="mt-4 rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error ?? startNowError}
+          </div>
+        )}
+
+        <div className="mt-6 flex flex-wrap justify-end gap-2">
           <Button variant="outline" onClick={() => history.back()}>Cancel</Button>
+          {isPreflight && (
+            <Button
+              variant="outline"
+              onClick={handleStartNow}
+              disabled={startingNow}
+              data-testid="prejoin-start-now"
+              className="gap-1.5"
+            >
+              <Play className="size-3.5" />
+              {startingNow ? 'Rescheduling…' : 'Start session now'}
+            </Button>
+          )}
           <Button
             onClick={onJoin}
             disabled={!consented || loading || !liveStartingSoon || prereqBlocked}
@@ -127,8 +207,8 @@ export function PreJoin({
               ? 'Connecting…'
               : prereqBlocked
                 ? 'Complete prerequisites to join'
-                : isHost && session.status !== 'LIVE' && startsInMs > 15 * 60 * 1000
-                  ? 'Open room early'
+                : isPreflight
+                  ? 'Open pre-flight room'
                   : liveStartingSoon
                     ? 'Join now'
                     : 'Too early to join'}

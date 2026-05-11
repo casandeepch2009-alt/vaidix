@@ -15,7 +15,7 @@ interface PendingSession {
   scheduledStart: string
   scheduledEnd: string
   recurrenceRule: string | null
-  visibility: string
+  openToAll: boolean
   cohort: { id: string; name: string } | null
   inviteCount: number
   proposer: { id: string; name: string; email: string }
@@ -129,10 +129,7 @@ export function ApprovalsInbox({ sessions: initial }: { sessions: PendingSession
                   </span>
                   <span className="inline-flex items-center gap-1.5">
                     <Users className="size-3.5" />
-                    {s.visibility === 'OPEN_TO_ALL' && 'All residents'}
-                    {s.visibility === 'COHORT' && s.cohort && `Cohort: ${s.cohort.name}`}
-                    {s.visibility === 'INVITE_ONLY' && `${s.inviteCount} invitee(s)`}
-                    {s.visibility === 'PRIVATE' && 'Private'}
+                    {audienceSummary(s)}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -173,4 +170,15 @@ export function ApprovalsInbox({ sessions: initial }: { sessions: PendingSession
       })}
     </div>
   )
+}
+
+// Compose the audience line shown on a pending-approval card. Mirrors the
+// new orthogonal-flags model: any combination is possible, so describe each
+// axis that's set rather than picking a single label.
+function audienceSummary(s: PendingSession): string {
+  const parts: string[] = []
+  if (s.cohort) parts.push(`Cohort: ${s.cohort.name}`)
+  if (s.inviteCount > 0) parts.push(`${s.inviteCount} invitee${s.inviteCount === 1 ? '' : 's'}`)
+  if (s.openToAll) parts.push('Anyone with link')
+  return parts.length > 0 ? parts.join(' · ') : 'Private (host only)'
 }

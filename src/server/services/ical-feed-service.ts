@@ -11,11 +11,9 @@ import { env } from '@/lib/env';
 import {
   SessionApprovalStatus,
   SessionStatus,
-  SessionVisibility,
-  Role,
 } from '@prisma/client';
 import { buildUserFeedIcs, sessionJoinUrl } from './ics-service';
-import { getUserCohortIds } from './cohort-service';
+import { buildSessionVisibilityWhere } from './sessions/visibility';
 
 const FEED_WINDOW_DAYS_PAST = 30;
 const FEED_WINDOW_DAYS_FUTURE = 180;
@@ -68,47 +66,38 @@ export async function verifyFeedToken(userId: string, token: string): Promise<bo
 export async function buildFeedForUser(userId: string): Promise<string> {
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { id: true, role: true, name: true },
+    select: { id: true, role: true, name: true, activeProgramId: true },
   });
   if (!user) throw new Error('USER_NOT_FOUND');
 
   const from = new Date(Date.now() - FEED_WINDOW_DAYS_PAST * 24 * 3600 * 1000);
   const to = new Date(Date.now() + FEED_WINDOW_DAYS_FUTURE * 24 * 3600 * 1000);
 
-  const baseWhere = {
-    deletedAt: null,
-    approvalStatus: SessionApprovalStatus.APPROVED,
-    status: { in: [SessionStatus.SCHEDULED, SessionStatus.LIVE] },
-    OR: [
-      { scheduledEnd: { gt: from }, scheduledStart: { lt: to } },
-      { recurrenceRule: { not: null } },
-    ],
-  };
-
-  let visibilityWhere: object;
-  if (user.role === Role.ADMIN || user.role === Role.PROGRAM_DIRECTOR) {
-    visibilityWhere = baseWhere;
-  } else {
-    const myCohorts = await getUserCohortIds(userId);
-    const visibilityOr =
-      user.role === Role.FACULTY
-        ? [
-            { visibility: SessionVisibility.OPEN_TO_ALL },
-            { visibility: SessionVisibility.COHORT, cohortId: { in: myCohorts } },
-            { visibility: SessionVisibility.INVITE_ONLY, invites: { some: { userId } } },
-            { hostId: userId },
-            { proposedBy: userId },
-          ]
-        : [
-            { visibility: SessionVisibility.OPEN_TO_ALL },
-            { visibility: SessionVisibility.COHORT, cohortId: { in: myCohorts } },
-            { visibility: SessionVisibility.INVITE_ONLY, invites: { some: { userId } } },
-          ];
-    visibilityWhere = { ...baseWhere, AND: [{ OR: visibilityOr }] };
-  }
+  // Reuse the shared visibility helper so the feed and the in-app Classroom
+  // list cannot drift. Same rule everywhere: cohort/invite/host scoping —
+  // `openToAll` alone is link-only and not auto-listed.
+  const visibility = await buildSessionVisibilityWhere({
+    userId,
+    role: user.role,
+    activeProgramId: user.activeProgramId ?? undefined,
+  });
 
   const sessions = await db.teachingSession.findMany({
-    where: visibilityWhere,
+    where: {
+      ...(user.activeProgramId ? { programId: user.activeProgramId } : {}),
+      deletedAt: null,
+      approvalStatus: SessionApprovalStatus.APPROVED,
+      status: { in: [SessionStatus.SCHEDULED, SessionStatus.LIVE] },
+      AND: [
+        {
+          OR: [
+            { scheduledEnd: { gt: from }, scheduledStart: { lt: to } },
+            { recurrenceRule: { not: null } },
+          ],
+        },
+        visibility,
+      ],
+    },
     select: {
       id: true,
       title: true,

@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import {
   Video, Calendar, Clock, Users, Plus, PlayCircle, Radio,
   Search, Share2, Bookmark, Gem, SortDesc, X, Check, ThumbsUp,
-  BookOpen, MessageCircleQuestion, RefreshCw,
+  BookOpen, MessageCircleQuestion, RefreshCw, CheckCircle2, Pencil,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
@@ -21,6 +21,9 @@ export interface ListedSession {
   scheduledEnd: string
   host: { id: string; name: string }
   participantCount: number
+  studyPackCount: number
+  questionCount: number
+  objectiveCount: number
   thumbnailUrl: string | null
   durationSec: number | null
   tags: string[]
@@ -108,11 +111,12 @@ interface FeedProps {
   past: ListedSession[]
   nowMs: number
   canSchedule: boolean
+  userId: string
 }
 
-export function ClassroomFeed({ live, upcoming, past, nowMs, canSchedule }: FeedProps) {
+export function ClassroomFeed({ live, upcoming, past, nowMs, canSchedule, userId }: FeedProps) {
   const [activeTab, setActiveTab] = useState<'live' | 'upcoming' | 'past'>(
-    live.length > 0 ? 'live' : 'past'
+    live.length > 0 ? 'live' : upcoming.length > 0 ? 'upcoming' : 'past'
   )
   const [search, setSearch] = useState('')
   const [typeFilter, setTypeFilter] = useState<TypeKey>('all')
@@ -136,13 +140,15 @@ export function ClassroomFeed({ live, upcoming, past, nowMs, canSchedule }: Feed
     if (sort === 'newest') items.sort((a, b) => new Date(b.scheduledStart).getTime() - new Date(a.scheduledStart).getTime())
     if (sort === 'oldest') items.sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
     if (sort === 'popular') items.sort((a, b) => b.participantCount - a.participantCount)
+    // Upcoming always soonest-first regardless of sort choice
+    if (activeTab === 'upcoming') items.sort((a, b) => new Date(a.scheduledStart).getTime() - new Date(b.scheduledStart).getTime())
     return items
   }, [source, typeFilter, search, sort])
 
   const tabs = [
     { key: 'live' as const,     label: 'Live',     count: live.length,     isLive: true },
     { key: 'upcoming' as const, label: 'Upcoming', count: upcoming.length, isLive: false },
-    { key: 'past' as const,     label: 'Past',     count: past.length,     isLive: false },
+    { key: 'past' as const,     label: 'Replays',  count: past.length,     isLive: false },
   ]
 
   return (
@@ -188,38 +194,40 @@ export function ClassroomFeed({ live, upcoming, past, nowMs, canSchedule }: Feed
         </div>
       </div>
 
-      {/* ─── Tab bar ─── */}
-      <div className="flex items-center gap-1 border-b border-border/60">
+      {/* ─── Tab bar — segmented pill control ─── */}
+      <div className="inline-flex items-center rounded-xl bg-muted/70 p-1">
         {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key)}
-            className={cn(
-              'relative flex items-center gap-1.5 px-4 pb-3 pt-1 text-sm font-semibold transition-colors',
-              activeTab === tab.key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/80'
-            )}
+            className="relative flex items-center gap-1.5 rounded-lg px-4 py-1.5 text-sm font-semibold"
           >
-            {tab.isLive && tab.count > 0 && (
-              <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
-            )}
-            {tab.label}
-            <span className={cn(
-              'rounded-full px-1.5 py-0.5 text-[10px] font-bold',
-              activeTab === tab.key
-                ? tab.isLive && tab.count > 0
-                  ? 'bg-red-500 text-white'
-                  : 'bg-primary/10 text-primary'
-                : 'bg-muted text-muted-foreground'
-            )}>
-              {tab.count}
-            </span>
             {activeTab === tab.key && (
               <motion.div
-                layoutId="tab-bar-underline"
-                className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full bg-primary"
-                transition={{ type: 'spring', stiffness: 500, damping: 35 }}
+                layoutId="tab-seg-bg"
+                className="absolute inset-0 rounded-lg bg-card shadow-sm"
+                transition={{ type: 'spring', stiffness: 500, damping: 38 }}
               />
             )}
+            <span className={cn(
+              'relative z-10 flex items-center gap-1.5 transition-colors',
+              activeTab === tab.key ? 'text-foreground' : 'text-muted-foreground hover:text-foreground/70'
+            )}>
+              {tab.isLive && tab.count > 0 && (
+                <span className="size-1.5 rounded-full bg-red-500 animate-pulse" />
+              )}
+              {tab.label}
+              <span className={cn(
+                'rounded-full px-1.5 py-px text-[10px] font-bold',
+                activeTab === tab.key
+                  ? tab.isLive && tab.count > 0
+                    ? 'bg-red-500/15 text-red-600 dark:text-red-400'
+                    : 'bg-primary/10 text-primary'
+                  : 'bg-muted-foreground/15 text-muted-foreground'
+              )}>
+                {tab.count}
+              </span>
+            </span>
           </button>
         ))}
       </div>
@@ -303,7 +311,9 @@ export function ClassroomFeed({ live, upcoming, past, nowMs, canSchedule }: Feed
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(idx * 0.04, 0.3), duration: 0.36, ease: [0.22, 1, 0.36, 1] }}
                 >
-                  <VideoCard session={s} nowMs={nowMs} />
+                  {s.status !== 'LIVE' && s.status !== 'ENDED'
+                    ? <UpcomingCard session={s} nowMs={nowMs} isHost={s.host.id === userId} />
+                    : <VideoCard session={s} nowMs={nowMs} />}
                 </motion.div>
               ))}
             </div>
@@ -471,7 +481,7 @@ function VideoCard({ session: s, nowMs }: { session: ListedSession; nowMs: numbe
             className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-primary/5 py-1.5 text-[11px] font-semibold text-primary ring-1 ring-primary/15 transition hover:bg-primary/10"
           >
             <MessageCircleQuestion className="size-3" />
-            Ask before class
+            Ask &amp; vote
           </Link>
         </div>
       )}
@@ -541,6 +551,241 @@ function VideoCard({ session: s, nowMs }: { session: ListedSession; nowMs: numbe
         </Link>
       )}
     </div>
+  )
+}
+
+// ─── Upcoming Event Card ─────────────────────────────────────────────────────
+
+const typeAccent: Record<string, { bar: string; bg: string; countdown: string }> = {
+  LECTURE:         { bar: 'bg-blue-500',   bg: 'bg-blue-500/5',   countdown: 'text-blue-600 dark:text-blue-400' },
+  GRAND_ROUNDS:    { bar: 'bg-amber-500',  bg: 'bg-amber-500/5',  countdown: 'text-amber-600 dark:text-amber-400' },
+  CASE_CONFERENCE: { bar: 'bg-purple-500', bg: 'bg-purple-500/5', countdown: 'text-purple-600 dark:text-purple-400' },
+  JOURNAL_CLUB:    { bar: 'bg-teal-500',   bg: 'bg-teal-500/5',   countdown: 'text-teal-600 dark:text-teal-400' },
+  SKILLS_WORKSHOP: { bar: 'bg-pink-500',   bg: 'bg-pink-500/5',   countdown: 'text-pink-600 dark:text-pink-400' },
+  ASSESSMENT:      { bar: 'bg-slate-500',  bg: 'bg-slate-500/5',  countdown: 'text-slate-600 dark:text-slate-400' },
+}
+
+function countdown(startMs: number, nowMs: number) {
+  const diff = startMs - nowMs
+  if (diff <= 0) return 'starting now'
+  const days = Math.floor(diff / 86400000)
+  const hours = Math.floor((diff % 86400000) / 3600000)
+  const mins = Math.floor((diff % 3600000) / 60000)
+  if (days > 1) return `in ${days} days`
+  if (days === 1) return 'tomorrow'
+  if (hours > 0) return `in ${hours}h ${mins}m`
+  if (mins > 0) return `in ${mins} min`
+  return 'very soon'
+}
+
+function UpcomingCard({ session: s, nowMs, isHost }: { session: ListedSession; nowMs: number; isHost: boolean }) {
+  const start = new Date(s.scheduledStart)
+  const inWindow = start.getTime() - nowMs <= 15 * 60 * 1000
+  const href = `/classroom/${s.id}`
+  const badge = typeBadge[s.sessionType]
+  const accent = typeAccent[s.sessionType] ?? { bar: 'bg-primary', bg: 'bg-primary/5', countdown: 'text-primary' }
+  const initials = s.host.name.split(' ').map((w: string) => w[0]).join('').slice(0, 2).toUpperCase()
+  const mins = scheduledMins(s.scheduledStart, s.scheduledEnd)
+
+  return (
+    <div className="group flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md">
+      {/* Type accent bar */}
+      <div className={`h-[3px] w-full ${accent.bar}`} />
+
+      {/* Date hero */}
+      <div className={`flex items-center justify-between px-4 py-4 ${accent.bg}`}>
+        <div>
+          <p className="text-4xl font-black leading-none tracking-tight text-foreground">
+            {start.getDate()}
+          </p>
+          <p className="mt-0.5 text-xs font-bold uppercase tracking-widest text-muted-foreground">
+            {start.toLocaleString('en', { month: 'short' })}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {start.toLocaleString('en', { weekday: 'long' })}
+          </p>
+        </div>
+        <div className="text-right">
+          <p className={`text-base font-black ${accent.countdown}`}>
+            {countdown(start.getTime(), nowMs)}
+          </p>
+          <p className="mt-0.5 text-xs font-semibold text-muted-foreground">
+            {start.toLocaleTimeString('en-IN', { hour: 'numeric', minute: '2-digit' })}
+          </p>
+          <p className="text-[11px] text-muted-foreground">{mins} min</p>
+        </div>
+      </div>
+
+      {/* Title + host */}
+      <div className="flex gap-2.5 px-3 pt-3">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-[11px] font-bold text-primary ring-2 ring-primary/10">
+          {initials}
+        </div>
+        <div className="min-w-0 flex-1">
+          <Link href={href}>
+            <p className="line-clamp-2 text-sm font-semibold leading-snug text-foreground transition-colors group-hover:text-primary">
+              {s.title}
+            </p>
+          </Link>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">{s.host.name}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {badge && (
+              <span className={cn('inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] font-semibold', badge.bg, badge.text)}>
+                {badge.label}
+              </span>
+            )}
+            {isHost && (
+              <span className="inline-flex items-center gap-0.5 rounded-md bg-teal-500/10 px-1.5 py-0.5 text-[10px] font-bold text-teal-700 dark:text-teal-400">
+                🎓 Hosting
+              </span>
+            )}
+            {s.isRecurring && (
+              <span className="inline-flex items-center gap-0.5 rounded-md bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                <RefreshCw className="size-2.5" /> Recurring
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Prep status strip — visible to all, shows what's ready */}
+      <div className="mx-3 mt-3 flex items-stretch overflow-hidden rounded-xl border border-border/50">
+        <PrepStatusChip label="Objectives" done={s.objectiveCount > 0} value={s.objectiveCount > 0 ? `${s.objectiveCount} set` : 'Pending'} />
+        <div className="w-px bg-border/50" />
+        <PrepStatusChip label="Materials" done={s.studyPackCount > 0} value={s.studyPackCount > 0 ? `${s.studyPackCount} added` : 'Pending'} />
+        <div className="w-px bg-border/50" />
+        <PrepStatusChip label="Questions" done={s.questionCount > 0} value={s.questionCount > 0 ? `${s.questionCount} asked` : 'Pending'} />
+      </div>
+
+      {/* Pre-class links — always vibrant, badge appears when content exists */}
+      <div className="mt-2 flex items-center gap-1.5 px-3">
+        <Link
+          href={`/classroom/${s.id}/study`}
+          className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-emerald-500/10 py-1.5 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-500/20 transition hover:bg-emerald-500/20 dark:text-emerald-400"
+        >
+          <BookOpen className="size-3" />
+          {isHost ? 'Manage pack' : 'Study pack'}
+          {s.studyPackCount > 0 ? (
+            <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-bold leading-none text-white">
+              {s.studyPackCount}
+            </span>
+          ) : (
+            <span className="ml-0.5 text-[9px] text-emerald-500/60">{isHost ? '+add' : '+add'}</span>
+          )}
+        </Link>
+        <Link
+          href={`/classroom/${s.id}/pre-questions`}
+          className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg bg-violet-500/10 py-1.5 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-500/20 transition hover:bg-violet-500/20 dark:text-violet-400"
+        >
+          <MessageCircleQuestion className="size-3" />
+          {isHost ? 'Review Q&A' : 'Ask & vote'}
+          {s.questionCount > 0 ? (
+            <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-violet-500 px-1 text-[9px] font-bold leading-none text-white">
+              {s.questionCount}
+            </span>
+          ) : (
+            <span className="ml-0.5 text-[9px] text-violet-500/60">+add</span>
+          )}
+        </Link>
+      </div>
+
+      {/* Bottom row — Share + Edit (host) + Study hub + Join */}
+      <div className="mx-3 mt-3 mb-3 flex items-center gap-1.5">
+        <ShareButton href={href} title={s.title} />
+        {isHost && <EditButton sessionId={s.id} />}
+        <Link
+          href={`/classroom/${s.id}/study`}
+          className={cn(
+            'inline-flex flex-1 items-center justify-center gap-1 rounded-xl py-2 text-[11px] font-bold transition-all',
+            inWindow
+              ? 'border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 hover:bg-emerald-500/20 dark:text-emerald-400'
+              : 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700'
+          )}
+        >
+          <BookOpen className="size-3.5" /> Study hub
+        </Link>
+        <Link
+          href={href}
+          className={cn(
+            'inline-flex flex-1 items-center justify-center gap-1 rounded-xl py-2 text-[11px] font-bold transition-all',
+            inWindow
+              ? 'bg-primary text-primary-foreground shadow-sm hover:bg-primary/90'
+              : 'border border-border bg-muted/40 text-muted-foreground hover:bg-muted/70'
+          )}
+          title={inWindow ? 'Join the live session' : `Opens ${start.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })} · join becomes available 15 min before`}
+        >
+          <PlayCircle className="size-3.5" />
+          {inWindow ? 'Join now' : 'Join'}
+        </Link>
+      </div>
+    </div>
+  )
+}
+
+// ─── Prep status chip (used by UpcomingCard) ─────────────────────────────────
+
+function PrepStatusChip({ label, done, value }: { label: string; done: boolean; value: string }) {
+  return (
+    <div className={cn(
+      'flex flex-1 flex-col items-center gap-0.5 px-2 py-2',
+      done ? 'bg-emerald-50/60 dark:bg-emerald-900/10' : 'bg-amber-50/40 dark:bg-amber-900/5'
+    )}>
+      <span className={cn(
+        'text-[9px] font-bold uppercase tracking-widest',
+        done ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-500 dark:text-amber-400'
+      )}>
+        {label}
+      </span>
+      <span className={cn(
+        'flex items-center gap-0.5 text-[10px] font-semibold',
+        done ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-600 dark:text-amber-400'
+      )}>
+        {done
+          ? <CheckCircle2 className="size-3 shrink-0" />
+          : <span className="size-2 shrink-0 rounded-full border border-amber-400" />}
+        {value}
+      </span>
+    </div>
+  )
+}
+
+// ─── Share button (used by UpcomingCard) ─────────────────────────────────────
+
+function EditButton({ sessionId }: { sessionId: string }) {
+  return (
+    <Link
+      href={`/classroom/${sessionId}/edit`}
+      title="Edit session"
+      className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/60 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+    >
+      <Pencil className="size-4" />
+    </Link>
+  )
+}
+
+function ShareButton({ href, title }: { href: string; title: string }) {
+  const [copied, setCopied] = useState(false)
+
+  async function handleShare(e: React.MouseEvent) {
+    e.preventDefault()
+    const url = `${window.location.origin}${href}`
+    try {
+      if (navigator.share) { await navigator.share({ title, url }); return }
+      await navigator.clipboard.writeText(url)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch { /* cancelled */ }
+  }
+
+  return (
+    <motion.button
+      whileTap={{ scale: 0.93 }}
+      onClick={handleShare}
+      title={copied ? 'Link copied!' : 'Share session link'}
+      className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-border bg-muted/60 text-muted-foreground transition hover:bg-muted hover:text-foreground"
+    >
+      {copied ? <Check className="size-4 text-primary" /> : <Share2 className="size-4" />}
+    </motion.button>
   )
 }
 

@@ -46,7 +46,7 @@ turn:
 room:
   auto_create: true
   enable_remote_unmute: true
-  max_participants: 100
+  max_participants: 1000
   empty_timeout: 300       # seconds — auto-close empty rooms
   departure_timeout: 20    # seconds after last person leaves
 

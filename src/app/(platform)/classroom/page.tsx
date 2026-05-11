@@ -11,6 +11,7 @@ import {
   sweepStaleScheduledSessions,
 } from '@/server/services/sessions/auto-end'
 import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
+import { bucketSessions } from '@/lib/sessions/buckets'
 import pearlsData from '@/mock-data/pearls.json'
 
 interface MockPearl { tags: string[] }
@@ -82,7 +83,7 @@ export default async function ClassroomListPage() {
     },
     include: {
       host: { select: { id: true, name: true } },
-      _count: { select: { participants: true } },
+      _count: { select: { participants: true, documentLinks: { where: { isPreSession: true } }, preQuestions: true } },
       recording: { select: { thumbnailUrl: true, durationSec: true } },
     },
     orderBy: { scheduledStart: 'desc' },
@@ -136,6 +137,9 @@ export default async function ClassroomListPage() {
       scheduledEnd: displayEnd.toISOString(),
       host: x.host,
       participantCount: x._count.participants,
+      studyPackCount: x._count.documentLinks,
+      questionCount: x._count.preQuestions,
+      objectiveCount: Array.isArray(x.objectives) ? (x.objectives as unknown[]).length : 0,
       thumbnailUrl: x.recording?.thumbnailUrl ?? null,
       durationSec: x.recording?.durationSec ?? null,
       tags: x.tags,
@@ -161,9 +165,13 @@ export default async function ClassroomListPage() {
     return r
   })
 
-  const live     = projected.filter((r) => r.status === 'LIVE')
-  const upcoming = projected.filter((r) => r.status === 'SCHEDULED' && new Date(r.scheduledStart) > now)
-  const past     = projected.filter((r) => r.status === 'ENDED').slice(0, 40)
+  // Single source of truth: bucketSessions. Same helper is used by the
+  // /calendar Sessions feed and the dashboard upcoming widget so a row
+  // can never appear in one list and not another.
+  const buckets = bucketSessions(projected, nowMs)
+  const live = buckets.live
+  const upcoming = buckets.upcoming
+  const past = buckets.past.slice(0, 40)
 
   return (
     <ClassroomFeed
@@ -172,6 +180,7 @@ export default async function ClassroomListPage() {
       past={past}
       nowMs={nowMs}
       canSchedule={canSchedule}
+      userId={s.user.id}
     />
   )
 }

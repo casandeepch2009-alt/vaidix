@@ -8,7 +8,6 @@ import { redirect, notFound } from 'next/navigation'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
 import { getEffectiveSessionRole } from '@/server/services/session-service'
-import { mapPrismaRoleToUserRole } from '@/lib/identity'
 import { SharedNotesPanel } from '@/components/classroom/shared-notes-panel'
 import { ChatPanelStandalone } from '@/components/classroom/chat-panel-standalone'
 
@@ -35,11 +34,9 @@ export default async function PopoutPage({
   })
   if (!user) redirect('/login')
 
-  const role = await getEffectiveSessionRole(
-    sessionId,
-    user.id,
-    mapPrismaRoleToUserRole(user.role)
-  )
+  // getEffectiveSessionRole takes the Prisma Role directly — no need to
+  // re-map to the UI's lowercased UserRole here.
+  const role = await getEffectiveSessionRole(sessionId, user.id, user.role)
   if (!role) notFound()
   const isHostish = role === 'HOST' || role === 'CO_HOST'
 

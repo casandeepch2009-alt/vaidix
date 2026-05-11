@@ -17,7 +17,7 @@ import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   PhoneOff, Hand, MessageSquare, Users, Trophy,
   LayoutGrid, Zap, Brain, X, Settings, Link2, ChevronDown,
-  NotebookPen, Pencil, Loader2,
+  NotebookPen, Pencil, Loader2, FileDown,
 } from 'lucide-react'
 import { WaitingRoom } from './waiting-room'
 import { PreJoin } from './pre-join'
@@ -34,7 +34,15 @@ import { PresenterAlertsHud } from '@/components/engagement/presenter-alerts-hud
 import { LeaderboardPanel } from '@/components/engagement/leaderboard-panel'
 import { HooksComposer } from '@/components/engagement/hooks-composer'
 import { CoachPanel } from '@/components/engagement/coach-panel'
-import { LiveCaptionsOverlay } from '@/components/engagement/live-captions-overlay'
+import {
+  LiveCaptionsOverlay,
+  CaptionControls,
+  readCaptionPrefs,
+  saveCaptionPrefs,
+  type CaptionLangCode,
+} from '@/components/engagement/live-captions-overlay'
+import { DeepgramCaptionsProducer } from './deepgram-captions-producer'
+import { PreflightBanner } from './preflight-banner'
 import { BreakoutsPanel } from './breakouts-panel'
 import { BreakoutRoomView } from './breakout-room-view'
 import { BgPicker } from './bg-picker'
@@ -61,6 +69,11 @@ interface SessionInfo {
   recordingEnabled: boolean
   consentRequired: boolean
   host: { id: string; name: string; email: string; avatarUrl: string | null }
+  /// Live captions ASR provider for this session. 'english-only' wires
+  /// Deepgram in the host's browser (Phase 1); 'indic-mix' is a Phase 2
+  /// stub — the overlay shows but no live producer runs, the recording's
+  /// post-batch transcript fills in after class. 'off' hides everything.
+  captionsProfile: 'english-only' | 'indic-mix' | 'off'
 }
 
 type JoinState =
@@ -509,6 +522,23 @@ function InnerRoom({
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('chat')
 
+  const captionsActive = session.captionsProfile !== 'off'
+  const [captionsEnabled, setCaptionsEnabled] = useState(() =>
+    captionsActive ? readCaptionPrefs().enabled : false,
+  )
+  const [captionsLang, setCaptionsLang] = useState<CaptionLangCode>(() =>
+    captionsActive ? readCaptionPrefs().lang : 'en',
+  )
+  const toggleCaptions = () => {
+    const next = !captionsEnabled
+    setCaptionsEnabled(next)
+    saveCaptionPrefs(next, captionsLang)
+  }
+  const changeCaptionsLang = (l: CaptionLangCode) => {
+    setCaptionsLang(l)
+    saveCaptionPrefs(captionsEnabled, l)
+  }
+
   const tabs = [
     { id: 'participants', label: 'People', icon: Users },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -565,9 +595,34 @@ function InnerRoom({
           />
         </div>
 
-        {isHostish && (
-          <HostControlsMenu sessionId={session.id} isHost={role === 'HOST'} />
-        )}
+        <div className="flex items-center gap-2">
+          {/* CC controls — in the top bar so they don't overlap video content */}
+          {captionsActive && (
+            <CaptionControls
+              enabled={captionsEnabled}
+              lang={captionsLang}
+              onToggle={toggleCaptions}
+              onLangChange={changeCaptionsLang}
+            />
+          )}
+          {/* Download transcript PDF — visible to anyone who can see the session.
+              The route returns 404 if no transcript exists yet; we show the button
+              regardless so users have one consistent entry point. */}
+          <a
+            href={`/api/classroom/sessions/${session.id}/captions/transcript/export-pdf`}
+            target="_blank"
+            rel="noopener"
+            aria-label="Download transcript as PDF"
+            title="Download transcript as PDF"
+            className="flex items-center gap-1 rounded-md border border-white/10 bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur transition-colors hover:bg-black/70"
+          >
+            <FileDown className="size-3.5" />
+            <span>PDF</span>
+          </a>
+          {isHostish && (
+            <HostControlsMenu sessionId={session.id} isHost={role === 'HOST'} />
+          )}
+        </div>
       </div>
 
       {/* Bottom gradient vignette */}
@@ -696,10 +751,44 @@ function InnerRoom({
         )}
       </AnimatePresence>
 
+      {/* Pre-flight banner — visible when the host has opened the room
+          outside the scheduled window. Status stays SCHEDULED server-side
+          until the window opens (see lib/sessions/scheduled-window.ts), so
+          checking status===SCHEDULED is the cleanest "is this pre-flight?"
+          signal available to the room chrome. */}
+      {session.status === 'SCHEDULED' && (
+        <PreflightBanner
+          sessionId={session.id}
+          scheduledStart={session.scheduledStart}
+          scheduledEnd={session.scheduledEnd}
+          isHost={role === 'HOST'}
+        />
+      )}
+
       {/* Engagement overlays */}
       <HookOverlay sessionId={session.id} />
       <PresenterAlertsHud sessionId={session.id} isHost={role === 'HOST'} />
-      <LiveCaptionsOverlay sessionId={session.id} />
+      {captionsActive && (
+        <LiveCaptionsOverlay
+          sessionId={session.id}
+          enabled={captionsEnabled}
+          chosenLang={captionsLang}
+        />
+      )}
+      {/* Live captions producer — host-only, English Phase 1. The component
+          is headless: it captures the local LiveKit mic track, opens a WS
+          to Deepgram with a server-minted scoped token, and POSTs finalized
+          utterances to /captions/publish for fan-out + persistence.
+          Gated on `session.status === 'LIVE'` so pre-flight test runs don't
+          burn Deepgram quota and don't leak chatter into the transcript. */}
+      <DeepgramCaptionsProducer
+        sessionId={session.id}
+        enabled={
+          role === 'HOST' &&
+          session.captionsProfile === 'english-only' &&
+          session.status === 'LIVE'
+        }
+      />
       <HandRaiseNotifications />
       {/* Headless join/leave chime — plays a soft 2-note tone when remote
           participants connect or disconnect. Default on; the toolbar

@@ -106,7 +106,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
                 {[
                   { label: 'Faculty gets notified', desc: 'An email + in-app approval request is sent immediately.' },
                   { label: 'Host approves', desc: 'One click — session moves to Published.' },
-                  { label: 'Calendars update', desc: 'Attendees see it on their Live Classes calendar.' },
+                  { label: 'Calendars update', desc: 'Attendees see it on their Calendar.' },
                   { label: 'Reminders go out', desc: '24 h and 1 h before the session starts.' },
                 ].map(({ label, desc }, i) => (
                   <li key={label} className="flex gap-3">

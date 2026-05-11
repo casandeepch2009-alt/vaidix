@@ -12,6 +12,7 @@ import { db } from '@/lib/db';
 import { getQueue, QUEUES } from '@/lib/queue';
 import { SessionStatus, RecordingStatus } from '@prisma/client';
 import { audit, AUDIT_EVENTS } from '@/server/services/audit';
+import { maybeFlipToLive } from '@/server/services/session-service';
 
 const ROOM_SESSION_PREFIX = 'session-';
 
@@ -278,25 +279,24 @@ export async function POST(req: Request) {
   try {
     switch (event.event) {
       case 'room_started': {
-        await db.teachingSession.updateMany({
-          where: {
-            id: sessionId,
-            status: { in: [SessionStatus.SCHEDULED] },
-          },
-          data: {
-            status: SessionStatus.LIVE,
-            actualStart: new Date(),
-            liveKitRoomSid: event.room?.sid ?? null,
-          },
-        });
+        // Capture the LiveKit room SID regardless of pre-flight vs in-window —
+        // the SID is just a handle for later operations (egress, mute, etc.)
+        // and stamping it doesn't imply the class has started.
+        if (event.room?.sid) {
+          await db.teachingSession.updateMany({
+            where: { id: sessionId, liveKitRoomSid: null },
+            data: { liveKitRoomSid: event.room.sid },
+          });
+        }
 
-        // ─── Kick off recording if the session opted in. ───────────────────
-        // Idempotent: room_started can fire on reconnects/migrations, but a
-        // Recording row with a non-null egressJobId means we've already asked
-        // LiveKit to record — don't double-start. A failure to start egress
-        // is logged + audited but never bubbles up: the live session must
-        // continue even if recording is unavailable.
-        await maybeStartRecording(sessionId);
+        // Status flip + recording start are gated to the scheduled window.
+        // Outside the window this room_started is a pre-flight test — the
+        // host is just opening the room early to A/V check. Status stays
+        // SCHEDULED, no recording, no LIVE pill on the classroom feed.
+        const flip = await maybeFlipToLive(sessionId, null);
+        if (flip.flipped) {
+          await maybeStartRecording(sessionId);
+        }
         break;
       }
       case 'room_finished': {
@@ -346,6 +346,15 @@ export async function POST(req: Request) {
             livekitIdentity: userId,
           },
         });
+        // Catch-up: a host may have opened the room early (pre-flight, status
+        // stayed SCHEDULED). Once a participant arrives *and* the window is
+        // open, this is the moment to flip and start recording. Also handles
+        // recurring sessions where the master row is ENDED from a prior
+        // occurrence — `maybeFlipToLive` allows ENDED→LIVE for recurring.
+        const flip = await maybeFlipToLive(sessionId, userId);
+        if (flip.flipped) {
+          await maybeStartRecording(sessionId);
+        }
         break;
       }
       case 'participant_left': {

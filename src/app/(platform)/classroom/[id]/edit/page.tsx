@@ -1,12 +1,21 @@
 import { notFound, redirect } from 'next/navigation'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
-import { Role, CohortStatus, SessionVisibility } from '@prisma/client'
+import { Role, CohortStatus } from '@prisma/client'
 import { CalendarDays } from 'lucide-react'
-import { EditSessionForm } from './edit-session-form'
+import { NewSessionForm } from '@/app/(platform)/calendar/new/new-session-form'
+import type { PrereqConfig } from '@/lib/validation/session'
 
 interface PageProps {
   params: Promise<{ id: string }>
+}
+
+function readPrereq(metadata: unknown): PrereqConfig | null {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) return null
+  const m = metadata as Record<string, unknown>
+  const p = m.prereq
+  if (!p || typeof p !== 'object') return null
+  return p as PrereqConfig
 }
 
 export default async function EditSessionPage({ params }: PageProps) {
@@ -24,7 +33,7 @@ export default async function EditSessionPage({ params }: PageProps) {
       proposedBy: true,
       scheduledStart: true,
       scheduledEnd: true,
-      visibility: true,
+      openToAll: true,
       cohortId: true,
       topicId: true,
       maxParticipants: true,
@@ -34,16 +43,11 @@ export default async function EditSessionPage({ params }: PageProps) {
       metadata: true,
       tags: true,
       approvalStatus: true,
-      // Recurrence rule (RRULE) — when present the edit form surfaces the
-      // Teams/Outlook-style "this occurrence / this and following / entire
-      // series" scope picker so the host can choose how the change applies.
       recurrenceRule: true,
       cohort: { select: { id: true, name: true } },
       invites: {
         include: {
-          user: {
-            select: { id: true, name: true, email: true, role: true, avatarUrl: true },
-          },
+          user: { select: { id: true, name: true, email: true, role: true, avatarUrl: true } },
         },
       },
     },
@@ -74,19 +78,19 @@ export default async function EditSessionPage({ params }: PageProps) {
     }),
   ])
 
-  const initialInvitees =
-    s.visibility === SessionVisibility.INVITE_ONLY
-      ? s.invites.map((i) => ({
-          id: i.user.id,
-          name: i.user.name,
-          email: i.user.email,
-          role: i.user.role,
-          avatarUrl: i.user.avatarUrl,
-        }))
-      : []
+  // Invitees are orthogonal to other audience axes now — surface them whenever
+  // they exist on the session, regardless of cohort / openToAll.
+  const initialInvitees = s.invites.map((i) => ({
+    id: i.user.id,
+    name: i.user.name,
+    email: i.user.email,
+    role: i.user.role,
+    avatarUrl: i.user.avatarUrl,
+  }))
 
   return (
     <div className="space-y-6">
+      {/* Hero header */}
       <div className="relative overflow-hidden rounded-2xl bg-linear-to-br from-amber-500/15 via-orange-500/10 to-transparent border border-amber-500/20 px-6 py-5">
         <div className="absolute -right-8 -top-8 size-40 rounded-full bg-amber-400/10 blur-2xl pointer-events-none" />
         <div className="relative flex items-center gap-4">
@@ -96,36 +100,41 @@ export default async function EditSessionPage({ params }: PageProps) {
           <div>
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Edit Session</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Visibility tier is locked once created. Time changes may require re-approval if you’re not the host.
+              Host and session format are locked, but the audience is editable — add a cohort, toggle anyone-with-link, or change invitees anytime. Time changes may require re-approval.
             </p>
           </div>
         </div>
       </div>
 
-      <EditSessionForm
-        sessionId={s.id}
-        initial={{
-          title: s.title,
-          description: s.description,
-          sessionType: s.sessionType,
-          hostId: s.hostId,
-          topicId: s.topicId,
-          scheduledStart: s.scheduledStart.toISOString(),
-          scheduledEnd: s.scheduledEnd.toISOString(),
-          visibility: s.visibility,
-          cohort: s.cohort,
-          invitees: initialInvitees,
-          recordingEnabled: s.recordingEnabled,
-          consentRequired: s.consentRequired,
-          maxParticipants: s.maxParticipants,
-          objectives: (s.objectives as Array<{ id: string; text: string; blooms: number }> | null) ?? [],
-          metadata: s.metadata,
-          recurrenceRule: s.recurrenceRule,
-        }}
+      <NewSessionForm
         faculty={faculty}
         cohorts={cohorts.map((c) => ({ id: c.id, name: c.name, memberCount: c._count.members }))}
         topics={topics}
         currentUserId={session.user.id}
+        currentUserRole={session.user.role}
+        editing={{
+          sessionId: s.id,
+          initial: {
+            title: s.title,
+            description: s.description,
+            sessionType: s.sessionType as
+              | 'LECTURE' | 'GRAND_ROUNDS' | 'CASE_CONFERENCE'
+              | 'JOURNAL_CLUB' | 'SKILLS_WORKSHOP' | 'ASSESSMENT',
+            hostId: s.hostId,
+            topicId: s.topicId,
+            scheduledStart: s.scheduledStart.toISOString(),
+            scheduledEnd: s.scheduledEnd.toISOString(),
+            openToAll: s.openToAll,
+            cohortId: s.cohortId,
+            invitees: initialInvitees,
+            recordingEnabled: s.recordingEnabled,
+            consentRequired: s.consentRequired,
+            objectives:
+              (s.objectives as Array<{ id: string; text: string; blooms: number }> | null) ?? [],
+            prereq: readPrereq(s.metadata),
+            recurrenceRule: s.recurrenceRule,
+          },
+        }}
       />
     </div>
   )

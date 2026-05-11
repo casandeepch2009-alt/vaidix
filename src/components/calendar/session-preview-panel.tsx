@@ -51,7 +51,7 @@ interface SessionPreview {
   scheduledStart: string
   scheduledEnd: string
   isRecurring: boolean
-  visibility: string
+  openToAll: boolean
   host: { id: string; name: string; email: string; role: string } | null
   cohort: {
     id: string
@@ -555,7 +555,7 @@ export function SessionPreviewPanel({ event, allEvents, onClose, onNavigate }: S
                         <FacultyBlock host={preview.host} />
                       </div>
                       <div className="rounded-xl border border-border bg-muted/20 p-4">
-                        <CohortSummary cohort={preview.cohort} visibility={preview.visibility} />
+                        <CohortSummary cohort={preview.cohort} openToAll={preview.openToAll} />
                       </div>
                     </div>
 
@@ -706,10 +706,10 @@ function FacultyBlock({ host }: { host: SessionPreview['host'] }) {
 
 function CohortSummary({
   cohort,
-  visibility,
+  openToAll,
 }: {
   cohort: SessionPreview['cohort']
-  visibility: string
+  openToAll: boolean
 }) {
   return (
     <div>
@@ -726,7 +726,7 @@ function CohortSummary({
         </>
       ) : (
         <p className="text-sm text-muted-foreground">
-          {visibility === 'OPEN_TO_ALL' ? 'Open to all learners' : 'Invite-only session'}
+          {openToAll ? 'Anyone with link can join' : 'Invite-only session'}
         </p>
       )}
     </div>

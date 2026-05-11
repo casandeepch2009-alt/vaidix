@@ -55,7 +55,7 @@ export async function userCanViewSession(actor: RecordingAccessActor, sessionId:
     select: {
       id: true,
       hostId: true,
-      visibility: true,
+      openToAll: true,
       cohortId: true,
       proposedBy: true,
       participants: { where: { userId: actor.userId }, select: { userId: true } },
@@ -67,19 +67,19 @@ export async function userCanViewSession(actor: RecordingAccessActor, sessionId:
   // Host / proposer can always view.
   if (session.hostId === actor.userId || session.proposedBy === actor.userId) return true;
 
-  // Participant of the session can view.
+  // Participant of the session (joined while it was live) can view.
   if (session.participants.length > 0) return true;
 
-  // Visibility rules.
-  if (session.visibility === 'OPEN_TO_ALL') return true;
-  if (session.visibility === 'COHORT' && session.cohortId && actor.role === Role.RESIDENT) {
+  // Audience axes — any match grants playback access.
+  if (session.openToAll) return true;
+  if (session.cohortId && actor.role === Role.RESIDENT) {
     const member = await db.cohortMember.findUnique({
       where: { cohortId_userId: { cohortId: session.cohortId, userId: actor.userId } },
       select: { userId: true },
     });
     if (member) return true;
   }
-  if (session.visibility === 'INVITE_ONLY' && session.invites.length > 0) return true;
+  if (session.invites.length > 0) return true;
 
   // Faculty default: any approved session in their institution
   if (actor.role === Role.FACULTY) return true;

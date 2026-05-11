@@ -18,6 +18,8 @@ import { startRetentionWorker } from './retention-worker';          // item #16
 import { startDsrExportWorker } from './dsr-export-worker';         // item #17
 import { startErasureWorker } from './erasure-worker';              // item #17
 import { startDlqWatchers } from './dlq-watcher';                    // item #8
+import { startAiHookGeneratorWorker } from './ai-hook-generator-worker'; // W8.1
+import { startPostSessionPackWorker } from './post-session-pack-worker';  // W8.3
 import { log } from '@/lib/log';
 
 const workers = [
@@ -33,6 +35,8 @@ const workers = [
   startRetentionWorker(),
   startDsrExportWorker(),
   startErasureWorker(),
+  startAiHookGeneratorWorker(),
+  startPostSessionPackWorker(),
 ];
 
 const dlqWatchers = startDlqWatchers();

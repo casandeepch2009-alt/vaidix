@@ -110,29 +110,33 @@ export function LoginForm() {
             transition={{ duration: 0.5 }}
             className="flex items-center gap-3"
           >
-            <div
-              className="flex h-12 w-12 items-center justify-center rounded-2xl"
-              style={{
-                background:
-                  'linear-gradient(135deg, rgba(20,184,166,0.35) 0%, rgba(124,58,237,0.25) 100%)',
-                border: '1.5px solid rgba(94,234,212,0.5)',
-                boxShadow: '0 0 20px rgba(20,184,166,0.3), inset 0 1px 0 rgba(255,255,255,0.2)',
-              }}
-            >
-              <svg viewBox="0 0 36 36" fill="none" width="22" height="22">
-                <circle cx="18" cy="18" r="14" stroke="url(#vlogo)" strokeWidth="3" fill="none" />
-                <circle cx="18" cy="18" r="6" fill="url(#vlogo2)" />
-                <defs>
-                  <linearGradient id="vlogo" x1="4" y1="4" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#5EEAD4" />
-                    <stop offset="1" stopColor="#A78BFA" />
-                  </linearGradient>
-                  <linearGradient id="vlogo2" x1="12" y1="12" x2="24" y2="24" gradientUnits="userSpaceOnUse">
-                    <stop stopColor="#FCD34D" />
-                    <stop offset="1" stopColor="#5EEAD4" />
-                  </linearGradient>
-                </defs>
-              </svg>
+            <div className="relative flex h-14 w-14 items-center justify-center">
+              {/* Pulsing radial halo — anchors the mark on the dark gradient */}
+              <motion.span
+                aria-hidden
+                className="absolute -inset-3 rounded-full"
+                style={{
+                  background:
+                    'radial-gradient(circle, rgba(94,234,212,0.55) 0%, rgba(96,165,250,0.35) 45%, transparent 72%)',
+                  filter: 'blur(10px)',
+                }}
+                animate={{ opacity: [0.55, 0.95, 0.55], scale: [1, 1.08, 1] }}
+                transition={{ duration: 3.5, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src="/logo.png"
+                alt="Vaidix"
+                width={56}
+                height={56}
+                className="relative h-14 w-14 object-contain"
+                style={{
+                  // 1px tight white halo outlines the blue strokes against the blue bg;
+                  // softer white + teal + blue layers stack a multi-color glow.
+                  filter:
+                    'drop-shadow(0 0 1px rgba(255,255,255,0.95)) drop-shadow(0 0 5px rgba(255,255,255,0.45)) drop-shadow(0 0 14px rgba(94,234,212,0.6)) drop-shadow(0 0 22px rgba(96,165,250,0.45))',
+                }}
+              />
             </div>
             <div>
               <span className="text-2xl font-bold tracking-tight text-white">
@@ -162,7 +166,7 @@ export function LoginForm() {
             </p>
             <p className="mt-4 text-sm leading-relaxed" style={{ color: 'rgba(226,232,240,0.6)' }}>
               Every case. Every conversation. Every scoring event — preserved as part of your
-              clinical reasoning journey at LVPEI.
+              clinical reasoning journey.
             </p>
           </motion.div>
 
@@ -174,7 +178,7 @@ export function LoginForm() {
             style={{ color: 'rgba(226,232,240,0.5)' }}
           >
             <ShieldCheck className="size-4" />
-            DPDPA 2023 compliant · All data stays at LVPEI
+            Secure · Invite-only access
           </motion.div>
         </div>
       </div>
@@ -188,7 +192,7 @@ export function LoginForm() {
           className="w-full max-w-md"
         >
           <div className="mb-8 lg:hidden">
-            <div className="flex items-center gap-2 text-2xl font-bold">
+            <div className="flex items-center gap-2 text-2xl font-bold text-slate-900">
               Vai<span className="text-teal-600">dix</span>
             </div>
           </div>
@@ -210,10 +214,10 @@ export function LoginForm() {
           )}
 
           <form onSubmit={handleSubmit} className="mt-8 space-y-5" noValidate>
-            {/* Identifier — accepts email, mobile, or username */}
+            {/* Identifier — accepts email or mobile */}
             <div>
               <label htmlFor="identifier" className="mb-1.5 block text-sm font-medium text-slate-700">
-                Email, mobile, or username
+                Email or mobile number
               </label>
               <div className="relative">
                 <AtSign className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
@@ -228,7 +232,7 @@ export function LoginForm() {
                     if (fieldErrors.identifier) setFieldErrors((p) => ({ ...p, identifier: '' }));
                   }}
                   onBlur={(e) => validateField('identifier', e.target.value)}
-                  placeholder="you@lvpei.org / 9XXXXXXXXX / your.username"
+                  placeholder="you@hospital.com / 98765 43210"
                   disabled={loading}
                   aria-invalid={!!fieldErrors.identifier}
                   aria-describedby={fieldErrors.identifier ? 'identifier-error' : 'identifier-help'}
@@ -244,7 +248,7 @@ export function LoginForm() {
                 <p id="identifier-error" className="mt-1.5 text-xs text-red-600">{fieldErrors.identifier}</p>
               ) : (
                 <p id="identifier-help" className="mt-1.5 text-xs text-slate-500">
-                  Use any of the three you set up at registration.
+                  Use the email or mobile number you registered with.
                 </p>
               )}
             </div>

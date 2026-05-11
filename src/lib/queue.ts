@@ -22,6 +22,10 @@ export const QUEUES = {
   PHI_SCAN: 'phi-scan',
   // W6.8 — Promo teaser video render (own queue so no co-tenant skipping)
   PROMO: 'promo-pipeline',
+  // W8.1 — AI hook auto-generator (15-min cadence per live session)
+  AI_HOOK: 'ai-hook',
+  // W8.3 — Post-session content pack (Pearl + QA + SJT + PBL via Claude)
+  POST_SESSION: 'post-session',
   // HARDENING-PLAN item #14
   AUDIT_WRITE: 'audit-write',
   // HARDENING-PLAN item #16

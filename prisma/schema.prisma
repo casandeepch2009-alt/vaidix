@@ -66,13 +66,6 @@ enum SessionApprovalStatus {
   CANCELLED
 }
 
-enum SessionVisibility {
-  OPEN_TO_ALL
-  COHORT
-  INVITE_ONLY
-  PRIVATE
-}
-
 enum SessionInviteStatus {
   INVITED
   ACCEPTED
@@ -187,6 +180,7 @@ enum PresenterAlertKind {
   ASK_QUESTION
   TOO_MUCH_LECTURE
   TIME_REMAINING
+  SILENT_PARTICIPANTS
 }
 
 enum PresenterAlertSeverity {
@@ -208,6 +202,18 @@ enum CaseDifficulty {
   BEGINNER
   INTERMEDIATE
   ADVANCED
+}
+
+enum CaseTemplateStatus {
+  /// Faculty draft — visible only to the owner. Result of an AI forge or
+  /// hand-authored. Cannot be assigned to residents.
+  DRAFT
+  /// Promoted to the program case bank — any resident in the program can
+  /// reach it via /cases. Set when faculty clicks Publish.
+  PUBLISHED
+  /// Removed from the bank. Past Conversation rows survive for audit but
+  /// the template is hidden from new resident-side queries.
+  ARCHIVED
 }
 
 enum CaseStatus {
@@ -262,6 +268,24 @@ enum DeckForgeSource {
   DOCUMENT // PDF / PPT / DOC / notes uploaded to /faculty/documents
   TRANSCRIPT // Forged from a recording's transcript
   HYBRID // Both a document and a transcript (slides cite both)
+}
+
+// Faculty intent at the start of the forge wizard. Branches the AI prompt
+// and the input rules.
+//   ENHANCE_EXISTING   — exactly 1 PRIMARY_PPTX + 0..N SOURCE refs. AI keeps
+//                        the deck shape, proposes content/density/visual edits.
+//   DRAFT_FROM_SCRATCH — no PRIMARY_PPTX, 1..N SOURCE / PRIOR_TRANSCRIPT.
+//                        AI authors a deck from briefing + extracted content.
+enum DeckForgeIntent {
+  ENHANCE_EXISTING
+  DRAFT_FROM_SCRATCH
+}
+
+// Role of each Document attached to a DeckForgeJob.
+enum DeckForgeInputRole {
+  PRIMARY_PPTX // Faculty's deck-to-enhance. ENHANCE_EXISTING only, exactly 1.
+  SOURCE // Reference material the AI reads to compose / enhance content.
+  PRIOR_TRANSCRIPT // A previous session transcript — "I've taught this before."
 }
 
 enum SlideLayout {
@@ -481,6 +505,8 @@ model User {
   breakoutAssignments     BreakoutParticipant[]
   recordingSharesCreated  RecordingShare[]              @relation("RecordingShareCreator")
   recordingSharesRevoked  RecordingShare[]              @relation("RecordingShareRevoker")
+  promoSharesCreated      PromoShare[]                  @relation("PromoShareCreator")
+  promoSharesRevoked      PromoShare[]                  @relation("PromoShareRevoker")
   preQuestionsAsked       PreSessionQuestion[]
   preQuestionVotes        PreSessionQuestionVote[]
   sessionPreCases         SessionPreCase[]              @relation("SessionPreCaseAssigner")
@@ -492,6 +518,7 @@ model User {
   webinarRegistrations    WebinarRegistration[]
   sessionFilesUploaded    SessionFile[]                 @relation("SessionFileUploader")
   whiteboardSnapshots     WhiteboardSnapshot[]          @relation("WhiteboardSnapshotAuthor")
+  caseTemplatesAuthored   CaseTemplate[]                @relation("CaseTemplateOwner")
 
   @@index([email])
   @@index([role])
@@ -865,15 +892,37 @@ model CaseTemplate {
   createdAt                  DateTime       @default(now())
   updatedAt                  DateTime       @updatedAt
 
-  program         Program          @relation(fields: [programId], references: [id])
-  topic           Topic?           @relation(fields: [topicId], references: [id])
-  cases           Case[]
+  /// Forge / authoring metadata. ownerId is the faculty who authored or
+  /// forged this case. Pre-existing seeded templates have ownerId=null
+  /// (legacy) and status=PUBLISHED so they keep showing in the resident bank.
+  ownerId          String?
+  status           CaseTemplateStatus @default(PUBLISHED)
+  sourceDocumentId String?
+  /// Per-stage AI-mentor guidance — populated by case-forge. Shape:
+  /// { patientStory: { mentorIntro, expectedQuestions[], keyFacts[] },
+  ///   observation:  { ... }, hypothesis: { differentials[], rationale },
+  ///   investigation: { workups[], rationale },
+  ///   reflection:    { teachingPoints[], pearls[] } }
+  stageGuidance    Json?
+  /// Router-v2 analysis result for the AI Coach (review + design passes).
+  /// Shape mirrors DeckForgeJob.analysisResult.
+  analysisResult   Json?
+  forgedAt         DateTime?
+
+  program        Program          @relation(fields: [programId], references: [id])
+  topic          Topic?           @relation(fields: [topicId], references: [id])
+  owner          User?            @relation("CaseTemplateOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  sourceDocument Document?        @relation("CaseTemplateSource", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  cases          Case[]
   sessionPreCases SessionPreCase[]
 
   @@index([programId])
   @@index([specialty])
   @@index([difficulty])
   @@index([topicId])
+  @@index([ownerId])
+  @@index([status])
+  @@index([sourceDocumentId])
   @@map("case_templates")
 }
 
@@ -1051,10 +1100,11 @@ model Pearl {
   topicId           String?
   /// W6.11 tenancy. Pearls library is per-program.
   programId         String
-  sourceType        String // 'recording' | 'document' | 'manual' | 'ai_extracted'
-  sourceRecordingId String?
-  sourceDocumentId  String?
-  extractedByAi     Boolean   @default(false)
+  sourceType               String // 'recording' | 'document' | 'manual' | 'session_transcript'
+  sourceRecordingId        String?
+  sourceDocumentId         String?
+  sourceSessionTranscriptId String? // W8.3 — set when extracted from live session transcript
+  extractedByAi            Boolean   @default(false)
   approved          Boolean   @default(false)
   approvedById      String?
   approvedAt        DateTime?
@@ -1070,6 +1120,7 @@ model Pearl {
   @@index([topicId])
   @@index([approved])
   @@index([sourceRecordingId])
+  @@index([sourceSessionTranscriptId])
   @@map("pearls")
 }
 
@@ -1396,7 +1447,11 @@ model TeachingSession {
   hostId              String
   status              SessionStatus         @default(SCHEDULED)
   approvalStatus      SessionApprovalStatus @default(DRAFT)
-  visibility          SessionVisibility     @default(OPEN_TO_ALL)
+  /// Anyone with the share-link can join the live call + chat. Independent of
+  /// cohortId / invites — set any combination. List-surface visibility is
+  /// driven by cohort membership / invite presence; openToAll alone makes a
+  /// session link-joinable but not auto-listed in anyone's feed.
+  openToAll           Boolean               @default(false)
   proposedBy          String
   approvedBy          String?
   approvedAt          DateTime?
@@ -1466,18 +1521,116 @@ model TeachingSession {
   preCases               SessionPreCase[]
   studyPackViews         StudyPackView[]
   objectiveAchievements  SessionObjectiveAchievement[]
+  liveTranscripts        SessionTranscript[]
+  promoShares            PromoShare[]
 
   @@index([programId])
   @@index([hostId])
   @@index([proposedBy])
   @@index([approvalStatus])
-  @@index([visibility])
+  @@index([openToAll])
   @@index([cohortId])
   @@index([status])
   @@index([scheduledStart])
   @@index([scheduledEnd])
   @@index([parentSessionId])
   @@map("teaching_sessions")
+}
+
+// Live captions persistence — written incrementally during a session by the
+// captions producer (Deepgram for English; Sarvam for Indic in Phase 2). Kept
+// distinct from `Transcript` (which is recordingId-keyed and produced by the
+// post-recording batch transcribe-worker against the recorded audio file).
+//
+// Why a separate model: not every session is recorded (recordingEnabled may
+// be false), and even for recorded sessions the live transcript is available
+// minutes earlier than the post-batch one. Post-session export reads from
+// SessionTranscript first, falls back to Transcript when finalized=false.
+//
+// Storage shape: a single Json `segments` array per (session, language) row,
+// appended in-place by the publish endpoint. Cap enforced server-side
+// (LIVE_TRANSCRIPT_MAX_SEGMENTS) so a stuck producer can't unbounded-grow.
+model SessionTranscript {
+  id          String    @id @default(cuid())
+  sessionId   String
+  language    String // 'en' | 'hi' | 'te' | 'ta' | 'kn' | 'ml' | 'mr' | 'bn' | 'ur'
+  source      String    @default("deepgram") // 'deepgram' | 'sarvam' | 'manual'
+  /// Append-only array of finalized segments. Each entry:
+  /// `{ startMs, endMs, text, speakerId?, speakerName?, confidence? }`.
+  /// Partial (interim) Deepgram results are NOT persisted — only finals.
+  segments    Json      @default("[]")
+  /// Concatenated finalized text. Maintained in lockstep with `segments` so
+  /// the export endpoint and Gemini summary can read the full conversation
+  /// without parsing JSON. Cap mirrors `segments`.
+  contentText String    @default("") @db.Text
+  /// Set true when the producer signals end-of-session (or a worker sweeps
+  /// abandoned rows after timeout). Locks the row from further appends.
+  finalized   Boolean   @default(false)
+  startedAt   DateTime  @default(now())
+  finalizedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+
+  session      TeachingSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  qaPairs      PostSessionQa[]
+  sjtCases     SjtCase[]
+  pblScenarios PblScenario[]
+
+  @@unique([sessionId, language])
+  @@index([sessionId])
+  @@map("session_transcripts")
+}
+
+// ─── W8.3 Post-Session Content Pack ─────────────────────────────────────────
+
+model PostSessionQa {
+  id                  String   @id @default(cuid())
+  sessionTranscriptId String
+  question            String   @db.Text
+  answer              String   @db.Text
+  source              String   @default("claude") // 'claude' | 'faculty'
+  createdAt           DateTime @default(now())
+
+  transcript SessionTranscript @relation(fields: [sessionTranscriptId], references: [id], onDelete: Cascade)
+
+  @@index([sessionTranscriptId])
+  @@map("post_session_qa")
+}
+
+model SjtCase {
+  id                  String    @id @default(cuid())
+  sessionTranscriptId String
+  stem                String    @db.Text
+  options             Json      // string[]
+  correctIndex        Int?
+  rationale           String    @db.Text
+  createdByAi         Boolean   @default(true)
+  approved            Boolean   @default(false)
+  approvedById        String?
+  approvedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  transcript SessionTranscript @relation(fields: [sessionTranscriptId], references: [id], onDelete: Cascade)
+
+  @@index([sessionTranscriptId])
+  @@map("sjt_cases")
+}
+
+model PblScenario {
+  id                  String    @id @default(cuid())
+  sessionTranscriptId String
+  trigger             String    @db.Text
+  objectives          Json      // string[]
+  content             String    @db.Text
+  createdByAi         Boolean   @default(true)
+  approved            Boolean   @default(false)
+  approvedById        String?
+  approvedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  transcript SessionTranscript @relation(fields: [sessionTranscriptId], references: [id], onDelete: Cascade)
+
+  @@index([sessionTranscriptId])
+  @@map("pbl_scenarios")
 }
 
 model SessionParticipant {
@@ -1828,10 +1981,12 @@ model Document {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  uploader      User                  @relation("DocumentUploader", fields: [uploadedById], references: [id])
-  tags          DocumentTag[]
-  sessionLinks  DocumentSessionLink[]
-  deckForgeJobs DeckForgeJob[]
+  uploader         User                  @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  tags             DocumentTag[]
+  sessionLinks     DocumentSessionLink[]
+  deckForgeJobs    DeckForgeJob[]
+  deckForgeInputs  DeckForgeJobInput[]
+  forgedCases      CaseTemplate[]        @relation("CaseTemplateSource")
 
   @@index([uploadedById])
   @@index([status])
@@ -1873,12 +2028,14 @@ model DocumentSessionLink {
 
 model DeckForgeJob {
   id              String          @id @default(cuid())
-  // Source — either a Document (PDF/PPT/DOC/notes) or a Recording transcript.
-  // At least one of (documentId, recordingId) must be set; both may be set
-  // when slides are forged from a session that also has uploaded materials.
+  // Legacy source — jobs created via the document-detail "Forge presentation"
+  // quick-start (no briefing, no intent gate). Wizard jobs use `inputs` below.
   documentId      String?
   recordingId     String?
   sourceKind      DeckForgeSource @default(DOCUMENT)
+  // Wizard fields (Phase 1A redesign). Null on legacy quick-start jobs.
+  intent          DeckForgeIntent?
+  briefing        Json? // { audience, sessionType, durationMin, objectives, localContext }
   requestedById   String
   status          DeckForgeStatus @default(QUEUED)
   inputTitle      String?
@@ -1894,16 +2051,36 @@ model DeckForgeJob {
   createdAt       DateTime        @default(now())
   updatedAt       DateTime        @updatedAt
 
-  document    Document?  @relation(fields: [documentId], references: [id])
-  recording   Recording? @relation(fields: [recordingId], references: [id])
-  requestedBy User       @relation(fields: [requestedById], references: [id])
+  document    Document?           @relation(fields: [documentId], references: [id])
+  recording   Recording?          @relation(fields: [recordingId], references: [id])
+  requestedBy User                @relation(fields: [requestedById], references: [id])
   slides      Slide[]
+  inputs      DeckForgeJobInput[]
 
   @@index([documentId])
   @@index([recordingId])
   @@index([status])
   @@index([requestedById])
   @@map("deck_forge_jobs")
+}
+
+// One row per Document attached to a wizard-created DeckForgeJob. Lets one
+// job pull from multiple uploads — e.g. the faculty's existing .pptx +
+// a recent guideline PDF + last term's transcript.
+model DeckForgeJobInput {
+  id         String             @id @default(cuid())
+  jobId      String
+  documentId String
+  role       DeckForgeInputRole
+  createdAt  DateTime           @default(now())
+
+  job      DeckForgeJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  document Document     @relation(fields: [documentId], references: [id])
+
+  @@unique([jobId, documentId])
+  @@index([jobId])
+  @@index([documentId])
+  @@map("deck_forge_job_inputs")
 }
 
 // One row per slide produced by a DeckForgeJob. Slides are first-class:
@@ -2822,8 +2999,13 @@ model LiveHook {
   explanation     String?      @db.Text
   intervalSeconds Int? // if recurring (e.g., every 6–8 min)
   scheduledAt     DateTime? // when this hook should fire
-  firedAt         DateTime? // when it actually fired
+  firedAt         DateTime? // when it actually fired in-session
   closedAt        DateTime? // when it stopped accepting responses
+  /// W9.4 — when the presenter pre-published this hook for resident voting
+  /// BEFORE the live session starts. Independent of `firedAt`: a hook can be
+  /// pre-published only, fired-only, or both (responses aggregate). Null
+  /// means the hook is a draft hidden from residents.
+  prePublishedAt  DateTime?
   createdById     String
   createdAt       DateTime     @default(now())
 
@@ -2832,6 +3014,7 @@ model LiveHook {
 
   @@index([sessionId, scheduledAt])
   @@index([sessionId, firedAt])
+  @@index([sessionId, prePublishedAt])
   @@map("live_hooks")
 }
 
@@ -3039,6 +3222,43 @@ model RecordingShareAccess {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
+// W9 — Promo Share (public flyer / WA banner / IG card landing page)
+// ════════════════════════════════════════════════════════════════════════════
+// Faculty generates promo assets via /api/promo/generate then "shares" the
+// session by creating a PromoShare row. The token is the short URL slug at
+// /p/[token]; tokenHash is what we actually index on (raw token never stored).
+// Public route is unauthenticated and exposes session title, host, when,
+// objectives summary, and the generated SVG previews. Revocable; expires by
+// default in 90 days unless the speaker pins it open.
+model PromoShare {
+  id           String    @id @default(cuid())
+  sessionId    String
+  /// Raw URL token. Stored so the speaker can re-open an existing share
+  /// after reloading the prep panel (the share page is public marketing
+  /// material, not PHI — same threat model as a newsletter URL).
+  token        String    @unique
+  /// sha256 hex of the raw token. Kept for cheap defense-in-depth on the
+  /// public read path and to keep parity with RecordingShare's pattern.
+  tokenHash    String    @unique
+  expiresAt    DateTime
+  createdById  String
+  revokedAt    DateTime?
+  revokedById  String?
+  accessCount  Int       @default(0)
+  lastAccessAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  session   TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  createdBy User            @relation("PromoShareCreator", fields: [createdById], references: [id])
+  revokedBy User?           @relation("PromoShareRevoker", fields: [revokedById], references: [id])
+
+  @@index([sessionId])
+  @@index([expiresAt])
+  @@map("promo_shares")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
 // W6 — Pre-Conference Question Submission Engine (Feeddback #2)
 // ════════════════════════════════════════════════════════════════════════════
 // Residents submit questions ahead of a session and upvote others. A debounced
@@ -3064,6 +3284,7 @@ model PreSessionQuestion {
   urgency   PreSessionQuestionUrgency @default(NORMAL)
   themeId   String?
   voteCount Int                       @default(0)
+  parentId  String? // Single-level reply thread (self-FK; service rejects nested replies)
   createdAt DateTime                  @default(now())
   updatedAt DateTime                  @updatedAt
 
@@ -3071,11 +3292,14 @@ model PreSessionQuestion {
   user    User                     @relation(fields: [userId], references: [id])
   theme   PreSessionQuestionTheme? @relation(fields: [themeId], references: [id], onDelete: SetNull)
   votes   PreSessionQuestionVote[]
+  parent  PreSessionQuestion?      @relation("PreQuestionThread", fields: [parentId], references: [id], onDelete: Cascade)
+  replies PreSessionQuestion[]     @relation("PreQuestionThread")
 
   @@index([sessionId, voteCount])
   @@index([sessionId, createdAt])
   @@index([userId])
   @@index([themeId])
+  @@index([parentId])
   @@map("pre_session_questions")
 }
 

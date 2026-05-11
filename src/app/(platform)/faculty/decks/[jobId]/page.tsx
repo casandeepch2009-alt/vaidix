@@ -7,6 +7,7 @@ import { auth } from '@/auth';
 import { db } from '@/lib/db';
 import { Role } from '@prisma/client';
 import { DeckEditorClient } from './deck-editor-client';
+import { isRouterV2 } from '@/server/services/decks/deck-analyze-service';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,7 @@ export default async function FacultyDeckEditorPage({
         speakerNotes: s.speakerNotes,
         accentHex: s.accentHex,
       }))}
+      initialAnalysis={isRouterV2(job.analysisResult) ? job.analysisResult : null}
     />
   );
 }

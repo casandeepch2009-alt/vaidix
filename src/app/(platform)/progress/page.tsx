@@ -490,7 +490,7 @@ function MetricTile({
         </div>
         <div>
           {loading ? (
-            <Skeleton className="h-7 w-12" />
+            <div className="h-7 w-12 animate-pulse rounded-md bg-muted" />
           ) : empty ? (
             <p className="text-2xl font-bold tabular-nums text-muted-foreground/50">—</p>
           ) : (

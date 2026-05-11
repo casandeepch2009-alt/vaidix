@@ -10,13 +10,15 @@
 
 import Link from 'next/link'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Bell, Check, Loader2 } from 'lucide-react'
+import { Bell, Check, ChevronRight, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { csrfHeaders } from '@/lib/csrf-client'
+import { ensureCsrfHeaders } from '@/lib/csrf-client'
 
 const POLL_INTERVAL_MS = 30_000
+// Popover shows a short stack; full history lives on /inbox.
+const POPOVER_LIMIT = 10
 const KIND_LABELS: Record<string, string> = {
   'session.proposed':    'Approval needed',
   'session.approved':    'Session approved',
@@ -47,7 +49,9 @@ interface ListResponse {
 }
 
 async function fetchList(onlyUnread = false): Promise<ListResponse['data']> {
-  const url = onlyUnread ? '/api/notifications?unread=1&limit=1' : '/api/notifications?limit=30'
+  const url = onlyUnread
+    ? '/api/notifications?unread=1&limit=1'
+    : `/api/notifications?limit=${POPOVER_LIMIT}`
   const res = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const body = (await res.json()) as ListResponse | { ok: false }
@@ -122,10 +126,11 @@ export function NotificationBell() {
       )
       setUnread((c) => Math.max(0, c - 1))
       try {
+        const headers = await ensureCsrfHeaders()
         await fetch(`/api/notifications/${n.id}/read`, {
           method: 'PATCH',
           credentials: 'same-origin',
-          headers: csrfHeaders(),
+          headers,
         })
       } catch {
         // If the PATCH fails the next poll will reconcile.
@@ -141,10 +146,13 @@ export function NotificationBell() {
     setItems((prev) => prev.map((x) => (x.readAt ? x : { ...x, readAt: now })))
     setUnread(0)
     try {
+      // Bootstrap the CSRF cookie if this is the user's first mutation of the
+      // session — otherwise the POST 403s and the badge re-appears on refresh.
+      const headers = await ensureCsrfHeaders()
       await fetch('/api/notifications/mark-all-read', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: csrfHeaders(),
+        headers,
       })
     } catch {
       // Reconcile on next poll.
@@ -186,7 +194,7 @@ export function NotificationBell() {
           </div>
 
           {/* Body */}
-          <div className="max-h-112 overflow-y-auto">
+          <div className="max-h-96 overflow-y-auto">
             {loading && !hydrated ? (
               <div className="flex items-center justify-center px-4 py-12 text-muted-foreground">
                 <Loader2 className="size-4 animate-spin" />
@@ -247,6 +255,16 @@ export function NotificationBell() {
               </ul>
             )}
           </div>
+
+          {/* Footer — always link to the full inbox so older items are reachable */}
+          <Link
+            href="/inbox"
+            onClick={() => setOpen(false)}
+            className="flex items-center justify-between border-t border-border/40 px-4 py-2.5 text-[12px] font-medium text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          >
+            <span>View all notifications</span>
+            <ChevronRight className="size-3.5" />
+          </Link>
         </div>
       )}
     </div>

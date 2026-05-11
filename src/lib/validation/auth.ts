@@ -26,7 +26,7 @@ import { MODULE_KEYS } from '../modules';
 // — never both — and folds the value into `identifier` after parsing.
 export const loginSchema = z
   .object({
-    identifier: z.string().min(1, 'Email, mobile, or username is required').max(254).optional(),
+    identifier: z.string().min(1, 'Email or mobile number is required').max(254).optional(),
     email: z.string().min(1).max(254).optional(),
     password: z.string().min(1, 'Password is required').max(128),
     rememberMe: z.boolean().optional().default(false),
@@ -37,7 +37,7 @@ export const loginSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['identifier'],
-        message: 'Email, mobile, or username is required',
+        message: 'Email or mobile number is required',
       });
       return z.NEVER;
     }
@@ -74,7 +74,7 @@ export const forgotPasswordSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['identifier'],
-        message: 'Email, mobile, or username is required',
+        message: 'Email or mobile number is required',
       });
       return z.NEVER;
     }
@@ -170,6 +170,17 @@ export const createInvitationSchema = z
     { path: ['yearOfResidency'], message: 'Year of residency required for residents' }
   );
 export type CreateInvitationInput = z.infer<typeof createInvitationSchema>;
+
+// ─── Bulk Create Invitations (admin Excel upload) ──────────────────────────
+// Wraps createInvitationSchema in an array. Per-row validation is identical
+// to the single-invite endpoint — the bulk route reuses the createInvitation
+// service for each row and reports per-row results (commit-successes shape).
+// Cap of 500 rows/batch keeps email + audit fan-out predictable; combined
+// with BULK_INVITATION_CREATE rate limit (5 batches/hour) → 2.5k invites/hr.
+export const bulkCreateInvitationsSchema = z.object({
+  rows: z.array(createInvitationSchema).min(1, 'At least one row required').max(500, 'Maximum 500 rows per batch'),
+});
+export type BulkCreateInvitationsInput = z.infer<typeof bulkCreateInvitationsSchema>;
 
 // ─── Update Invitation (admin) ──────────────────────────────────────────────
 // Mutates an existing PENDING invitation. Email is NOT editable (it's the

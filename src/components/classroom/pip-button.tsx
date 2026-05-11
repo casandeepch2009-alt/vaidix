@@ -19,8 +19,13 @@ import { Track } from 'livekit-client'
 import { useSessionEvents } from '@/hooks/use-session-events'
 import { cn } from '@/lib/utils'
 
-interface DocumentWithPip extends Document {
-  pictureInPictureEnabled?: boolean
+// Document with the PiP fields surfaced (lib.dom.d.ts already declares
+// `pictureInPictureEnabled` as required, but we still need the
+// `pictureInPictureElement` + `exitPictureInPicture` properties for
+// runtime feature detection in browsers that may not implement them).
+// Use intersection rather than `extends Document` so we don't fight
+// lib.dom's required typings on the inherited fields.
+type DocumentWithPip = Document & {
   pictureInPictureElement?: HTMLVideoElement | null
   exitPictureInPicture?: () => Promise<void>
 }

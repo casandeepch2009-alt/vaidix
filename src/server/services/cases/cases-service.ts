@@ -76,7 +76,13 @@ export interface ListTemplatesOptions {
 }
 
 export async function listCaseTemplates(opts: ListTemplatesOptions): Promise<CaseTemplateView[]> {
-  const where: Prisma.CaseTemplateWhereInput = { programId: opts.programId };
+  // Resident-facing list only sees PUBLISHED templates. DRAFT (in-progress
+  // forges) and ARCHIVED (faculty-removed) are hidden — those surface in
+  // /faculty/cases for the case owner only.
+  const where: Prisma.CaseTemplateWhereInput = {
+    programId: opts.programId,
+    status: 'PUBLISHED',
+  };
   if (opts.difficulty) where.difficulty = opts.difficulty;
   if (typeof opts.bloomsLevel === 'number') where.bloomsLevel = opts.bloomsLevel;
   if (opts.specialty) where.specialty = opts.specialty;
@@ -125,6 +131,7 @@ export async function getCaseTemplate(idOrLegacyId: string, programId: string): 
   const t = await db.caseTemplate.findFirst({
     where: {
       programId,
+      status: 'PUBLISHED',
       OR: [{ id: idOrLegacyId }, { legacyId: idOrLegacyId }],
     },
     include: {

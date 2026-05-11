@@ -19,14 +19,21 @@ import {
   Tldraw,
   type Editor,
   type StoreSnapshot,
+  type TLEditorSnapshot,
   type TLRecord,
   loadSnapshot,
   getSnapshot,
 } from 'tldraw'
 import 'tldraw/tldraw.css'
 
+// `getSnapshot()` (tldraw v3+) returns the `TLEditorSnapshot` envelope
+// `{ document, session }`, not the lower-level `StoreSnapshot<TLRecord>`.
+// `loadSnapshot()` accepts either — it dispatches on shape internally — so
+// we type the imperative handle in terms of the value `getSnapshot()`
+// actually returns and cast at the `loadSnapshot` callsite (we accept
+// `unknown` from the network for incoming snapshots).
 interface SurfaceHandle {
-  getSnapshot: () => StoreSnapshot<TLRecord> | null
+  getSnapshot: () => TLEditorSnapshot | null
   loadSnapshot: (snapshot: unknown) => void
 }
 

@@ -76,7 +76,7 @@ export function Header() {
   const showRoleSwitcher = allRoles.length > 0
 
   return (
-    <header className="relative z-30 flex shrink-0 flex-col border-b border-border/70 bg-background/96 backdrop-blur-md">
+    <header className="relative z-30 flex shrink-0 flex-col border-b border-border/70 bg-background">
       {/* Impersonation banner — admin-only, only when actively switched */}
       {isImpersonating && (
         <div className="flex items-center justify-between gap-2 bg-amber-500/15 px-4 py-1.5 text-[11px] font-medium text-amber-900 dark:bg-amber-500/20 dark:text-amber-200 lg:px-6">

@@ -38,6 +38,7 @@ import {
   UsersRound,
   FolderOpen,
   Sparkles,
+  Wand2,
   type LucideIcon,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -87,6 +88,7 @@ const ICON_MAP: Record<string, LucideIcon> = {
   UsersRound,
   FolderOpen,
   Sparkles,
+  Wand2,
 }
 
 interface AppSidebarProps {
@@ -117,9 +119,20 @@ export function AppSidebar({ collapsed: controlledCollapsed, onToggle }: AppSide
         {/* Logo / Branding + Collapse toggle */}
         <div className={cn('flex h-14 shrink-0 items-center px-3', collapsed ? 'flex-col justify-center gap-1.5' : 'justify-between gap-2')}>
           <div className="flex items-center gap-2.5">
-            <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-linear-to-br from-teal-500 via-teal-600 to-blue-600 text-sm font-bold text-white shadow-lg shadow-teal-500/30">
-              V
-            </span>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/logo.png"
+              alt="Vaidix"
+              width={36}
+              height={36}
+              className="size-9 shrink-0 object-contain"
+              style={{
+                // Same outline+halo stack as the auth pages so the blue stroke
+                // stays readable on the light-teal sidebar background.
+                filter:
+                  'drop-shadow(0 0 1px rgba(15,23,42,0.45)) drop-shadow(0 0 4px rgba(255,255,255,0.55)) drop-shadow(0 0 10px rgba(20,184,166,0.45))',
+              }}
+            />
             {!collapsed && (
               <span className="bg-linear-to-r from-teal-700 to-blue-700 bg-clip-text text-lg font-bold tracking-tight text-transparent dark:from-teal-300 dark:to-blue-300">
                 Vaidix

@@ -1,17 +1,13 @@
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
-import { Pencil } from 'lucide-react'
+import { Pencil, BookOpen } from 'lucide-react'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
 import { LiveSession } from '@/components/classroom/live-session'
 import { PendingSessionManager } from '@/components/classroom/pending-session-manager'
-import { PreConferencePrepBlock } from '@/components/classroom/pre-conference-prep-block'
-import { PreConferenceResidentBlock } from '@/components/classroom/pre-conference-resident-block'
-import type { ObjectiveRow } from '@/components/classroom/objectives-chip-list'
+import { PostSessionInsightsPanel } from '@/components/classroom/post-session-insights-panel'
 import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
-import { computePrereqStatus, readPrereqConfig } from '@/server/services/sessions/prereq'
-
-interface StoredObjective { id: string; text: string; blooms: number }
+import { computePrereqStatus } from '@/server/services/sessions/prereq'
 
 interface PageProps {
   params: Promise<{ id: string }>
@@ -68,7 +64,7 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     ? new Date(next.getTime() + (s.scheduledEnd.getTime() - s.scheduledStart.getTime()))
     : s.scheduledEnd
 
-  const [host, proposer, topic, viewer] = await Promise.all([
+  const [host, proposer, viewer] = await Promise.all([
     db.user.findUnique({
       where: { id: s.hostId },
       select: { id: true, name: true, email: true, avatarUrl: true },
@@ -77,12 +73,6 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
       where: { id: s.proposedBy },
       select: { id: true, name: true },
     }),
-    s.topicId
-      ? db.topic.findUnique({
-          where: { id: s.topicId },
-          select: { name: true, subspecialty: true },
-        })
-      : Promise.resolve(null),
     // Authoritative profile lookup for the local viewer. The Vaidix flow
     // requires every joiner to be a registered user (no anonymous guests),
     // so we always have name / email / avatar on file — pull all three so
@@ -128,7 +118,11 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
   if (s.approvalStatus !== 'APPROVED') {
     return (
       <>
-        {canEdit && <EditSessionLink sessionId={s.id} />}
+        {canEdit && (
+          <div className="flex justify-end">
+            <EditSessionLink sessionId={s.id} />
+          </div>
+        )}
         <PendingSessionManager
           session={{
             id: s.id,
@@ -151,83 +145,43 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     )
   }
 
-  // W6.8 — for APPROVED-but-not-yet-LIVE sessions, show Pre-Conference Prep
-  // panels above the pre-join screen for host / faculty / PD / admin.
+  // Pre-conference prep (objectives, study pack, readiness, etc.) lives on
+  // /classroom/[id]/study now — surfaced via a shortcut for SCHEDULED sessions.
   const isCurator =
     session.user.id === s.hostId ||
     session.user.role === 'FACULTY' ||
     session.user.role === 'PROGRAM_DIRECTOR' ||
     session.user.role === 'ADMIN'
 
-  const showCuratorBlock = effectiveStatus === 'SCHEDULED' && isCurator
-  const showResidentBlock = effectiveStatus === 'SCHEDULED' && !isCurator
+  const showStudyHubLink = effectiveStatus === 'SCHEDULED'
 
   // Compute the prereq gate state for non-curators only — host/faculty/PD/admin
   // bypass the gate so they can always start/manage the room.
   const prereqStatus = !isCurator
     ? await computePrereqStatus(s.id, session.user.id)
     : null
-  const prereqConfig = readPrereqConfig(s.metadata)
 
-  // Always read this user's marks — used by both curator + resident blocks
-  // (curator sees their own marks too if attending another session as a learner).
-  const myMarks = await db.sessionObjectiveAchievement.findMany({
-    where: { sessionId: s.id, userId: session.user.id },
-    select: { objectiveId: true, status: true },
+  // W8.3 — render the post-session insights panel only when a finalized
+  // English transcript exists for this session. Cheap select, runs on every
+  // detail-page render but is a single indexed lookup.
+  const finalizedTranscript = await db.sessionTranscript.findUnique({
+    where: { sessionId_language: { sessionId: s.id, language: 'en' } },
+    select: { finalized: true },
   })
-
-  // Resident-facing prep counts — surfaced on the prep block so the CTAs are
-  // not blind links. Cheap COUNT-only queries; no list materialisation.
-  const [studyPackCount, preQuestionCount, myPreQuestionCount] = showResidentBlock
-    ? await Promise.all([
-        Promise.all([
-          db.documentSessionLink.count({
-            where: { sessionId: s.id, isPreSession: true },
-          }),
-          db.sessionPreCase.count({ where: { sessionId: s.id } }),
-        ]).then(([docs, cases]) => docs + cases),
-        db.preSessionQuestion.count({ where: { sessionId: s.id } }),
-        db.preSessionQuestion.count({
-          where: { sessionId: s.id, userId: session.user.id },
-        }),
-      ])
-    : [0, 0, 0]
-
-  const storedObjectives = (s.objectives as unknown as StoredObjective[] | null) ?? []
-  const markByObjId = new Map(myMarks.map((m) => [m.objectiveId, m.status]))
-  const objectiveRows: ObjectiveRow[] = storedObjectives.map((o) => ({
-    id: o.id,
-    text: o.text,
-    blooms: o.blooms,
-    myStatus: markByObjId.get(o.id) ?? null,
-  }))
+  const showInsights = !!finalizedTranscript?.finalized
+  const canTriggerInsights =
+    session.user.id === s.hostId ||
+    session.user.role === 'PROGRAM_DIRECTOR' ||
+    session.user.role === 'ADMIN'
 
   return (
     <>
-      {canEdit && <EditSessionLink sessionId={s.id} />}
-      {showCuratorBlock && (
-        <PreConferencePrepBlock
-          sessionId={s.id}
-          canCurate={
-            session.user.id === s.hostId ||
-            session.user.role === 'PROGRAM_DIRECTOR' ||
-            session.user.role === 'ADMIN'
-          }
-          objectives={objectiveRows}
-          topic={topic}
-          prereqConfig={prereqConfig}
-        />
-      )}
-      {showResidentBlock && (
-        <PreConferenceResidentBlock
-          sessionId={s.id}
-          studyPackCount={studyPackCount}
-          preQuestionCount={preQuestionCount}
-          myPreQuestionCount={myPreQuestionCount}
-          objectives={objectiveRows}
-          topic={topic}
-          prereqStatus={prereqStatus}
-        />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        {showStudyHubLink && <StudyHubLink sessionId={s.id} isCurator={isCurator} />}
+        {canEdit && <EditSessionLink sessionId={s.id} />}
+      </div>
+      {showInsights && (
+        <PostSessionInsightsPanel sessionId={s.id} canTrigger={canTriggerInsights} />
       )}
       <LiveSession
         session={{
@@ -242,6 +196,10 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           recordingEnabled: s.recordingEnabled,
           consentRequired: s.consentRequired,
           host: host ?? { id: s.hostId, name: 'Unknown host', email: '', avatarUrl: null },
+          // Live captions provider for this session, set at scheduling time.
+          // Read off the metadata bag the v2.8 form already persists into.
+          captionsProfile: ((s.metadata as { captionsProfile?: string } | null | undefined)
+            ?.captionsProfile ?? 'off') as 'english-only' | 'indic-mix' | 'off',
         }}
         currentUser={{
           id: session.user.id,
@@ -260,14 +218,24 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
 
 function EditSessionLink({ sessionId }: { sessionId: string }) {
   return (
-    <div className="flex justify-end">
-      <Link
-        href={`/classroom/${sessionId}/edit`}
-        className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-accent"
-      >
-        <Pencil className="size-3.5" />
-        Edit session
-      </Link>
-    </div>
+    <Link
+      href={`/classroom/${sessionId}/edit`}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground shadow-sm transition hover:bg-accent"
+    >
+      <Pencil className="size-3.5" />
+      Edit session
+    </Link>
+  )
+}
+
+function StudyHubLink({ sessionId, isCurator }: { sessionId: string; isCurator: boolean }) {
+  return (
+    <Link
+      href={`/classroom/${sessionId}/study`}
+      className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-1.5 text-xs font-semibold text-emerald-700 shadow-sm transition hover:bg-emerald-500/20 dark:text-emerald-400"
+    >
+      <BookOpen className="size-3.5" />
+      {isCurator ? 'Manage prep' : 'Open study hub'}
+    </Link>
   )
 }

@@ -18,7 +18,7 @@ import {
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
-import { csrfHeaders } from '@/lib/csrf-client'
+import { ensureCsrfHeaders } from '@/lib/csrf-client'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -145,10 +145,11 @@ export function InboxClient({ role }: { role: string }) {
       prev.map((x) => (x.id === n.id ? { ...x, readAt: new Date().toISOString() } : x))
     )
     try {
+      const headers = await ensureCsrfHeaders()
       await fetch(`/api/notifications/${n.id}/read`, {
         method: 'PATCH',
         credentials: 'same-origin',
-        headers: csrfHeaders(),
+        headers,
       })
     } catch { /* reconcile on next refresh */ }
   }
@@ -159,10 +160,12 @@ export function InboxClient({ role }: { role: string }) {
     const now = new Date().toISOString()
     setItems((prev) => prev.map((x) => (x.readAt ? x : { ...x, readAt: now })))
     try {
+      // First mutation of the session may not have a CSRF cookie yet — bootstrap.
+      const headers = await ensureCsrfHeaders()
       await fetch('/api/notifications/mark-all-read', {
         method: 'POST',
         credentials: 'same-origin',
-        headers: csrfHeaders(),
+        headers,
       })
     } finally {
       setBusyAll(false)
@@ -188,10 +191,11 @@ export function InboxClient({ role }: { role: string }) {
     const next = !current
     setPrefs((prev) => prev.map((p) => (p.kind === kind ? { ...p, enabled: next } : p)))
     try {
+      const headers = await ensureCsrfHeaders()
       await fetch('/api/notifications/preferences', {
         method: 'PUT',
         credentials: 'same-origin',
-        headers: { ...csrfHeaders(), 'Content-Type': 'application/json' },
+        headers: { ...headers, 'Content-Type': 'application/json' },
         body: JSON.stringify({ kind, channel: 'IN_APP', enabled: next }),
       })
     } catch {

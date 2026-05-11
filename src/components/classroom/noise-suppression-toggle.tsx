@@ -69,9 +69,18 @@ export function NoiseSuppressionToggle({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     const handler = () => void apply()
-    localParticipant.on('localTrackPublished' as never, handler)
+    // LiveKit's typed event-emitter overloads `on/off` per event name, and the
+    // `localTrackPublished` overload's handler signature `(publication,
+    // participant) => void` collapses our nullary handler to `never` when the
+    // event-name itself is cast. Use `EventEmitter`-shaped any to keep the
+    // wiring at runtime without contorting the typed overloads.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(localParticipant as any).on('localTrackPublished', handler)
     void apply()
-    return () => { localParticipant.off('localTrackPublished' as never, handler) }
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ;(localParticipant as any).off('localTrackPublished', handler)
+    }
   }, [localParticipant, apply])
 
   return null

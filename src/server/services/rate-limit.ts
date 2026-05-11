@@ -108,6 +108,12 @@ export const LIMITS = {
   FORGOT_PASSWORD: { limit: 3, windowSec: 60 * 60, failMode: 'closed' as const },
   ACCEPT_INVITE: { limit: 10, windowSec: 15 * 60, failMode: 'closed' as const },
   INVITATION_CREATE: { limit: 30, windowSec: 60 * 60, failMode: 'closed' as const },
+  // Bulk invite import (admin uploads .xlsx). 1 unit = 1 batch (NOT 1 row).
+  // Batch size is capped at 500 rows server-side, so 5 batches/hour caps the
+  // mail/audit fan-out at 2,500/hour per admin. Fail-closed because each row
+  // sends an email and writes audit rows — runaway retries on a Redis outage
+  // would burn outbound mail quota.
+  BULK_INVITATION_CREATE: { limit: 5, windowSec: 60 * 60, failMode: 'closed' as const },
 
   // General API — fail-open (read-heavy, low-risk).
   API_GENERAL: { limit: 300, windowSec: 60, failMode: 'open' as const },
@@ -115,6 +121,21 @@ export const LIMITS = {
   // ─── W4-Sprint ───────────────────────────────────────────────────────────
   DOCUMENT_UPLOAD: { limit: 30, windowSec: 60 * 60, failMode: 'open' as const },
   DOCUMENT_ANALYZE: { limit: 60, windowSec: 60 * 60, failMode: 'closed' as const }, // billable upstream
+  // Legacy single-source forge (document-detail "Forge presentation" button).
+  // 1 Gemini call per forge. Was previously referenced but missing — fixed.
+  DECK_FORGE: { limit: 30, windowSec: 60 * 60, failMode: 'closed' as const },
+  // Wizard forge runs Gemini-extract + Opus-draft in series (~2x cost +
+  // multimodal blob ingest). Tighter ceiling than legacy.
+  DECK_WIZARD_FORGE: { limit: 15, windowSec: 60 * 60, failMode: 'closed' as const },
+  // Deck analyze runs both Opus (review) and Sonnet (design) — twice as
+  // expensive as DOCUMENT_ANALYZE. Tighter ceiling.
+  DECK_ANALYZE: { limit: 30, windowSec: 60 * 60, failMode: 'closed' as const },
+  // Per-slide AI refine (faculty asks "tighten this" / "add evidence" via
+  // chat). Each call is a single Opus or Gemini hit.
+  DECK_REFINE: { limit: 120, windowSec: 60 * 60, failMode: 'closed' as const },
+  // Case-forge — heavy multimodal Gemini call. Tighter ceiling than deck-
+  // forge (cases are typically forged less often than decks per document).
+  CASE_FORGE: { limit: 20, windowSec: 60 * 60, failMode: 'closed' as const },
   HOOK_CREATE: { limit: 60, windowSec: 60 * 60, failMode: 'open' as const },
   HOOK_RESPOND: { limit: 200, windowSec: 60 * 60, failMode: 'open' as const },
   WHATSAPP_SEND: { limit: 100, windowSec: 60 * 60, failMode: 'closed' as const }, // billable + abuse vector
@@ -131,4 +152,19 @@ export const LIMITS = {
   SHARED_NOTE_WRITE: { limit: 120, windowSec: 60, failMode: 'open' as const },
   SESSION_FILE_UPLOAD: { limit: 30, windowSec: 60 * 60, failMode: 'closed' as const },
   WEBINAR_REGISTER: { limit: 5, windowSec: 60 * 60, failMode: 'closed' as const },
+
+  // ─── W7.4 — Live captions ────────────────────────────────────────────────
+  // Token mint: one mint per session is the steady state, but reconnects on
+  // network blips can burst. Fail-closed: short-lived Deepgram tokens are
+  // billable upstream and a leak vector if uncapped.
+  CAPTIONS_TOKEN_MINT: { limit: 60, windowSec: 60 * 60, failMode: 'closed' as const },
+  // Publish: one POST per finalized Deepgram segment. ~3-5/sec during active
+  // speech is normal; cap at ~600/min/session = ~10/sec headroom. Fail-open
+  // because a dropped segment merely degrades the live overlay; users still
+  // see the audio, the post-recording transcript fills the gap.
+  CAPTIONS_PUBLISH: { limit: 600, windowSec: 60, failMode: 'open' as const },
+  // Translate: per-listener Gemini fan-out is the worst case. Fail-closed
+  // because Gemini is billable and a runaway re-render loop on the overlay
+  // shouldn't silently rack up cost.
+  CAPTIONS_TRANSLATE: { limit: 300, windowSec: 60 * 60, failMode: 'closed' as const },
 } as const;

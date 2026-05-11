@@ -95,6 +95,11 @@ export const authConfig: NextAuthConfig = {
         // route handler enforces token + optional password + expiry/revoke.
         /^\/api\/recordings\/share\/[^/]+$/.test(nextUrl.pathname) ||
         /^\/recordings\/share\/[^/]+$/.test(nextUrl.pathname) ||
+        // W9 — Promo share links (`/p/[token]` and `/api/p/[token]`) follow
+        // the same hashed-token model. The handler enforces expiry/revoke;
+        // middleware just needs to let the request through.
+        /^\/p\/[^/]+$/.test(nextUrl.pathname) ||
+        /^\/api\/p\/[^/]+$/.test(nextUrl.pathname) ||
         // Live-captions ingest is bearer-token authed inside the route handler
         // (LiveKit Agent uses a shared secret, not session cookies).
         /^\/api\/classroom\/sessions\/[^/]+\/live-captions\/ingest$/.test(nextUrl.pathname);

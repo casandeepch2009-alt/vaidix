@@ -9,7 +9,6 @@ import { buildApprovalGate, buildSessionVisibilityWhere } from './sessions/visib
 import {
   SessionApprovalStatus,
   SessionStatus,
-  SessionVisibility,
   Role,
   type TeachingSession,
 } from '@prisma/client';
@@ -22,7 +21,7 @@ export interface CalendarEvent {
   end: string;                 // ISO
   status: SessionStatus;
   approvalStatus: SessionApprovalStatus;
-  visibility: SessionVisibility;
+  openToAll: boolean;
   sessionType: string;
   host: { id: string; name: string; role: string } | null;
   isRecurring: boolean;
@@ -67,7 +66,7 @@ async function buildVisibilityWhere(userId: string, role: Role, from: Date, to: 
 function expandOccurrences(
   session: Pick<
     TeachingSession,
-    'id' | 'title' | 'sessionType' | 'scheduledStart' | 'scheduledEnd' | 'recurrenceRule' | 'recurrenceUntil' | 'status' | 'approvalStatus' | 'visibility' | 'cohortId'
+    'id' | 'title' | 'sessionType' | 'scheduledStart' | 'scheduledEnd' | 'recurrenceRule' | 'recurrenceUntil' | 'status' | 'approvalStatus' | 'openToAll' | 'cohortId'
   > & { host: { id: string; name: string; role: string } | null; cohortName: string | null },
   from: Date,
   to: Date
@@ -86,7 +85,7 @@ function expandOccurrences(
         end: session.scheduledEnd.toISOString(),
         status: session.status,
         approvalStatus: session.approvalStatus,
-        visibility: session.visibility,
+        openToAll: session.openToAll,
         sessionType: session.sessionType,
         host: session.host,
         isRecurring: false,
@@ -120,7 +119,7 @@ function expandOccurrences(
       end: occEnd.toISOString(),
       status: session.status,
       approvalStatus: session.approvalStatus,
-      visibility: session.visibility,
+      openToAll: session.openToAll,
       sessionType: session.sessionType,
       host: session.host,
       isRecurring: true,
@@ -169,7 +168,7 @@ export async function listCalendarEvents(
       recurrenceUntil: true,
       status: true,
       approvalStatus: true,
-      visibility: true,
+      openToAll: true,
       cohortId: true,
       hostId: true,
     },

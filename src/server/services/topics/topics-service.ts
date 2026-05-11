@@ -30,9 +30,57 @@ export interface TopicDetail extends TopicSummary {
 }
 
 export class TopicError extends Error {
-  constructor(public readonly code: 'NOT_FOUND', message: string) {
+  constructor(public readonly code: 'NOT_FOUND' | 'INVALID_NAME', message: string) {
     super(message);
   }
+}
+
+function slugifyTopicName(name: string): string {
+  const base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+  return base || 'topic';
+}
+
+export async function createTopic(
+  input: { name: string; subspecialty?: string | null },
+  programId: string,
+): Promise<{ id: string; name: string; subspecialty: string | null }> {
+  const name = input.name.trim();
+  if (!name) throw new TopicError('INVALID_NAME', 'Topic name is required');
+
+  // Slug must be unique within program; on collision append -2, -3, …
+  const baseSlug = slugifyTopicName(name);
+  let slug = baseSlug;
+  for (let n = 2; n < 50; n++) {
+    const taken = await db.topic.findFirst({
+      where: { programId, slug },
+      select: { id: true },
+    });
+    if (!taken) break;
+    slug = `${baseSlug}-${n}`;
+  }
+
+  // Push new topics to the end of their group rather than colliding on order 0.
+  const last = await db.topic.aggregate({
+    where: { programId },
+    _max: { displayOrder: true },
+  });
+  const displayOrder = (last._max.displayOrder ?? 0) + 1;
+
+  const created = await db.topic.create({
+    data: {
+      programId,
+      name,
+      slug,
+      subspecialty: input.subspecialty?.trim() || null,
+      displayOrder,
+    },
+    select: { id: true, name: true, subspecialty: true },
+  });
+  return created;
 }
 
 export async function listTopics(opts: {

@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Calendar, dateFnsLocalizer, Views, type View, type SlotInfo } from 'react-big-calendar'
 import {
   format, parse, startOfWeek, getDay, startOfMonth, endOfMonth,
-  addMonths, addWeeks, addDays, setMonth, setYear, formatDistanceToNow, isFuture,
-  differenceInMinutes, isToday as dateFnsIsToday, startOfDay,
+  addMonths, addWeeks, addDays, setMonth, setYear,
+  differenceInMinutes, isToday as dateFnsIsToday,
 } from 'date-fns'
 import { enUS } from 'date-fns/locale'
 import { useRouter } from 'next/navigation'
@@ -15,11 +15,12 @@ import 'react-big-calendar/lib/css/react-big-calendar.css'
 import { cn } from '@/lib/utils'
 import {
   ChevronLeft, ChevronRight, CalendarDays, List, LayoutGrid,
-  Clock, Loader2, AlertCircle, Video, Radio, Users, RefreshCw,
+  Clock, Loader2, AlertCircle, Video, Users, RefreshCw,
   BookOpen, Activity, Search, BookMarked, Wrench, ClipboardList,
 } from 'lucide-react'
 import type { SessionActivitySummary } from '@/app/api/calendar/session-activity-batch/route'
 import { SessionPreviewPanel } from '@/components/calendar/session-preview-panel'
+import { sessionBucket } from '@/lib/sessions/buckets'
 
 const locales = { 'en-US': enUS }
 const localizer = dateFnsLocalizer({ format, parse, startOfWeek, getDay, locales })
@@ -32,7 +33,7 @@ interface ApiEvent {
   end: string
   status: 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED'
   approvalStatus: 'DRAFT' | 'PENDING_FACULTY' | 'APPROVED' | 'REJECTED' | 'CANCELLED'
-  visibility: 'OPEN_TO_ALL' | 'COHORT' | 'INVITE_ONLY' | 'PRIVATE'
+  openToAll: boolean
   sessionType: string
   host: { id: string; name: string; role: string } | null
   isRecurring: boolean
@@ -58,12 +59,12 @@ interface CalendarViewProps {
 // ─── Status helpers ───────────────────────────────────────────────────────────
 
 function eventColor(e: ApiEvent): { bg: string; text: string; dot: string; border: string } {
-  if (e.status === 'LIVE')                                   return { bg: '#dcfce7', text: '#15803d', dot: '#16a34a', border: '#86efac' }
-  if (e.approvalStatus === 'APPROVED')                       return { bg: 'oklch(0.45 0.15 165 / 0.08)', text: 'oklch(0.35 0.15 165)', dot: 'oklch(0.45 0.15 165)', border: 'oklch(0.45 0.15 165 / 0.3)' }
-  if (e.approvalStatus === 'PENDING_FACULTY')                return { bg: '#fef9c3', text: '#b45309', dot: '#d97706', border: '#fcd34d' }
-  if (e.approvalStatus === 'DRAFT')                          return { bg: '#f1f5f9', text: '#475569', dot: '#94a3b8', border: '#cbd5e1' }
-  if (e.approvalStatus === 'CANCELLED' || e.status === 'CANCELLED') return { bg: '#fef2f2', text: '#9f1239', dot: '#f43f5e', border: '#fca5a5' }
-  return { bg: 'oklch(0.45 0.15 165 / 0.08)', text: 'oklch(0.35 0.15 165)', dot: 'oklch(0.45 0.15 165)', border: 'oklch(0.45 0.15 165 / 0.3)' }
+  if (e.status === 'LIVE')                                   return { bg: '#dcfce7', text: '#14532d', dot: '#16a34a', border: '#4ade80' }
+  if (e.approvalStatus === 'APPROVED')                       return { bg: '#d1fae5', text: '#064e3b', dot: '#059669', border: '#6ee7b7' }
+  if (e.approvalStatus === 'PENDING_FACULTY')                return { bg: '#fef3c7', text: '#78350f', dot: '#d97706', border: '#fbbf24' }
+  if (e.approvalStatus === 'DRAFT')                          return { bg: '#f1f5f9', text: '#334155', dot: '#64748b', border: '#94a3b8' }
+  if (e.approvalStatus === 'CANCELLED' || e.status === 'CANCELLED') return { bg: '#fee2e2', text: '#7f1d1d', dot: '#ef4444', border: '#fca5a5' }
+  return { bg: '#d1fae5', text: '#064e3b', dot: '#059669', border: '#6ee7b7' }
 }
 
 function statusLabel(e: ApiEvent): string {
@@ -98,15 +99,14 @@ function EventTile({ event }: { event: CalEvent }) {
   const label = statusLabel(r)
   return (
     <div
-      className="flex h-full min-h-6 items-start gap-1 overflow-hidden rounded-md px-1.5 py-0.5"
+      className="flex h-full min-h-6 flex-col items-center justify-center overflow-hidden rounded-md px-1.5 py-0.5 text-center gap-0.5"
       style={{ background: c.bg, borderLeft: `3px solid ${c.dot}` }}
     >
-      <span className="mt-px shrink-0 size-1.5 rounded-full" style={{ background: c.dot, marginTop: '5px' }} />
-      <span className="truncate text-[11px] font-semibold leading-tight" style={{ color: c.text }}>
+      <span className="truncate w-full text-[11px] font-semibold leading-tight" style={{ color: c.text }}>
         {event.title}
       </span>
       {label === 'LIVE' && (
-        <span className="ml-auto shrink-0 rounded-full bg-green-500 px-1 py-0 text-[9px] font-bold text-white leading-tight mt-px">
+        <span className="shrink-0 rounded-full bg-green-500 px-1.5 py-0 text-[9px] font-bold text-white leading-tight">
           LIVE
         </span>
       )}
@@ -530,10 +530,22 @@ function SessionsFeed({
   activityMap: Record<string, SessionActivitySummary>
 }) {
   const grouped = useMemo(() => {
-    const todayStart = startOfDay(new Date())
-    const filtered = events.filter((e) =>
-      mode === 'upcoming' ? e.start >= todayStart : e.start < todayStart
-    )
+    // Use the shared bucketing helper so this list stays in sync with the
+    // /classroom feed. A LIVE session is treated as upcoming for agenda
+    // purposes (it's still actionable from the user's perspective).
+    // Date.now() is impure but acceptable here — the memo recomputes when
+    // events/mode change, which is exactly when a fresh "now" is wanted.
+    // eslint-disable-next-line react-hooks/purity
+    const now = Date.now()
+    const filtered = events.filter((e) => {
+      const bucket = sessionBucket(
+        { status: e.resource.status, scheduledStart: e.start, scheduledEnd: e.end },
+        now,
+      )
+      return mode === 'upcoming'
+        ? bucket === 'upcoming' || bucket === 'live'
+        : bucket === 'past'
+    })
     const sorted = [...filtered].sort((a, b) => a.start.getTime() - b.start.getTime())
     const map = new Map<string, CalEvent[]>()
     for (const e of sorted) {
@@ -609,19 +621,6 @@ export function CalendarView({ canCreate, userRole }: CalendarViewProps) {
 
   const isOrganizer = userRole ? ORGANIZER_ROLES.includes(userRole) : false
 
-  const upcomingSession = useMemo(() => {
-    const upcoming = events
-      .filter(
-        (e) =>
-          isFuture(e.start) &&
-          e.resource.approvalStatus !== 'CANCELLED' &&
-          e.resource.status !== 'CANCELLED'
-      )
-      .sort((a, b) => a.start.getTime() - b.start.getTime())
-    const live = events.find((e) => e.resource.status === 'LIVE')
-    return live ?? upcoming[0] ?? null
-  }, [events])
-
   const fetchEvents = useCallback(async (anchor: Date) => {
     setLoading(true)
     setError(null)
@@ -691,6 +690,18 @@ export function CalendarView({ canCreate, userRole }: CalendarViewProps) {
     []
   )
 
+  const scrollToTime = useMemo(() => {
+    const d = new Date()
+    d.setHours(9, 0, 0, 0)
+    return d
+  }, [])
+
+  const slotPropGetter = useCallback((date: Date) => {
+    const h = date.getHours()
+    if (h < 9 || h >= 18) return { className: 'rbc-off-hours' }
+    return {}
+  }, [])
+
   return (
     <>
       <SessionPreviewPanel
@@ -700,90 +711,50 @@ export function CalendarView({ canCreate, userRole }: CalendarViewProps) {
         onNavigate={navigateToSession}
       />
 
-      {/* Upcoming session spotlight — organizer/faculty only */}
-      {isOrganizer && upcomingSession && !loading && (
-        <div
-          className={cn(
-            'mb-4 flex cursor-pointer items-center gap-4 rounded-xl border px-4 py-3 transition hover:opacity-90',
-            upcomingSession.resource.status === 'LIVE'
-              ? 'border-green-200 bg-green-50/80 dark:border-green-800 dark:bg-green-950/30'
-              : 'border-primary/20 bg-primary/5'
-          )}
-          onClick={() => setSelectedEvent(upcomingSession)}
-        >
-          <div
-            className={cn(
-              'flex size-9 shrink-0 items-center justify-center rounded-xl',
-              upcomingSession.resource.status === 'LIVE'
-                ? 'bg-green-100 dark:bg-green-900/40'
-                : 'bg-primary/10'
-            )}
-          >
-            {upcomingSession.resource.status === 'LIVE' ? (
-              <Radio className="size-4 text-green-600" />
-            ) : (
-              <Video className="size-4 text-primary" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p
-              className={cn(
-                'text-[10px] font-bold uppercase tracking-widest',
-                upcomingSession.resource.status === 'LIVE' ? 'text-green-600' : 'text-primary'
-              )}
-            >
-              {upcomingSession.resource.status === 'LIVE' ? 'Live now' : 'Next session'}
-            </p>
-            <p className="truncate text-sm font-semibold text-foreground">
-              {upcomingSession.title}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {upcomingSession.resource.status === 'LIVE'
-                ? `Started ${formatDistanceToNow(upcomingSession.start)} ago`
-                : `Starts ${formatDistanceToNow(upcomingSession.start, { addSuffix: true })}`}
-            </p>
-          </div>
-          {upcomingSession.resource.status === 'LIVE' && (
-            <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-green-500 px-3 py-1 text-[11px] font-bold text-white">
-              <span className="relative flex size-1.5">
-                <span className="absolute inline-flex size-full animate-ping rounded-full bg-white opacity-75" />
-                <span className="relative inline-flex size-1.5 rounded-full bg-white" />
-              </span>
-              LIVE
-            </span>
-          )}
-          {upcomingSession.resource.host && (
-            <div className="flex shrink-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground">
-              <Users className="size-3" />
-              {upcomingSession.resource.host.name}
-            </div>
-          )}
-        </div>
-      )}
-
       {/* Vaidix overrides for react-big-calendar */}
       <style>{`
         .rbc-calendar { font-family: inherit; }
+
+        /* ── Month view ── */
         .rbc-header { border-bottom: 1px solid hsl(var(--border)); padding: 8px 6px; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: hsl(var(--muted-foreground)); background: transparent; }
-        .rbc-month-view { border: none; border-radius: 0; }
+        .rbc-month-view { border: none; }
         .rbc-month-row { border-top: 1px solid hsl(var(--border)); }
         .rbc-day-bg { border-left: 1px solid hsl(var(--border)); }
-        .rbc-day-bg.rbc-today { background: oklch(0.45 0.15 165 / 0.06); }
+        .rbc-day-bg.rbc-today { background: oklch(0.45 0.15 165 / 0.04); }
         .rbc-date-cell { padding: 4px 8px; font-size: 12px; font-weight: 600; color: hsl(var(--muted-foreground)); }
         .rbc-date-cell.rbc-now { color: oklch(0.45 0.15 165); font-weight: 800; }
         .rbc-date-cell.rbc-off-range { opacity: 0.35; }
+        .rbc-show-more { font-size: 11px; font-weight: 700; color: oklch(0.45 0.15 165); padding: 0 4px; }
+        .rbc-show-more:hover { text-decoration: underline; }
+
+        /* ── Events ── */
         .rbc-event { background: transparent !important; border: none !important; padding: 1px 2px !important; }
         .rbc-event:focus, .rbc-event.rbc-selected { outline: none !important; box-shadow: none !important; }
         .rbc-event.rbc-selected .rounded-md { outline: 2px solid oklch(0.45 0.15 165); outline-offset: 1px; }
-        .rbc-show-more { font-size: 11px; font-weight: 700; color: oklch(0.45 0.15 165); padding: 0 4px; }
-        .rbc-show-more:hover { text-decoration: underline; }
+        /* Hide the "9:00 AM – 10:00 AM" label RBC overlays on top of our EventTile */
+        .rbc-event-label { display: none !important; }
+
+        /* ── Time grid ── */
+        .rbc-toolbar { display: none; }
         .rbc-time-view { border: none; }
         .rbc-time-header { border-bottom: 1px solid hsl(var(--border)); }
-        .rbc-time-content { border-top: 1px solid hsl(var(--border)); }
-        .rbc-timeslot-group { border-bottom: 1px solid hsl(var(--border) / 0.5); }
-        .rbc-time-slot { color: hsl(var(--muted-foreground)); font-size: 11px; }
-        .rbc-current-time-indicator { background: oklch(0.45 0.15 165); }
-        .rbc-toolbar { display: none; }
+        .rbc-time-content { border-top: none; }
+        /* 1-hour slot groups only — clean single horizontal rule per hour */
+        .rbc-timeslot-group { border-bottom: 1px solid hsl(var(--border) / 0.5); min-height: 64px; }
+        .rbc-time-slot { border-top: none !important; }
+        /* Vertical column separators */
+        .rbc-day-slot { border-left: 1px solid hsl(var(--border) / 0.45); }
+        .rbc-current-time-indicator { background: oklch(0.45 0.15 165); height: 2px; }
+        /* Time-gutter labels — snap to grid line, Teams-style */
+        .rbc-time-gutter .rbc-time-slot { display: flex; align-items: flex-start; justify-content: flex-end; padding-right: 10px; }
+        .rbc-label { font-size: 11px; font-weight: 600; color: hsl(var(--muted-foreground)); transform: translateY(-8px); letter-spacing: 0.01em; }
+
+        /* ── Working / off hours (Teams-style) ── */
+        /* Off hours: neutral cool-gray, no brand tint */
+        .rbc-off-hours { background-color: hsl(220 13% 96%) !important; }
+        .rbc-off-hours .rbc-time-slot { color: hsl(var(--muted-foreground) / 0.4); }
+        /* Today column: very subtle brand tint only in working hours */
+        .rbc-day-slot.rbc-today { background: oklch(0.45 0.15 165 / 0.025); }
       `}</style>
 
       <div className="rounded-2xl border border-border bg-card shadow-sm">
@@ -879,9 +850,14 @@ export function CalendarView({ canCreate, userRole }: CalendarViewProps) {
                   views={[Views.MONTH, Views.WEEK, Views.DAY, Views.AGENDA]}
                   popup
                   selectable={canCreate}
+                  step={60}
+                  timeslots={1}
+                  formats={{ timeGutterFormat: 'h a' }}
                   onSelectEvent={onSelectEvent}
                   onSelectSlot={onSelectSlot}
                   eventPropGetter={eventPropGetter}
+                  slotPropGetter={slotPropGetter}
+                  scrollToTime={scrollToTime}
                   components={components}
                   startAccessor="start"
                   endAccessor="end"

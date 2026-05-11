@@ -14,6 +14,7 @@ interface UpcomingTraining {
   title: string;
   day: string;
   time: string;
+  startsAt: string; // ISO — used for client-side countdown
   faculty: string;
   type: string;
   isLive: boolean;
@@ -90,6 +91,7 @@ export async function GET() {
       title: s.title,
       day: formatDay(s.scheduledStart, now),
       time: formatTime(s.scheduledStart),
+      startsAt: s.scheduledStart.toISOString(),
       faculty: s.host?.name ?? 'TBA',
       type: TYPE_LABEL[s.sessionType] ?? s.sessionType,
       isLive: s.status === SessionStatus.LIVE,

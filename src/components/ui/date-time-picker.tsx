@@ -34,7 +34,7 @@ function formatDisplay(val: string) {
   if (!p) return null
   const date = new Date(p.year, p.month - 1, p.day, p.hour, p.minute)
   return {
-    date: date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }),
+    date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
     time: date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true }),
   }
 }
@@ -67,9 +67,9 @@ interface DateTimePickerProps {
   compact?: boolean
 }
 
-// Conservative panel-height estimate for direction detection. Calendar view
-// is the tallest at ~480px (header + 6-week grid + time picker + confirm).
-const PANEL_H = 480
+// Panel-height estimate for direction detection. Calendar view
+// is the tallest at ~360px after compaction.
+const PANEL_H = 360
 
 type View = 'calendar' | 'year' | 'month'
 
@@ -117,7 +117,7 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
   const openPicker = useCallback(() => {
     if (buttonRef.current) {
       const r = buttonRef.current.getBoundingClientRect()
-      const panelWidth = 360
+      const panelWidth = 300
       const left = Math.min(r.left, window.innerWidth - panelWidth - 8)
       // Open upward only when there's clearly not enough room below AND
       // there's more room above. Otherwise default to opening down.
@@ -234,23 +234,22 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
     minParsed !== null &&
     (viewYear < minParsed.year || (viewYear === minParsed.year && mo < minParsed.month))
   const isYearDisabled = (y: number) => minParsed !== null && y < minParsed.year
-  // Resulting commit value is invalid iff selected day equals min's day AND
-  // chosen hour:minute is before min's hour:minute.
+  // Inline warning when picked time is before `min` on min's own day. Disabled
+  // days in the grid prevent the day-before-min case from being reachable via
+  // the calendar; if it happens via external state the form-level validator
+  // (end > start) catches it.
   const selH24 = ampm === 'AM' ? (hour === 12 ? 0 : hour) : (hour === 12 ? 12 : hour + 12)
   const selTime = selH24 * 60 + minute
   const onMinDay =
     minDayKey !== null && selDay > 0 && dayKey(selYear, selMonth, selDay) === minDayKey
   const timeBeforeMin = onMinDay && selTime < minTime
-  const dayBeforeMin =
-    minDayKey !== null && selDay > 0 && dayKey(selYear, selMonth, selDay) < minDayKey
-  const isInvalid = dayBeforeMin || timeBeforeMin
 
   const yearRange = Array.from({ length: 12 }, (_, i) => now.getFullYear() - 3 + i)
   const display = formatDisplay(value)
 
   return (
-    <div className="space-y-2">
-      <label className="flex items-center gap-1 text-sm font-semibold text-foreground">
+    <div className="space-y-1.5">
+      <label className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
         {label}
         {required && <span className="text-destructive">*</span>}
       </label>
@@ -260,25 +259,44 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
         type="button"
         onClick={openPicker}
         className={cn(
-          'flex w-full items-center gap-2.5 rounded-xl border-2 bg-card text-sm transition-all text-left',
-          compact ? 'px-3 py-1.5' : 'px-3.5 py-2.5',
+          'group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 p-3.5 text-left transition-all duration-200',
           open
-            ? 'border-primary shadow-[0_0_0_4px_oklch(0.45_0.15_165/0.12)]'
-            : 'border-input hover:border-primary/40',
-          !value && 'text-muted-foreground'
+            ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10'
+            : value
+              ? 'border-primary/20 bg-linear-to-br from-primary/5 to-card hover:border-primary/40 hover:shadow-md hover:shadow-primary/8'
+              : 'border-dashed border-border/70 bg-card hover:border-primary/40 hover:bg-accent/20',
         )}
       >
-        <Calendar className="size-4 shrink-0 text-muted-foreground" />
+        {/* Subtle shine layer when filled */}
+        {value && (
+          <span className="pointer-events-none absolute inset-0 bg-linear-to-br from-primary/8 via-transparent to-transparent" />
+        )}
+
+        {/* Icon container */}
+        <span className={cn(
+          'relative flex size-10 shrink-0 items-center justify-center rounded-xl transition-all duration-200',
+          value
+            ? 'bg-primary text-primary-foreground shadow-md shadow-primary/30'
+            : 'bg-muted text-muted-foreground group-hover:bg-primary/10 group-hover:text-primary',
+        )}>
+          <Calendar className="size-4" />
+        </span>
+
+        {/* Text */}
         {display ? (
-          <span className="flex flex-1 items-center gap-2 font-medium text-foreground">
-            <span>{display.date}</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="text-primary">{display.time}</span>
+          <span className="relative flex-1 min-w-0">
+            <span className="block text-sm font-semibold leading-tight text-foreground">{display.date}</span>
+            <span className="mt-0.5 flex items-center gap-1">
+              <Clock className="size-3 text-primary/70" />
+              <span className="text-xs font-semibold text-primary tabular-nums">{display.time}</span>
+            </span>
           </span>
         ) : (
-          <span className="flex-1">{`Pick ${label.toLowerCase()} date & time`}</span>
+          <span className="relative flex-1 min-w-0">
+            <span className="block text-[13px] font-medium text-muted-foreground">Select date</span>
+            <span className="mt-0.5 block text-[11px] text-muted-foreground/50">Tap to pick</span>
+          </span>
         )}
-        <Clock className="size-4 shrink-0 text-muted-foreground" />
       </button>
 
       {mounted &&
@@ -291,11 +309,11 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: panelPos.openUp ? 8 : -8, scale: 0.96 }}
                 transition={{ duration: 0.15, ease: 'easeOut' }}
-                style={{ top: panelPos.top, left: panelPos.left, width: 360 }}
-                className="fixed z-9999 max-w-[calc(100vw-16px)] overflow-hidden rounded-2xl border border-border bg-card shadow-2xl shadow-black/20"
+                style={{ top: panelPos.top, left: panelPos.left, width: 300 }}
+                className="fixed z-9999 max-w-[calc(100vw-16px)] overflow-hidden rounded-xl border border-border bg-card shadow-xl shadow-black/15"
               >
                 {/* Header strip */}
-                <div className="bg-linear-to-r from-teal-500/10 via-blue-500/5 to-transparent px-4 py-3 flex items-center justify-between border-b border-border">
+                <div className="bg-linear-to-r from-teal-500/10 via-blue-500/5 to-transparent px-3 py-2 flex items-center justify-between border-b border-border">
                   {view === 'year' ? (
                     <>
                       <button
@@ -303,10 +321,10 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                         onClick={() => setView('calendar')}
                         className="flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
                       >
-                        <ChevronLeft className="size-3.5" /> Back
+                        <ChevronLeft className="size-3" /> Back
                       </button>
-                      <span className="text-sm font-bold text-foreground">Select year</span>
-                      <span className="w-10" />
+                      <span className="text-xs font-bold text-foreground">Select year</span>
+                      <span className="w-8" />
                     </>
                   ) : view === 'month' ? (
                     <>
@@ -315,24 +333,24 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                         onClick={() => setView('calendar')}
                         className="flex items-center gap-1 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors"
                       >
-                        <ChevronLeft className="size-3.5" /> Back
+                        <ChevronLeft className="size-3" /> Back
                       </button>
-                      <span className="text-sm font-bold text-foreground">Select month · {viewYear}</span>
-                      <span className="w-10" />
+                      <span className="text-xs font-bold text-foreground">Select month · {viewYear}</span>
+                      <span className="w-8" />
                     </>
                   ) : (
                     <>
                       <button
                         type="button"
                         onClick={prevMonth}
-                        className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                       >
-                        <ChevronLeft className="size-4" />
+                        <ChevronLeft className="size-3.5" />
                       </button>
                       <button
                         type="button"
                         onClick={() => setView('year')}
-                        className="group flex items-center gap-1 text-sm font-bold text-foreground hover:text-primary transition-colors"
+                        className="group flex items-center gap-1 text-xs font-bold text-foreground hover:text-primary transition-colors"
                       >
                         <span>{MONTHS[viewMonth - 1]}</span>
                         <span className="text-muted-foreground group-hover:text-primary">{viewYear}</span>
@@ -340,9 +358,9 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                       <button
                         type="button"
                         onClick={nextMonth}
-                        className="flex size-7 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                        className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
                       >
-                        <ChevronRight className="size-4" />
+                        <ChevronRight className="size-3.5" />
                       </button>
                     </>
                   )}
@@ -357,7 +375,7 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
                       transition={{ duration: 0.12 }}
-                      className="grid grid-cols-4 gap-1.5 p-3 max-h-52 overflow-y-auto"
+                      className="grid grid-cols-4 gap-1 p-2 max-h-44 overflow-y-auto"
                     >
                       {yearRange.map((y) => {
                         const disabled = isYearDisabled(y)
@@ -368,7 +386,7 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                             disabled={disabled}
                             onClick={() => { if (disabled) return; setViewYear(y); setView('month') }}
                             className={cn(
-                              'rounded-xl py-2 text-sm font-semibold transition-all',
+                              'rounded-lg py-1.5 text-xs font-semibold transition-all',
                               disabled
                                 ? 'cursor-not-allowed text-muted-foreground/40'
                                 : viewYear === y
@@ -388,7 +406,7 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: -20 }}
                       transition={{ duration: 0.12 }}
-                      className="grid grid-cols-3 gap-1.5 p-3"
+                      className="grid grid-cols-3 gap-1 p-2"
                     >
                       {MONTHS.map((m, i) => {
                         const disabled = isMonthDisabled(i + 1)
@@ -399,7 +417,7 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                             disabled={disabled}
                             onClick={() => { if (disabled) return; setViewMonth(i + 1); setView('calendar') }}
                             className={cn(
-                              'rounded-xl py-2 text-xs font-semibold transition-all',
+                              'rounded-lg py-1.5 text-xs font-semibold transition-all',
                               disabled
                                 ? 'cursor-not-allowed text-muted-foreground/40'
                                 : viewMonth === i + 1 && viewYear === selYear
@@ -419,29 +437,29 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                       animate={{ opacity: 1, x: 0 }}
                       exit={{ opacity: 0, x: monthDir * -20 }}
                       transition={{ duration: 0.12 }}
-                      className="p-3"
+                      className="p-2"
                     >
                       {/* Day headers */}
-                      <div className="grid grid-cols-7 mb-1">
+                      <div className="grid grid-cols-7 mb-0.5">
                         {DAYS_SHORT.map((d) => (
-                          <div key={d} className="flex h-7 items-center justify-center text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                          <div key={d} className="flex h-6 items-center justify-center text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
                             {d}
                           </div>
                         ))}
                       </div>
                       {/* Date grid */}
-                      <div className="grid grid-cols-7 gap-y-0.5">
+                      <div className="grid grid-cols-7 gap-y-0">
                         {cells.map((day, i) => {
                           const disabled = day !== null && isDayDisabled(day)
                           return (
-                            <div key={i} className="flex h-9 items-center justify-center">
+                            <div key={i} className="flex h-7 items-center justify-center">
                               {day !== null && (
                                 <button
                                   type="button"
                                   disabled={disabled}
                                   onClick={() => selectDay(day)}
                                   className={cn(
-                                    'size-8 rounded-xl text-sm font-medium transition-all',
+                                    'size-7 rounded-lg text-xs font-medium transition-all',
                                     disabled
                                       ? 'cursor-not-allowed text-muted-foreground/35 line-through decoration-1'
                                       : isSelected(day)
@@ -463,71 +481,50 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                   )}
                 </AnimatePresence>
 
-                {/* Time picker */}
-                <div className="border-t border-border bg-muted/30 px-4 py-3">
-                  <p className="mb-2 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                {/* Time picker — values auto-commit; click outside closes the panel.
+                    Spinner controls are hidden so the box stays clean; users edit by
+                    typing or by tapping AM/PM. Tailwind arbitrary CSS handles the
+                    cross-browser spinner suppression inline. */}
+                <div className="border-t border-border bg-muted/30 px-3 py-3">
+                  <p className="mb-2 flex items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
                     <Clock className="size-3" /> Time
                   </p>
-                  <div className="flex items-center gap-1.5">
-                    <div className="flex items-center rounded-xl border border-input bg-card px-0.5 py-0.5">
-                      <button
-                        type="button"
-                        onClick={() => changeHour(hour - 1 < 1 ? 12 : hour - 1)}
-                        className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                      >
-                        <ChevronLeft className="size-3.5" />
-                      </button>
+                  <div className="flex items-stretch gap-2">
+                    <div className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-card focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 transition-colors">
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={1}
                         max={12}
                         value={String(hour).padStart(2, '0')}
                         onChange={(e) => changeHour(Number(e.target.value))}
-                        className="w-8 bg-transparent text-center text-sm font-bold outline-none text-foreground"
+                        aria-label="Hour"
+                        className="w-10 bg-transparent text-center text-base font-bold tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                      <button
-                        type="button"
-                        onClick={() => changeHour(hour + 1 > 12 ? 1 : hour + 1)}
-                        className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                      >
-                        <ChevronRight className="size-3.5" />
-                      </button>
-                    </div>
-                    <span className="text-base font-bold text-muted-foreground">:</span>
-                    <div className="flex items-center rounded-xl border border-input bg-card px-0.5 py-0.5">
-                      <button
-                        type="button"
-                        onClick={() => changeMinute(minute - 5 < 0 ? 55 : Math.floor((minute - 1) / 5) * 5)}
-                        className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                      >
-                        <ChevronLeft className="size-3.5" />
-                      </button>
+                      <span className="text-base font-bold text-muted-foreground/60 select-none">:</span>
                       <input
                         type="number"
+                        inputMode="numeric"
                         min={0}
                         max={59}
+                        step={5}
                         value={String(minute).padStart(2, '0')}
                         onChange={(e) => changeMinute(Number(e.target.value))}
-                        className="w-8 bg-transparent text-center text-sm font-bold outline-none text-foreground"
+                        aria-label="Minute"
+                        className="w-10 bg-transparent text-center text-base font-bold tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
                       />
-                      <button
-                        type="button"
-                        onClick={() => changeMinute(minute + 5 > 59 ? 0 : Math.ceil((minute + 1) / 5) * 5)}
-                        className="flex size-6 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                      >
-                        <ChevronRight className="size-3.5" />
-                      </button>
                     </div>
-                    <div className="ml-auto flex shrink-0 rounded-xl border border-input bg-card p-0.5 gap-0.5">
+                    <div className="flex h-10 shrink-0 items-center rounded-lg border border-input bg-card p-0.5">
                       {(['AM', 'PM'] as const).map((v) => (
                         <button
                           key={v}
                           type="button"
                           onClick={() => toggleAmpm(v)}
+                          aria-pressed={ampm === v}
                           className={cn(
-                            'rounded-lg px-2 py-1 text-xs font-bold transition-all min-w-9',
+                            'flex h-full items-center rounded-md px-3 text-xs font-bold transition-all',
                             ampm === v
-                              ? 'bg-linear-to-br from-teal-500 to-blue-600 text-white shadow-sm'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
                               : 'text-muted-foreground hover:text-foreground'
                           )}
                         >
@@ -536,39 +533,18 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                       ))}
                     </div>
                   </div>
-                </div>
-
-                {/* Confirm */}
-                <div className="px-4 pb-4 pt-2 space-y-2">
                   {timeBeforeMin && minParsed && (
-                    <p className="text-[11px] font-medium text-amber-600">
-                      Earliest allowed time on this day is{' '}
+                    <p className="mt-2 flex items-center gap-1 text-[10px] font-medium text-amber-600">
+                      Earliest allowed:{' '}
                       {new Date(
                         minParsed.year,
                         minParsed.month - 1,
                         minParsed.day,
                         minParsed.hour,
                         minParsed.minute
-                      ).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}.
+                      ).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })}
                     </p>
                   )}
-                  <button
-                    type="button"
-                    disabled={!selDay || isInvalid}
-                    onClick={() => setOpen(false)}
-                    className={cn(
-                      'w-full rounded-xl py-2.5 text-sm font-bold transition-all',
-                      selDay && !isInvalid
-                        ? 'bg-linear-to-r from-teal-500 to-blue-600 text-white shadow-md shadow-teal-500/20 hover:opacity-90'
-                        : 'bg-muted text-muted-foreground cursor-not-allowed'
-                    )}
-                  >
-                    {!selDay
-                      ? 'Select a date first'
-                      : isInvalid
-                        ? 'Pick a later time'
-                        : `Confirm — ${display?.date ?? ''}`}
-                  </button>
                 </div>
               </motion.div>
             )}

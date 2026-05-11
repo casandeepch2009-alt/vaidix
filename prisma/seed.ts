@@ -100,15 +100,41 @@ const LEVELS = [
   { levelNumber: 4, name: 'Proficient', description: 'Teaching and supervising others', minMastery: 85 },
 ];
 
-// ─── Default passwords ────────────────────────────────────────────────────
-const DEFAULT_PASSWORD      = 'Vaidix@2026!';
-const DEMO_PASSWORD         = '12345678';
+// ─── Default passwords (DEMO ONLY) ────────────────────────────────────────
+// The admin password is sourced from ADMIN_PASSWORD env var (see below).
+// This constant is only the fallback for the 4 demo non-admin users.
+const DEMO_PASSWORD = '12345678';
+
+// Dev-only fallbacks for the admin bootstrap. Production MUST set the
+// ADMIN_* env vars — the seed throws if they're missing under NODE_ENV=production.
+const DEV_FALLBACK_ADMIN = {
+  email:    'sandeep@vaidix.local',
+  mobile:   '+919876543210',
+  name:     'Sandeep',
+  password: 'Vaidix@2026!',
+};
 
 async function main() {
   console.log('🌱 Seeding Vaidix database...\n');
 
-  const passwordHash     = await bcrypt.hash(DEFAULT_PASSWORD, 12);
-  const demoPasswordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
+  // ─── Admin bootstrap credentials (env-driven) ──────────────────────────
+  // Production REQUIRES ADMIN_EMAIL, ADMIN_MOBILE, ADMIN_PASSWORD.
+  // Dev/demo falls back to historical Sandeep defaults so local seeds work.
+  const isProd     = process.env.NODE_ENV === 'production';
+  const adminEmail    = process.env.ADMIN_EMAIL    ?? (isProd ? null : DEV_FALLBACK_ADMIN.email);
+  const adminMobile   = process.env.ADMIN_MOBILE   ?? (isProd ? null : DEV_FALLBACK_ADMIN.mobile);
+  const adminName     = process.env.ADMIN_NAME     ?? DEV_FALLBACK_ADMIN.name;
+  const adminPassword = process.env.ADMIN_PASSWORD ?? (isProd ? null : DEV_FALLBACK_ADMIN.password);
+
+  if (!adminEmail || !adminMobile || !adminPassword) {
+    throw new Error(
+      'Production seed requires ADMIN_EMAIL, ADMIN_MOBILE, and ADMIN_PASSWORD env vars. ' +
+        'Set them in the production .env before running `prisma db seed`.',
+    );
+  }
+
+  const adminPasswordHash = await bcrypt.hash(adminPassword, 12);
+  const demoPasswordHash  = await bcrypt.hash(DEMO_PASSWORD, 12);
 
   // ─── 0. PROGRAMS (W6.11 multi-tenancy) ────────────────────────────────────
   // Seeded before everything else because Cohort/TeachingSession/Topic/
@@ -170,11 +196,11 @@ async function main() {
   console.log(`👥 Seeding Users... (profile: ${SEED_DEMO ? 'DEMO' : 'PRODUCTION'})`);
 
   const adminUser = {
-    email:       'sandeep@vaidix.local',
-    mobile:      '+919876543210',
-    name:        'Sandeep',
+    email:       adminEmail,
+    mobile:      adminMobile,
+    name:        adminName,
     role:        Role.ADMIN,
-    hash:        passwordHash,
+    hash:        adminPasswordHash,
     affiliation: 'Vaidix Platform',
   };
 
@@ -218,9 +244,21 @@ async function main() {
   const usersToSeed = SEED_DEMO ? [adminUser, ...demoNonAdminUsers] : [adminUser];
 
   for (const u of usersToSeed) {
+    // Split user creation from its 1:1 child rows (profile / preferences /
+    // stats). Nesting them under a single upsert is brittle on re-runs: if a
+    // previous seed partially populated the DB (e.g. created the children
+    // then failed before linking, or the User was deleted but cascades
+    // didn't fire), the nested `create` block has no upsert mode and trips
+    // the unique constraint on `userId`. Independent upserts keyed on
+    // `userId` recover cleanly from any partial state.
     const userRow = await prisma.user.upsert({
       where: { email: u.email },
-      update: { mobile: u.mobile, passwordHash: u.hash, activeProgramId: DEFAULT_PROGRAM_ID },
+      update: {
+        mobile: u.mobile,
+        passwordHash: u.hash,
+        activeProgramId: DEFAULT_PROGRAM_ID,
+        status: UserStatus.ACTIVE,
+      },
       create: {
         email:           u.email,
         mobile:          u.mobile,
@@ -230,16 +268,27 @@ async function main() {
         passwordHash:    u.hash,
         emailVerifiedAt: new Date(),
         activeProgramId: DEFAULT_PROGRAM_ID,
-        profile: {
-          create: {
-            affiliation: u.affiliation,
-            languages:   ['en'],
-            timezone:    'Asia/Kolkata',
-          },
-        },
-        preferences: { create: {} },
-        stats:       { create: {} },
       },
+    });
+    await prisma.userProfile.upsert({
+      where:  { userId: userRow.id },
+      update: { affiliation: u.affiliation },
+      create: {
+        userId:      userRow.id,
+        affiliation: u.affiliation,
+        languages:   ['en'],
+        timezone:    'Asia/Kolkata',
+      },
+    });
+    await prisma.userPreferences.upsert({
+      where:  { userId: userRow.id },
+      update: {},
+      create: { userId: userRow.id },
+    });
+    await prisma.userStats.upsert({
+      where:  { userId: userRow.id },
+      update: {},
+      create: { userId: userRow.id },
     });
     // W6.11: ensure every seeded user is a member of the default program.
     await prisma.programMembership.upsert({
@@ -257,7 +306,7 @@ async function main() {
     const cornea = await prisma.program.findUnique({ where: { slug: 'lvpei-cornea-fellowship' } });
     if (cornea) {
       const multiProgramEmails = [
-        { email: 'sandeep@vaidix.local',       role: null },
+        { email: adminEmail,                    role: null },
         { email: 'rajeev.nair@vaidix.local',   role: Role.PROGRAM_DIRECTOR },
         { email: 'meera.krishnan@vaidix.local', role: Role.FACULTY },
       ];
@@ -279,7 +328,7 @@ async function main() {
   // skip this entirely; admins wire mappings via /admin/users + /admin/cohorts.
   if (SEED_DEMO) {
     console.log('🪢 Seeding mappings (faculty↔PD, cohort↔mentor)...');
-    const sandeep = await prisma.user.findUnique({ where: { email: 'sandeep@vaidix.local' } });
+    const sandeep = await prisma.user.findUnique({ where: { email: adminEmail } });
     const rajeev  = await prisma.user.findUnique({ where: { email: 'rajeev.nair@vaidix.local' } });
     const meera   = await prisma.user.findUnique({ where: { email: 'meera.krishnan@vaidix.local' } });
     const arjun   = await prisma.user.findUnique({ where: { email: 'arjun.mehta@vaidix.local' } });
@@ -502,15 +551,15 @@ async function main() {
 
   console.log('\n✅ Seed complete.\n');
   if (SEED_DEMO) {
-    console.log('📝 Demo credentials (password: 12345678 except Sandeep):');
-    console.log('   9876543210  Sandeep           [ADMIN]            pw: Vaidix@2026!');
+    console.log(`📝 Admin credentials: ${adminEmail}  /  pw: ${adminPassword}`);
+    console.log('📝 Demo non-admin credentials (password: 12345678):');
     console.log('   9876543211  Arjun Mehta        [RESIDENT]');
     console.log('   9876543212  Dr. Meera Krishnan [FACULTY]');
     console.log('   9876543213  Dr. Rajeev Nair    [PROGRAM_DIRECTOR]');
     console.log('   9876543214  Priya Sharma        [EXTERNAL_LEARNER]');
     console.log('');
   } else {
-    console.log('🛡️  PRODUCTION seed: only admin (sandeep@vaidix.local) was created.');
+    console.log(`🛡️  PRODUCTION seed: only admin (${adminEmail}) was created.`);
     console.log('   All other users must be invited via /admin/invitations.');
     console.log('');
   }

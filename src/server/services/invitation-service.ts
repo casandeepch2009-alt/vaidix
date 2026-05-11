@@ -88,6 +88,24 @@ export async function createInvitation(args: CreateArgs) {
     throw new Error('PENDING_INVITE_EXISTS');
   }
 
+  // Mobile is a unique login identifier (multi-identifier login). Catch
+  // collisions at invite-creation time so the admin sees an error immediately
+  // rather than discovering silently at accept-time that the mobile was dropped.
+  if (args.mobile) {
+    const canonical = canonicaliseMobile(args.mobile);
+    if (canonical) {
+      const [mobileUser, mobilePending] = await Promise.all([
+        db.user.findUnique({ where: { mobile: canonical }, select: { id: true } }),
+        db.invitation.findFirst({
+          where: { mobile: canonical, status: InvitationStatus.PENDING },
+          select: { id: true },
+        }),
+      ]);
+      if (mobileUser) throw new Error('MOBILE_EXISTS');
+      if (mobilePending) throw new Error('MOBILE_INVITE_EXISTS');
+    }
+  }
+
   // Validate hierarchy mapping against role. Mappings are silently dropped
   // for non-applicable roles (e.g. cohortId on a FACULTY invite) so the UI
   // can send everything it has without a separate per-role payload shape.

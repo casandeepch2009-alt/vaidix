@@ -17,7 +17,7 @@ import {
 } from '@/lib/email-templates';
 import { buildSessionIcs, sessionJoinUrl } from './ics-service';
 import { env } from '@/lib/env';
-import { SessionVisibility, UserStatus } from '@prisma/client';
+import { NotificationChannel, UserStatus } from '@prisma/client';
 import { emit, emitToMany } from './notifications-service';
 
 const CALENDAR_URL = `${env.NEXTAUTH_URL.replace(/\/$/, '')}/calendar`;
@@ -72,46 +72,38 @@ function sharedVarsFor(session: NonNullable<SessionWithRels>) {
 }
 
 // ----------------------------------------------------------------------------
-// Recipient resolution — mirrors calendar visibility rules but returns users,
-// not prisma-where clauses, so we can email them.
+// Recipient resolution — union of explicit audiences (cohort members + named
+// invitees), deduped. `openToAll` deliberately does NOT add recipients: a
+// link-only session has no broadcast list. If a host wants to email a wide
+// group they must also pick a cohort (or invite individuals). This stops the
+// silent "blast every resident + faculty in the institution" path the old
+// OPEN_TO_ALL default had.
 // ----------------------------------------------------------------------------
 async function resolveAttendees(
   session: NonNullable<SessionWithRels>
 ): Promise<{ id: string; name: string; email: string }[]> {
-  if (session.visibility === SessionVisibility.PRIVATE) {
-    return [];
-  }
+  const byId = new Map<string, { id: string; name: string; email: string }>();
 
-  if (session.visibility === SessionVisibility.INVITE_ONLY) {
-    const invites = await db.sessionInvite.findMany({
-      where: { sessionId: session.id, status: { in: ['INVITED', 'ACCEPTED'] } },
-      include: { user: { select: { id: true, name: true, email: true, status: true } } },
-    });
-    return invites
-      .filter((i) => i.user.status === UserStatus.ACTIVE)
-      .map((i) => ({ id: i.user.id, name: i.user.name, email: i.user.email }));
-  }
-
-  if (session.visibility === SessionVisibility.COHORT && session.cohortId) {
+  if (session.cohortId) {
     const members = await db.cohortMember.findMany({
       where: { cohortId: session.cohortId, user: { status: UserStatus.ACTIVE } },
       include: { user: { select: { id: true, name: true, email: true } } },
     });
-    return members.map((m) => ({ id: m.user.id, name: m.user.name, email: m.user.email }));
+    for (const m of members) {
+      byId.set(m.user.id, { id: m.user.id, name: m.user.name, email: m.user.email });
+    }
   }
 
-  // OPEN_TO_ALL — residents + faculty in institution. Keep the blast radius
-  // honest: large lectures should be COHORT-scoped. Here we email every ACTIVE
-  // RESIDENT and FACULTY member except the host.
-  const users = await db.user.findMany({
-    where: {
-      status: UserStatus.ACTIVE,
-      role: { in: ['RESIDENT', 'FACULTY'] },
-      id: { not: session.host.id },
-    },
-    select: { id: true, name: true, email: true },
+  const invites = await db.sessionInvite.findMany({
+    where: { sessionId: session.id, status: { in: ['INVITED', 'ACCEPTED'] } },
+    include: { user: { select: { id: true, name: true, email: true, status: true } } },
   });
-  return users;
+  for (const i of invites) {
+    if (i.user.status !== UserStatus.ACTIVE) continue;
+    byId.set(i.user.id, { id: i.user.id, name: i.user.name, email: i.user.email });
+  }
+
+  return Array.from(byId.values());
 }
 
 // ----------------------------------------------------------------------------

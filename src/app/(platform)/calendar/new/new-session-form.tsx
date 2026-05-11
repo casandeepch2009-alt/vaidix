@@ -33,6 +33,27 @@ interface Faculty { id: string; name: string; email: string; role: string }
 interface Cohort { id: string; name: string; memberCount: number }
 interface Topic { id: string; name: string; subspecialty: string | null }
 
+interface EditingState {
+  sessionId: string
+  initial: {
+    title: string
+    description: string | null
+    sessionType: SessionType
+    hostId: string
+    topicId: string | null
+    scheduledStart: string
+    scheduledEnd: string
+    openToAll: boolean
+    cohortId: string | null
+    invitees: PickableUser[]
+    recordingEnabled: boolean
+    consentRequired: boolean
+    objectives: ObjectiveDraft[]
+    prereq: PrereqConfig | null
+    recurrenceRule: string | null
+  }
+}
+
 interface Props {
   faculty: Faculty[]
   cohorts: Cohort[]
@@ -41,11 +62,17 @@ interface Props {
   defaultEnd?: string
   currentUserId: string
   currentUserRole: string
+  /** When set, the wizard prefills all fields and switches submit to PATCH+reschedule. */
+  editing?: EditingState
 }
 
-type Visibility = 'OPEN_TO_ALL' | 'COHORT' | 'INVITE_ONLY' | 'PRIVATE'
 type SessionType = 'LECTURE' | 'GRAND_ROUNDS' | 'CASE_CONFERENCE' | 'JOURNAL_CLUB' | 'SKILLS_WORKSHOP' | 'ASSESSMENT'
 type EndMode = 'count' | 'date' | 'never'
+
+// Audience picker keys. The three "real" axes are independent flags on
+// TeachingSession; `private` is the UI affordance for the empty state and
+// maps to all-flags-off when submitted.
+type AudienceAxis = 'openToAll' | 'cohort' | 'invite' | 'private'
 
 const SESSION_TYPES: Array<{
   value: SessionType; label: string; desc: string
@@ -57,30 +84,33 @@ const SESSION_TYPES: Array<{
   { value: 'CASE_CONFERENCE',  label: 'Case Conference', desc: 'Multi-team case review',          icon: FolderOpen,     gradient: 'from-orange-500/30 to-orange-500/5', iconColor: 'text-orange-600 dark:text-orange-400', selectedBorder: 'border-orange-500',  selectedBg: 'bg-orange-500/8',  glow: 'shadow-orange-500/25' },
   { value: 'JOURNAL_CLUB',     label: 'Journal Club',    desc: 'Literature review & critique',    icon: BookMarked,     gradient: 'from-amber-500/30 to-amber-500/5',   iconColor: 'text-amber-600 dark:text-amber-400',   selectedBorder: 'border-amber-500',   selectedBg: 'bg-amber-500/8',   glow: 'shadow-amber-500/25' },
   { value: 'SKILLS_WORKSHOP',  label: 'Skills Workshop', desc: 'Hands-on procedural practice',   icon: Wrench,         gradient: 'from-emerald-500/30 to-emerald-500/5',iconColor: 'text-emerald-600 dark:text-emerald-400',selectedBorder: 'border-emerald-500', selectedBg: 'bg-emerald-500/8', glow: 'shadow-emerald-500/25' },
-  { value: 'ASSESSMENT',       label: 'Assessment',      desc: 'Evaluation & competency check',  icon: ClipboardCheck, gradient: 'from-rose-500/30 to-rose-500/5',     iconColor: 'text-rose-600 dark:text-rose-400',     selectedBorder: 'border-rose-500',    selectedBg: 'bg-rose-500/8',    glow: 'shadow-rose-500/25' },
+  { value: 'ASSESSMENT',       label: 'Assessment',      desc: 'Quiz, OSCE or evaluation',        icon: ClipboardCheck, gradient: 'from-rose-500/30 to-rose-500/5',     iconColor: 'text-rose-600 dark:text-rose-400',     selectedBorder: 'border-rose-500',    selectedBg: 'bg-rose-500/8',    glow: 'shadow-rose-500/25' },
 ]
 
-const VISIBILITY_OPTIONS: Array<{
-  value: Visibility; label: string; description: string
+// Three independent audience axes (any combination allowed) plus a "Private"
+// affordance that means "no audience" (host-only). Selecting Private clears
+// the other three; selecting any other axis clears Private.
+const AUDIENCE_OPTIONS: Array<{
+  value: AudienceAxis; label: string; description: string
   icon: typeof Globe; accent: string; bg: string; border: string; glow: string
 }> = [
-  { value: 'OPEN_TO_ALL', label: 'Anyone with link', description: 'Share the URL — anyone can join',   icon: Globe,      accent: 'text-sky-600',     bg: 'bg-sky-500/10',     border: 'border-sky-500',     glow: 'shadow-sky-500/20' },
-  { value: 'COHORT',      label: 'Cohort',           description: 'Batch or specialty group members',  icon: UsersRound, accent: 'text-violet-600',  bg: 'bg-violet-500/10',  border: 'border-violet-500',  glow: 'shadow-violet-500/20' },
-  { value: 'INVITE_ONLY', label: 'Invite only',      description: 'Specific people you select now',    icon: UserCheck,  accent: 'text-emerald-600', bg: 'bg-emerald-500/10', border: 'border-emerald-500', glow: 'shadow-emerald-500/20' },
-  { value: 'PRIVATE',     label: 'Private',          description: 'Only you and the faculty host',     icon: Lock,       accent: 'text-slate-600',   bg: 'bg-slate-500/10',   border: 'border-slate-400',   glow: 'shadow-slate-500/20' },
+  { value: 'openToAll', label: 'Anyone with link',  description: 'Share the URL — anyone can join the call & chat', icon: Globe,      accent: 'text-sky-600',     bg: 'bg-sky-500/10',     border: 'border-sky-500',     glow: 'shadow-sky-500/20' },
+  { value: 'cohort',    label: 'Cohort',            description: 'Batch or specialty group members',                icon: UsersRound, accent: 'text-violet-600',  bg: 'bg-violet-500/10',  border: 'border-violet-500',  glow: 'shadow-violet-500/20' },
+  { value: 'invite',    label: 'Invite specific people', description: 'Pick individuals to add to this session',    icon: UserCheck,  accent: 'text-emerald-600', bg: 'bg-emerald-500/10', border: 'border-emerald-500', glow: 'shadow-emerald-500/20' },
+  { value: 'private',   label: 'Private',           description: 'Only you and the host — no audience',             icon: Lock,       accent: 'text-slate-600',   bg: 'bg-slate-500/10',   border: 'border-slate-400',   glow: 'shadow-slate-500/20' },
 ]
 
 const STEP_THEMES = [
-  { gradient: 'from-blue-500/20 via-blue-400/8 to-transparent',     blob: 'bg-blue-400/20',    icon: Sparkles,    iconBg: 'bg-blue-500/15',    iconColor: 'text-blue-600 dark:text-blue-400',    ring: 'ring-blue-500/30' },
-  { gradient: 'from-violet-500/20 via-violet-400/8 to-transparent',  blob: 'bg-violet-400/20',  icon: CalendarDays, iconBg: 'bg-violet-500/15', iconColor: 'text-violet-600 dark:text-violet-400', ring: 'ring-violet-500/30' },
-  { gradient: 'from-amber-500/20 via-amber-400/8 to-transparent',    blob: 'bg-amber-400/20',   icon: UsersRound,  iconBg: 'bg-amber-500/15',   iconColor: 'text-amber-600 dark:text-amber-400',   ring: 'ring-amber-500/30' },
-  { gradient: 'from-emerald-500/20 via-emerald-400/8 to-transparent',blob: 'bg-emerald-400/20', icon: Zap,         iconBg: 'bg-emerald-500/15', iconColor: 'text-emerald-600 dark:text-emerald-400',ring: 'ring-emerald-500/30' },
+  { gradient: 'from-blue-500/20 via-blue-400/8 to-transparent',     cBorder: 'border-blue-500/25',   cFill: 'bg-blue-500/10',    icon: Sparkles,    iconBg: 'bg-blue-500/15',    iconColor: 'text-blue-600 dark:text-blue-400',    ring: 'ring-blue-500/30' },
+  { gradient: 'from-violet-500/20 via-violet-400/8 to-transparent',  cBorder: 'border-violet-500/25', cFill: 'bg-violet-500/10',  icon: CalendarDays, iconBg: 'bg-violet-500/15', iconColor: 'text-violet-600 dark:text-violet-400', ring: 'ring-violet-500/30' },
+  { gradient: 'from-amber-500/20 via-amber-400/8 to-transparent',    cBorder: 'border-amber-500/25',  cFill: 'bg-amber-500/10',   icon: UsersRound,  iconBg: 'bg-amber-500/15',   iconColor: 'text-amber-600 dark:text-amber-400',   ring: 'ring-amber-500/30' },
+  { gradient: 'from-emerald-500/20 via-emerald-400/8 to-transparent',cBorder: 'border-emerald-500/25',cFill: 'bg-emerald-500/10', icon: Zap,         iconBg: 'bg-emerald-500/15', iconColor: 'text-emerald-600 dark:text-emerald-400',ring: 'ring-emerald-500/30' },
 ]
 
 const STEPS = [
   { id: 'what',     label: 'Session',  subtitle: "What it's about", heading: "What's this session?",  sub: 'Name it and pick the format.' },
   { id: 'schedule', label: 'Schedule', subtitle: 'Host & timing',   heading: 'Host & timing',         sub: "Who's hosting and when does it happen?" },
-  { id: 'audience', label: 'Audience', subtitle: 'Who can join',    heading: 'Who can join?',         sub: 'Set visibility and link to a topic.' },
+  { id: 'audience', label: 'Audience', subtitle: 'Who can join',    heading: 'Who can join?',         sub: 'Pick any combination — link, cohort, individuals.' },
   { id: 'details',  label: 'Finish',   subtitle: 'Review & submit', heading: 'Almost there!',         sub: 'Add optional details and review before scheduling.' },
 ]
 
@@ -134,52 +164,121 @@ const slide = {
 
 // ─── Main component ───────────────────────────────────────────────────────────
 export function NewSessionForm({
-  faculty, cohorts, topics, defaultStart, defaultEnd, currentUserId, currentUserRole,
+  faculty, cohorts, topics, defaultStart, defaultEnd, currentUserId, currentUserRole, editing,
 }: Props) {
   const router = useRouter()
+  const isEditing = !!editing
+  const e0 = editing?.initial
 
   // Core
-  const [title, setTitle]           = useState('')
-  const [description, setDesc]      = useState('')
-  const [objectives, setObjectives] = useState<ObjectiveDraft[]>([])
-  const [sessionType, setSessionType] = useState<SessionType>('LECTURE')
-  const [topicId, setTopicId]       = useState('')
+  const [title, setTitle]           = useState(e0?.title ?? '')
+  const [description, setDesc]      = useState(e0?.description ?? '')
+  const [objectives, setObjectives] = useState<ObjectiveDraft[]>(e0?.objectives ?? [])
+  const [sessionType, setSessionType] = useState<SessionType>(e0?.sessionType ?? 'LECTURE')
+  const [topicId, setTopicId]       = useState(e0?.topicId ?? '')
+  // Local mirror so newly-created topics show up without a page reload.
+  const [topicList, setTopicList]   = useState<Topic[]>(topics)
   const [hostId, setHostId]         = useState(
+    e0?.hostId ??
     // FACULTY and RESIDENT default to self-host (auto-approves). Admin/PD
     // default to the first faculty entry — usually themselves if PD, else the
     // first available faculty member.
-    currentUserRole === 'FACULTY' || currentUserRole === 'RESIDENT'
+    (currentUserRole === 'FACULTY' || currentUserRole === 'RESIDENT'
       ? currentUserId
-      : (faculty[0]?.id ?? '')
+      : (faculty[0]?.id ?? ''))
   )
-  const [start, setStart]           = useState(toLocalInput(defaultStart) || '')
-  const [end, setEnd]               = useState(toLocalInput(defaultEnd) || '')
-  const [visibility, setVis]        = useState<Visibility>('OPEN_TO_ALL')
-  const [cohortId, setCohortId]     = useState('')
-  const [invitees, setInvitees]     = useState<PickableUser[]>([])
+  const [start, setStart]           = useState(
+    e0 ? toLocalInput(e0.scheduledStart) : (toLocalInput(defaultStart) || '')
+  )
+  const [end, setEnd]               = useState(
+    e0 ? toLocalInput(e0.scheduledEnd) : (toLocalInput(defaultEnd) || '')
+  )
+  // Audience state — each axis is independent. Decode the editing initial
+  // state into the matching set of axes; default for fresh sessions is just
+  // "cohort" selected (the most common intent — faculty schedule for their
+  // cohort). Empty defaults would force the host to think about it; "cohort"
+  // is a safer auto-list default than the legacy "OPEN_TO_ALL" footgun.
+  const initialAxes: Set<AudienceAxis> = (() => {
+    if (!e0) return new Set<AudienceAxis>(['cohort'])
+    const s = new Set<AudienceAxis>()
+    if (e0.openToAll) s.add('openToAll')
+    if (e0.cohortId) s.add('cohort')
+    if (e0.invitees && e0.invitees.length > 0) s.add('invite')
+    if (s.size === 0) s.add('private')
+    return s
+  })()
+  const [audience, setAudience]     = useState<Set<AudienceAxis>>(initialAxes)
+  const [cohortId, setCohortId]     = useState(e0?.cohortId ?? '')
+  const [invitees, setInvitees]     = useState<PickableUser[]>(e0?.invitees ?? [])
 
-  // Recurrence
-  const [repeats, setRepeats]       = useState(false)
-  const [freq, setFreq]             = useState<'WEEKLY' | 'DAILY' | 'MONTHLY'>('WEEKLY')
-  const [repeatEvery, setRepeatEvery] = useState(1)
-  const [byDays, setByDays]         = useState<Set<string>>(new Set(['MO']))
-  const [endMode, setEndMode]       = useState<EndMode>('count')
-  const [count, setCount]           = useState(8)
-  const [endDate, setEndDate]       = useState('')
+  function toggleAxis(axis: AudienceAxis) {
+    setAudience((prev) => {
+      const next = new Set(prev)
+      if (axis === 'private') {
+        // Private is exclusive — picking it clears the others.
+        return new Set<AudienceAxis>(['private'])
+      }
+      next.delete('private')
+      if (next.has(axis)) {
+        next.delete(axis)
+        // If they cleared the only remaining real axis, fall back to Private
+        // so the form never lands in a "nothing selected" state.
+        if (next.size === 0) next.add('private')
+      } else {
+        next.add(axis)
+      }
+      return next
+    })
+  }
+
+  // Recurrence — when editing, decode the stored rule and surface its options.
+  const initialRecurrence = (() => {
+    if (!e0?.recurrenceRule) return null
+    try {
+      const rr = RRule.fromString(`DTSTART:${new Date(e0.scheduledStart).toISOString().replace(/[-:]/g, '').split('.')[0]}Z\nRRULE:${e0.recurrenceRule}`)
+      const opts = rr.origOptions
+      return {
+        freq: opts.freq === Frequency.DAILY ? 'DAILY' : opts.freq === Frequency.MONTHLY ? 'MONTHLY' : 'WEEKLY',
+        interval: opts.interval ?? 1,
+        byDays: Array.isArray(opts.byweekday)
+          ? new Set(opts.byweekday.map(d => typeof d === 'object' && 'toString' in d ? d.toString().slice(0, 2).toUpperCase() : String(d)))
+          : new Set<string>(['MO']),
+        endMode: (opts.count ? 'count' : opts.until ? 'date' : 'never') as EndMode,
+        count: opts.count ?? 8,
+        until: opts.until instanceof Date ? opts.until.toISOString().slice(0, 10) : '',
+      }
+    } catch { return null }
+  })()
+
+  const [repeats, setRepeats]       = useState(!!initialRecurrence)
+  const [freq, setFreq]             = useState<'WEEKLY' | 'DAILY' | 'MONTHLY'>(
+    (initialRecurrence?.freq as 'WEEKLY' | 'DAILY' | 'MONTHLY') ?? 'WEEKLY'
+  )
+  const [repeatEvery, setRepeatEvery] = useState(initialRecurrence?.interval ?? 1)
+  const [byDays, setByDays]         = useState<Set<string>>(initialRecurrence?.byDays ?? new Set(['MO']))
+  const [endMode, setEndMode]       = useState<EndMode>(initialRecurrence?.endMode ?? 'count')
+  const [count, setCount]           = useState(initialRecurrence?.count ?? 8)
+  const [endDate, setEndDate]       = useState(initialRecurrence?.until ?? '')
   const [excludedDates, setExcludedDates] = useState<string[]>([])
 
-  // Options
+  // Options — share link only applies on initial create.
   const [genLink, setGenLink]       = useState(false)
   const [linkTtl, setLinkTtl]       = useState(48)
   const [createdLink, setCreatedLink] = useState<{ url: string; expiresAt: string } | null>(null)
   const [copied, setCopied]         = useState(false)
 
-  // Prerequisites
-  const [prereqMode, setPrereqMode] = useState<PrereqConfig['mode']>('NONE')
-  const [reqQ, setReqQ]             = useState(false)
-  const [minQ, setMinQ]             = useState(1)
-  const [reqPack, setReqPack]       = useState(false)
-  const [reqAck, setReqAck]         = useState(false)
+  // Prerequisites — preload from editing.metadata.prereq if present.
+  const [prereqMode, setPrereqMode] = useState<PrereqConfig['mode']>(e0?.prereq?.mode ?? 'NONE')
+  const [reqQ, setReqQ]             = useState(e0?.prereq?.requirePreQuestions ?? false)
+  const [minQ, setMinQ]             = useState(e0?.prereq?.minPreQuestions ?? 1)
+  const [reqPack, setReqPack]       = useState(e0?.prereq?.requireStudyPack ?? false)
+  const [reqAck, setReqAck]         = useState(e0?.prereq?.requireReadinessAck ?? false)
+
+  // Live captions — Phase 1 ships english-only (Deepgram). Indic-mix is a
+  // stub: faculty can pick it but the live producer is not yet wired; we
+  // surface a "coming soon" hint and the post-recording transcript fills
+  // in afterwards.
+  const [captionsProfile, setCaptionsProfile] = useState<'english-only' | 'indic-mix' | 'off'>('english-only')
 
   // Wizard
   const [submitting, setSubmitting] = useState(false)
@@ -190,8 +289,10 @@ export function NewSessionForm({
 
   const hostIsSelf   = hostId === currentUserId
   const selectedHost = faculty.find((f) => f.id === hostId)
-  const isCohort     = visibility === 'COHORT'
-  const isInvite     = visibility === 'INVITE_ONLY'
+  const wantsOpenToAll = audience.has('openToAll')
+  const wantsCohort    = audience.has('cohort')
+  const wantsInvite    = audience.has('invite')
+  const isPrivate      = audience.has('private')
 
   function validateStep(s: number): string | null {
     if (s === 0 && !title.trim()) return 'Give this session a title before continuing.'
@@ -202,8 +303,8 @@ export function NewSessionForm({
       if (d !== null && d <= 0) return 'End time must be after start.'
     }
     if (s === 2) {
-      if (isCohort && !cohortId)          return 'Select a cohort.'
-      if (isInvite && invitees.length === 0) return 'Add at least one invitee.'
+      if (wantsCohort && !cohortId)          return 'Select a cohort or uncheck the Cohort option.'
+      if (wantsInvite && invitees.length === 0) return 'Add at least one invitee or uncheck Invite specific people.'
     }
     return null
   }
@@ -241,14 +342,97 @@ export function NewSessionForm({
     if (err) { setStepErr(err); return }
     setError(null); setSubmitting(true)
     try {
+      if (isEditing && editing) {
+        // ── EDIT MODE: PATCH editable fields, then reschedule if time changed,
+        // then diff invitees. Server enforces immutability of host/sessionType
+        // only; the three audience axes (openToAll / cohortId / invitees) are
+        // independently editable post-create under the orthogonal-audience model.
+        //   • openToAll + cohortId ride on this PATCH (both reflected in DB columns).
+        //   • Invitees ride on the separate /invites POST + DELETE deltas below
+        //     so we don't have to send the full roster every save.
+        // Private = all three axes unset, which maps to openToAll=false +
+        // cohortId=null + an empty invitee diff.
+        const patchBody = {
+          title,
+          description: description.trim().length === 0 ? null : description,
+          topicId: topicId || null,
+          objectives: objectives.length > 0
+            ? objectives.filter((o) => o.text.trim().length >= 3)
+            : null,
+          prereq: prereqMode === 'NONE' ? undefined : {
+            mode: prereqMode, requirePreQuestions: reqQ, minPreQuestions: minQ,
+            requireStudyPack: reqPack, requireReadinessAck: reqAck,
+          },
+          openToAll: !isPrivate && wantsOpenToAll,
+          cohortId: !isPrivate && wantsCohort && cohortId ? cohortId : null,
+        }
+        const patchRes = await fetch(`/api/classroom/sessions/${editing.sessionId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(patchBody),
+        })
+        const patchJson = await patchRes.json()
+        if (!patchJson.ok) throw new Error(patchJson.error?.message ?? 'Failed to save')
+
+        const startChanged = new Date(start).toISOString() !== editing.initial.scheduledStart
+        const endChanged   = new Date(end).toISOString()   !== editing.initial.scheduledEnd
+        if (startChanged || endChanged) {
+          const r = await fetch(`/api/classroom/sessions/${editing.sessionId}/reschedule`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scheduledStart: new Date(start).toISOString(),
+              scheduledEnd:   new Date(end).toISOString(),
+              scope: 'series',
+            }),
+          })
+          const rj = await r.json()
+          if (!rj.ok) throw new Error(rj.error?.message ?? 'Failed to reschedule')
+        }
+
+        // Invitees can now be edited on any session (axes are orthogonal).
+        // Diff the current vs. initial roster and POST/DELETE the deltas.
+        // If the user toggled to Private or unchecked the Invite axis, treat
+        // the effective roster as empty so existing invitees are removed —
+        // otherwise they'd silently survive a "this should have no audience"
+        // intent because the picker state is just hidden, not cleared.
+        {
+          const effectiveInvitees = isPrivate || !wantsInvite ? [] : invitees
+          const initialIds = new Set(editing.initial.invitees.map((u) => u.id))
+          const currentIds = new Set(effectiveInvitees.map((u) => u.id))
+          const toAdd = effectiveInvitees.filter((u) => !initialIds.has(u.id)).map((u) => u.id)
+          const toRemove = editing.initial.invitees.filter((u) => !currentIds.has(u.id)).map((u) => u.id)
+          if (toAdd.length > 0) {
+            const ar = await fetch(`/api/classroom/sessions/${editing.sessionId}/invites`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ userIds: toAdd }),
+            })
+            const aj = await ar.json()
+            if (!aj.ok) throw new Error(aj.error?.message ?? 'Failed to add invitees')
+          }
+          for (const userId of toRemove) {
+            const dr = await fetch(`/api/classroom/sessions/${editing.sessionId}/invites/${userId}`, { method: 'DELETE' })
+            const dj = await dr.json()
+            if (!dj.ok) throw new Error(dj.error?.message ?? 'Failed to remove invitee')
+          }
+        }
+
+        router.push(`/classroom/${editing.sessionId}/study`)
+        router.refresh()
+        return
+      }
+
+      // ── CREATE MODE ──
+      // Private = no audience at all (all flags off / no cohort / no invitees).
+      // The other three axes are orthogonal and may combine.
       const payload = {
         title, description: description || undefined, sessionType,
         topicId: topicId || undefined, hostId,
         scheduledStart: new Date(start).toISOString(),
         scheduledEnd:   new Date(end).toISOString(),
-        visibility,
-        cohortId:   isCohort  ? cohortId              : undefined,
-        inviteeIds: isInvite  ? invitees.map((u) => u.id) : undefined,
+        openToAll: !isPrivate && wantsOpenToAll,
+        cohortId:   !isPrivate && wantsCohort ? cohortId              : undefined,
+        inviteeIds: !isPrivate && wantsInvite ? invitees.map((u) => u.id) : undefined,
         recurrenceRule: buildRRule(),
         maxParticipants: 100, recordingEnabled: true, consentRequired: true, tags: [],
         objectives: objectives.length > 0 ? objectives.filter((o) => o.text.trim().length >= 3) : undefined,
@@ -258,6 +442,9 @@ export function NewSessionForm({
         },
         // Excluded recurrence dates — backend stores in metadata
         ...(excludedDates.length > 0 ? { excludedDates } : {}),
+        // Live captions provider (metadata.captionsProfile). Default
+        // 'english-only' so legacy faculty get captions out of the box.
+        captionsProfile,
       }
       const res  = await fetch('/api/classroom/sessions', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -349,21 +536,7 @@ export function NewSessionForm({
 
       {/* Main card — no overflow-hidden so FacultySearch dropdown can escape */}
       <div className="relative rounded-2xl border border-border bg-card shadow-md" style={{ minHeight: 440 }}>
-        {/* Blobs confined inside inner overflow-hidden */}
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`blob-${step}`}
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.4 }}
-            >
-              <div className={cn('absolute -right-10 -top-10 size-48 rounded-full blur-3xl opacity-60', theme.blob)} />
-              <div className={cn('absolute -bottom-16 -left-10 size-36 rounded-full blur-3xl opacity-40', theme.blob)} />
-            </motion.div>
-          </AnimatePresence>
-        </div>
-
-        <AnimatePresence mode="wait" custom={dir}>
+<AnimatePresence mode="wait" custom={dir}>
           <motion.div
             key={step}
             custom={dir}
@@ -374,8 +547,12 @@ export function NewSessionForm({
             transition={{ duration: 0.22, ease: [0.25, 0.1, 0.25, 1] }}
             className="relative"
           >
-            {/* Step gradient header */}
-            <div className={cn('relative overflow-hidden bg-linear-to-br px-6 pt-6 pb-5', theme.gradient)}>
+            {/* Step gradient header — border-b creates a hard edge so gradient doesn't bleed into card body */}
+            <div className={cn('relative overflow-hidden bg-linear-to-br px-6 pt-6 pb-5 border-b border-border/40', theme.gradient)}>
+              {/* Corner arc decorations — clipped cleanly by overflow-hidden, no bleed outside header */}
+              <div className={cn('pointer-events-none absolute -right-10 -top-10 size-40 rounded-full border-2 opacity-60', theme.cBorder)} />
+              <div className={cn('pointer-events-none absolute -right-3 -top-3 size-24 rounded-full border opacity-40', theme.cBorder)} />
+              <div className={cn('pointer-events-none absolute right-8 -top-6 size-14 rounded-full border opacity-25', theme.cBorder)} />
               <div className="flex items-center gap-3.5">
                 <div className={cn('flex size-11 shrink-0 items-center justify-center rounded-2xl shadow-sm', theme.iconBg, `ring-2 ${theme.ring}`)}>
                   <theme.icon className={cn('size-5', theme.iconColor)} />
@@ -409,9 +586,9 @@ export function NewSessionForm({
               )}
               {step === 2 && (
                 <StepAudience
-                  topics={topics} cohorts={cohorts}
+                  topics={topicList} setTopics={setTopicList} cohorts={cohorts}
                   topicId={topicId} setTopicId={setTopicId}
-                  visibility={visibility} setVisibility={setVis}
+                  audience={audience} toggleAxis={toggleAxis}
                   cohortId={cohortId} setCohortId={setCohortId}
                   invitees={invitees} setInvitees={setInvitees}
                 />
@@ -419,16 +596,9 @@ export function NewSessionForm({
               {step === 3 && (
                 <StepDetails
                   title={title} sessionType={sessionType} selectedHost={selectedHost}
-                  start={start} end={end} visibility={visibility}
+                  start={start} end={end} audience={audience}
                   repeats={repeats} count={count} freq={freq} repeatEvery={repeatEvery} endMode={endMode}
                   description={description} setDesc={setDesc}
-                  objectives={objectives} setObjectives={setObjectives}
-                  prereqMode={prereqMode} setPrereqMode={setPrereqMode}
-                  reqQ={reqQ} setReqQ={setReqQ} minQ={minQ} setMinQ={setMinQ}
-                  reqPack={reqPack} setReqPack={setReqPack}
-                  reqAck={reqAck} setReqAck={setReqAck}
-                  genLink={genLink} setGenLink={setGenLink}
-                  linkTtl={linkTtl} setLinkTtl={setLinkTtl}
                   submitting={submitting}
                 />
               )}
@@ -463,20 +633,27 @@ export function NewSessionForm({
             <p className="hidden text-xs text-muted-foreground sm:block">You&apos;re hosting — schedules immediately</p>
           )}
           {step < STEPS.length - 1 ? (
-            <motion.button type="button" onClick={goNext} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+            // key="next" / key="submit" force React to unmount + remount instead of reusing the
+            // same DOM node when the action button changes type. Without keys, React reuses the
+            // motion.button at this slot and flips type=button → type=submit during the click's
+            // re-render, so the browser's click activation runs against a now-submit button and
+            // submits the form mid-wizard.
+            <motion.button key="next" type="button" onClick={goNext} whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
               className="group relative flex items-center gap-1.5 overflow-hidden rounded-xl bg-primary px-5 py-2.5 text-sm font-bold text-primary-foreground shadow-md shadow-primary/30 transition-shadow hover:shadow-primary/50"
             >
               <span className="relative z-10 flex items-center gap-1.5">Continue <ChevronRight className="size-4 transition-transform group-hover:translate-x-0.5" /></span>
               <span className="absolute inset-0 bg-linear-to-r from-transparent to-white/10 opacity-0 transition-opacity group-hover:opacity-100" />
             </motion.button>
           ) : (
-            <motion.button type="submit" disabled={submitting} whileHover={{ scale: submitting ? 1 : 1.02 }} whileTap={{ scale: submitting ? 1 : 0.98 }}
+            <motion.button key="submit" type="submit" disabled={submitting} whileHover={{ scale: submitting ? 1 : 1.02 }} whileTap={{ scale: submitting ? 1 : 0.98 }}
               className="group relative flex items-center gap-2 overflow-hidden rounded-xl bg-primary px-7 py-2.5 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/35 transition-shadow hover:shadow-primary/55 disabled:opacity-60 disabled:cursor-not-allowed"
             >
               <span className="relative z-10 flex items-center gap-2">
                 {submitting
-                  ? <><Loader2 className="size-4 animate-spin" /> Scheduling…</>
-                  : <>{hostIsSelf ? 'Schedule session' : 'Send for approval'} <Zap className="size-4 transition-transform group-hover:scale-110" /></>
+                  ? <><Loader2 className="size-4 animate-spin" /> {isEditing ? 'Saving…' : 'Scheduling…'}</>
+                  : isEditing
+                    ? <>Save changes <Check className="size-4 transition-transform group-hover:scale-110" /></>
+                    : <>{hostIsSelf ? 'Schedule session' : 'Send for approval'} <Zap className="size-4 transition-transform group-hover:scale-110" /></>
                 }
               </span>
               <span className="absolute inset-0 bg-linear-to-r from-transparent to-white/15 opacity-0 transition-opacity group-hover:opacity-100" />
@@ -670,9 +847,9 @@ function StepSchedule({
       {/* Date / time */}
       <div className="space-y-2.5">
         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Date &amp; time</p>
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-          <DateTimePicker label="Start" required value={start} onChange={onStartChange} compact />
-          <DateTimePicker label="End" required value={end} onChange={setEnd} min={start || undefined} compact />
+        <div className="grid grid-cols-2 gap-3">
+          <DateTimePicker label="Start" required value={start} onChange={onStartChange} />
+          <DateTimePicker label="End" required value={end} onChange={setEnd} min={start || undefined} />
         </div>
         {start && (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -834,22 +1011,52 @@ function StepSchedule({
 
 // ─── Step 3: Audience ─────────────────────────────────────────────────────────
 function StepAudience({
-  topics, cohorts, topicId, setTopicId,
-  visibility, setVisibility, cohortId, setCohortId, invitees, setInvitees,
+  topics, setTopics, cohorts, topicId, setTopicId,
+  audience, toggleAxis, cohortId, setCohortId, invitees, setInvitees,
 }: {
-  topics: Topic[]; cohorts: Cohort[]
+  topics: Topic[]; setTopics: (next: Topic[]) => void; cohorts: Cohort[]
   topicId: string; setTopicId: (v: string) => void
-  visibility: Visibility; setVisibility: (v: Visibility) => void
+  audience: Set<AudienceAxis>; toggleAxis: (axis: AudienceAxis) => void
   cohortId: string; setCohortId: (v: string) => void
   invitees: PickableUser[]; setInvitees: (v: PickableUser[]) => void
 }) {
+  const [creatingTopic, setCreatingTopic] = useState(false)
+  const [newTopicName, setNewTopicName]   = useState('')
+  const [topicSaving, setTopicSaving]     = useState(false)
+  const [topicError, setTopicError]       = useState<string | null>(null)
+
+  async function saveNewTopic() {
+    const name = newTopicName.trim()
+    if (name.length < 2) { setTopicError('Name must be at least 2 characters'); return }
+    setTopicSaving(true); setTopicError(null)
+    try {
+      const res = await fetch('/api/topics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      })
+      const json = await res.json()
+      if (!json.ok) throw new Error(json.error?.message ?? 'Failed to create topic')
+      const t = json.data.topic as Topic
+      setTopics([...topics, t])
+      setTopicId(t.id)
+      setNewTopicName(''); setCreatingTopic(false)
+    } catch (e) {
+      setTopicError((e as Error).message)
+    } finally {
+      setTopicSaving(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="space-y-2.5">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Visibility</p>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
+          Audience <span className="normal-case font-normal tracking-normal opacity-70">(pick any combination)</span>
+        </p>
         <div className="grid grid-cols-2 gap-2.5">
-          {VISIBILITY_OPTIONS.map((opt) => {
-            const Icon = opt.icon; const sel = visibility === opt.value
+          {AUDIENCE_OPTIONS.map((opt) => {
+            const Icon = opt.icon; const sel = audience.has(opt.value)
             return (
               <motion.label key={opt.value} whileHover={{ scale: 1.015 }} whileTap={{ scale: 0.985 }}
                 className={cn(
@@ -857,7 +1064,13 @@ function StepAudience({
                   sel ? `${opt.border} bg-card shadow-lg ${opt.glow}` : 'border-input hover:border-primary/20 hover:bg-accent/30',
                 )}
               >
-                <input type="radio" name="visibility" value={opt.value} checked={sel} onChange={() => setVisibility(opt.value)} className="sr-only" />
+                <input
+                  type="checkbox"
+                  name={`audience-${opt.value}`}
+                  checked={sel}
+                  onChange={() => toggleAxis(opt.value)}
+                  className="sr-only"
+                />
                 <div className={cn('mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl transition-colors', sel ? opt.bg : 'bg-muted')}>
                   <Icon className={cn('size-4', sel ? opt.accent : 'text-muted-foreground')} />
                 </div>
@@ -872,10 +1085,14 @@ function StepAudience({
             )
           })}
         </div>
+        <p className="text-xs text-muted-foreground">
+          Cohort and invitees control who sees the session in their feed and gets the materials.
+          &ldquo;Anyone with link&rdquo; lets non-listed users join the call &amp; chat via the share URL — they don&apos;t see materials.
+        </p>
       </div>
 
       <AnimatePresence>
-        {visibility === 'COHORT' && (
+        {audience.has('cohort') && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
             <div className="space-y-2 rounded-2xl border-2 border-violet-200 bg-violet-500/5 p-4 dark:border-violet-800">
               <p className="text-sm font-bold">Select cohort <span className="text-destructive">*</span></p>
@@ -903,12 +1120,15 @@ function StepAudience({
             </div>
           </motion.div>
         )}
-        {visibility === 'INVITE_ONLY' && (
+        {audience.has('invite') && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
             <div className="space-y-3 rounded-2xl border-2 border-emerald-200 bg-emerald-500/5 p-4 dark:border-emerald-800">
               <div>
-                <p className="text-sm font-bold">Invite people <span className="text-destructive">*</span></p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Quick-add a cohort or pick individuals. Snapshot at creation.</p>
+                <p className="text-sm font-bold">Invite specific people <span className="text-destructive">*</span></p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  Quick-add a cohort&apos;s members or pick individuals. Independent of the Cohort option above —
+                  use this to add a few extras (e.g. a visiting fellow).
+                </p>
               </div>
               <CohortQuickAdd selected={invitees} onChange={setInvitees} />
               <UserPicker selected={invitees} onChange={setInvitees} placeholder="Search by name or email…" />
@@ -920,20 +1140,31 @@ function StepAudience({
         )}
       </AnimatePresence>
 
-      <div className="space-y-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Topic <span className="normal-case font-normal tracking-normal opacity-60">(optional)</span></p>
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Topic <span className="normal-case font-normal tracking-normal opacity-60">(optional)</span></p>
+          {!creatingTopic && (
+            <button
+              type="button"
+              onClick={() => { setCreatingTopic(true); setTopicError(null) }}
+              className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-primary hover:bg-primary/10 transition"
+            >
+              <Plus className="size-3" /> New topic
+            </button>
+          )}
+        </div>
         <Select value={topicId || 'none'} onValueChange={(v) => setTopicId(v === 'none' ? '' : (v ?? ''))}>
-          <SelectTrigger className="w-full rounded-xl border-2 py-2.5">
+          <SelectTrigger className="h-11 w-full max-w-sm rounded-lg border bg-background px-3 text-sm font-medium">
             <SelectValue placeholder="No topic">
               {(v) => {
                 if (!v || v === 'none') return <span className="text-muted-foreground">No topic</span>
                 const t = topics.find((x) => x.id === v)
                 if (!t) return <span className="text-muted-foreground">No topic</span>
-                return <span className="flex items-center gap-2"><span className="font-medium">{t.name}</span>{t.subspecialty && <span className="text-xs text-muted-foreground">· {t.subspecialty}</span>}</span>
+                return <span className="flex items-center gap-2"><span>{t.name}</span>{t.subspecialty && <span className="text-xs text-muted-foreground">· {t.subspecialty}</span>}</span>
               }}
             </SelectValue>
           </SelectTrigger>
-          <SelectContent>
+          <SelectContent className="max-h-72">
             <SelectItem value="none"><span className="text-muted-foreground">No topic</span></SelectItem>
             {topics.map((t) => (
               <SelectItem key={t.id} value={t.id}>
@@ -942,6 +1173,46 @@ function StepAudience({
             ))}
           </SelectContent>
         </Select>
+        <AnimatePresence>
+          {creatingTopic && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
+              className="overflow-hidden"
+            >
+              <div className="mt-1 flex w-full max-w-sm items-center gap-1.5 rounded-lg border bg-card/50 p-1.5">
+                <Input
+                  autoFocus
+                  value={newTopicName}
+                  onChange={(e) => { setNewTopicName(e.target.value); if (topicError) setTopicError(null) }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); saveNewTopic() }
+                    if (e.key === 'Escape') { setCreatingTopic(false); setNewTopicName(''); setTopicError(null) }
+                  }}
+                  placeholder="e.g. Diabetic Macular Edema"
+                  className="h-8 flex-1 border-0 bg-transparent text-sm shadow-none focus-visible:ring-0"
+                  disabled={topicSaving}
+                />
+                <Button
+                  type="button" size="sm" onClick={saveNewTopic} disabled={topicSaving || newTopicName.trim().length < 2}
+                  className="h-8 px-3"
+                >
+                  {topicSaving ? <Loader2 className="size-3.5 animate-spin" /> : 'Save'}
+                </Button>
+                <button
+                  type="button"
+                  onClick={() => { setCreatingTopic(false); setNewTopicName(''); setTopicError(null) }}
+                  disabled={topicSaving}
+                  className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-50"
+                >
+                  <X className="size-3.5" />
+                </button>
+              </div>
+              {topicError && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-destructive"><AlertCircle className="size-3" /> {topicError}</p>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
         <p className="text-xs text-muted-foreground">Links to the topic library — residents find this session alongside related cases and atlas images.</p>
       </div>
     </div>
@@ -950,30 +1221,27 @@ function StepAudience({
 
 // ─── Step 4: Details + Review ─────────────────────────────────────────────────
 function StepDetails({
-  title, sessionType, selectedHost, start, end, visibility,
+  title, sessionType, selectedHost, start, end, audience,
   repeats, count, freq, repeatEvery, endMode,
-  description, setDesc,
-  objectives, setObjectives,
-  prereqMode, setPrereqMode,
-  reqQ, setReqQ, minQ, setMinQ, reqPack, setReqPack, reqAck, setReqAck,
-  genLink, setGenLink, linkTtl, setLinkTtl, submitting,
+  description, setDesc, submitting,
 }: {
   title: string; sessionType: SessionType; selectedHost?: Faculty
-  start: string; end: string; visibility: Visibility
+  start: string; end: string; audience: Set<AudienceAxis>
   repeats: boolean; count: number; freq: string; repeatEvery: number; endMode: EndMode
   description: string; setDesc: (v: string) => void
-  objectives: ObjectiveDraft[]; setObjectives: (v: ObjectiveDraft[]) => void
-  prereqMode: PrereqConfig['mode']; setPrereqMode: (v: PrereqConfig['mode']) => void
-  reqQ: boolean; setReqQ: (v: boolean) => void; minQ: number; setMinQ: (v: number) => void
-  reqPack: boolean; setReqPack: (v: boolean) => void
-  reqAck: boolean; setReqAck: (v: boolean) => void
-  genLink: boolean; setGenLink: (v: boolean) => void
-  linkTtl: number; setLinkTtl: (v: number) => void
   submitting: boolean
 }) {
+  const [materials, setMaterials] = useState<File[]>([])
   const typeConfig = SESSION_TYPES.find((t) => t.value === sessionType)!
   const TypeIcon   = typeConfig.icon
-  const visOpt     = VISIBILITY_OPTIONS.find((v) => v.value === visibility)!
+  // Compose a one-line audience summary from the selected axes. Private wins
+  // alone (it's mutually exclusive in the picker). Otherwise show each axis
+  // separated by " · ". Picks the first axis's accent colours for the pill.
+  const audienceAxes = AUDIENCE_OPTIONS.filter((o) => audience.has(o.value))
+  const visOpt       = audienceAxes[0] ?? AUDIENCE_OPTIONS[3] // fall back to Private styling
+  const audienceLabel = audience.has('private')
+    ? 'Private'
+    : audienceAxes.map((o) => o.label).join(' · ')
   const dur        = diffMinutes(start, end)
   const durLabel   = dur && dur > 0 ? `${Math.floor(dur / 60) > 0 ? `${Math.floor(dur / 60)}h ` : ''}${dur % 60 > 0 ? `${dur % 60}m` : ''}`.trim() : null
   const freqLabel  = { DAILY: 'day', WEEKLY: 'week', MONTHLY: 'month' }[freq] ?? freq.toLowerCase()
@@ -981,28 +1249,41 @@ function StepDetails({
   return (
     <div className="space-y-5">
       {/* Review card */}
-      <motion.div initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 300, damping: 24 }}
-        className="overflow-hidden rounded-2xl border-2 border-primary/20 bg-linear-to-br from-primary/8 via-primary/4 to-transparent"
+      <motion.div
+        initial={{ opacity: 0, y: 10, scale: 0.97 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ type: 'spring', stiffness: 280, damping: 22 }}
+        className={cn('overflow-hidden rounded-xl border-2 px-4 py-3 bg-linear-to-br', typeConfig.gradient, typeConfig.selectedBorder)}
       >
-        <div className="p-4">
-          <div className="flex items-start gap-3.5">
-            <div className={cn('flex size-12 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br shadow-md', typeConfig.gradient, typeConfig.glow)}>
-              <TypeIcon className={cn('size-6', typeConfig.iconColor)} />
+        <div className="flex items-start gap-3">
+          {/* Left: type pill + big title */}
+          <div className="flex-1 min-w-0">
+            <div className={cn('mb-1.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest', typeConfig.selectedBg, typeConfig.iconColor)}>
+              <TypeIcon className="size-2.5" />{typeConfig.label}
             </div>
-            <div className="flex-1 min-w-0 pt-0.5">
-              <p className="text-base font-bold truncate">{title || <span className="text-muted-foreground">Untitled session</span>}</p>
-              <p className={cn('text-xs font-semibold mt-0.5', typeConfig.iconColor)}>{typeConfig.label}</p>
-            </div>
+            <p className="text-2xl font-black leading-tight tracking-tight truncate">
+              {title || <span className="opacity-35 font-medium italic">Untitled</span>}
+            </p>
           </div>
-          <div className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-            <div className="flex items-center gap-1.5 text-muted-foreground"><CalendarDays className="size-3.5 shrink-0 text-primary/60" /><span>{start ? fmtLocal(start) : '—'}</span></div>
-            <div className="flex items-center gap-1.5 text-muted-foreground"><Clock className="size-3.5 shrink-0 text-primary/60" /><span>{durLabel ?? '—'}{repeats ? ` · every ${repeatEvery > 1 ? `${repeatEvery} ${freqLabel}s` : freqLabel}${endMode === 'count' ? ` ×${count}` : ''}` : ''}</span></div>
-            <div className="flex items-center gap-1.5 text-muted-foreground">
-              <div className="flex size-3.5 shrink-0 items-center justify-center rounded-full bg-primary text-[9px] font-bold text-primary-foreground">{selectedHost ? initials(selectedHost.name) : '?'}</div>
-              <span className="truncate">{selectedHost?.name ?? '—'}</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-muted-foreground"><visOpt.icon className={cn('size-3.5 shrink-0', visOpt.accent)} /><span>{visOpt.label}</span></div>
+          {/* Right: metadata stack */}
+          <div className="shrink-0 space-y-1 pt-0.5 text-right text-xs text-foreground/60">
+            {start && (
+              <p className="flex items-center justify-end gap-1"><CalendarDays className="size-3" />{fmtLocal(start)}</p>
+            )}
+            {durLabel && (
+              <p className="flex items-center justify-end gap-1"><Clock className="size-3" />{durLabel}
+                {repeats && <span className="opacity-70"> · ×{count}</span>}
+              </p>
+            )}
+            {selectedHost && (
+              <p className="flex items-center justify-end gap-1.5">
+                <span className="flex size-3.5 shrink-0 items-center justify-center rounded-full bg-primary/70 text-[7px] font-bold leading-none text-primary-foreground">{initials(selectedHost.name)}</span>
+                <span className="max-w-[120px] truncate">{selectedHost.name}</span>
+              </p>
+            )}
+            <p className="flex items-center justify-end gap-1">
+              <visOpt.icon className={cn('size-3', visOpt.accent)} />{audienceLabel}
+            </p>
           </div>
         </div>
       </motion.div>
@@ -1015,83 +1296,32 @@ function StepDetails({
       </div>
 
       <div className="space-y-2">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Learning objectives</p>
-        <ObjectivesEditor value={objectives} onChange={setObjectives} disabled={submitting} />
-      </div>
-
-      {/* Prerequisites */}
-      <div className="space-y-2.5">
-        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Resident gate</p>
-        <div className="grid grid-cols-3 gap-2">
-          {([
-            { v: 'NONE', label: 'No gate', desc: 'Open room' },
-            { v: 'OPTIONAL', label: 'Show only', desc: 'No block' },
-            { v: 'MANDATORY', label: 'Required', desc: 'Block until done' },
-          ] as Array<{ v: PrereqConfig['mode']; label: string; desc: string }>).map((m) => {
-            const sel = prereqMode === m.v
-            return (
-              <label key={m.v} className={cn('flex cursor-pointer flex-col gap-1 rounded-xl border-2 p-3 transition-all', sel ? 'border-primary bg-primary/5 shadow-sm' : 'border-input hover:border-primary/30')}>
-                <input type="radio" name="prereqMode" value={m.v} checked={sel} onChange={() => setPrereqMode(m.v)} className="sr-only" />
-                <div className="flex items-center justify-between"><span className="text-sm font-bold">{m.label}</span>{sel && <Check className="size-3.5 text-primary" />}</div>
-                <p className="text-xs text-muted-foreground">{m.desc}</p>
-              </label>
-            )
-          })}
+        <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Materials</p>
+        <div className="flex items-center gap-2">
+          <label className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-dashed border-input px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:bg-primary/5 hover:text-primary">
+            <input type="file" multiple accept=".pdf,.ppt,.pptx,.doc,.docx,.mp4"
+              onChange={(e) => setMaterials(prev => [...prev, ...Array.from(e.target.files ?? [])])}
+              className="sr-only" />
+            <FolderOpen className="size-3.5 shrink-0" />
+            Attach files
+          </label>
+          <span className="text-[10px] text-muted-foreground/40">PDF · PPT · DOCX · MP4</span>
         </div>
-        <AnimatePresence>
-          {prereqMode !== 'NONE' && (
-            <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-              <div className="space-y-2 rounded-xl border-2 border-primary/20 bg-primary/5 p-3">
-                {[
-                  { checked: reqQ,   set: setReqQ,   icon: MessageCircleQuestion, label: 'Pre-questions submitted', desc: 'Must submit at least N questions before joining.',
-                    extra: reqQ && <div className="mt-2 flex items-center gap-2"><span className="text-xs text-muted-foreground">Min:</span><Input type="number" min={1} max={20} value={minQ} onChange={(e) => setMinQ(Math.max(1, Number(e.target.value) || 1))} className="w-20 rounded-lg border-2 px-2 py-1 text-sm" /></div> },
-                  { checked: reqPack, set: setReqPack, icon: BookOpen,            label: 'Study pack opened',      desc: 'All prep docs opened at least once.' },
-                  { checked: reqAck,  set: setReqAck,  icon: Target,             label: 'Readiness self-marked',  desc: 'Each objective must have a self-mark.' },
-                ].map(({ checked, set, icon: Icon, label, desc, extra }) => (
-                  <label key={label} className="flex cursor-pointer items-start gap-2.5 rounded-lg border-2 border-input bg-card p-3 hover:border-primary/30 transition-colors">
-                    <input type="checkbox" checked={checked} onChange={(e) => set(e.target.checked)} className="mt-0.5 size-4 accent-primary" />
-                    <Icon className="mt-0.5 size-4 text-primary shrink-0" />
-                    <div className="flex-1"><span className="text-sm font-semibold">{label}</span><p className="text-xs text-muted-foreground">{desc}</p>{extra}</div>
-                  </label>
-                ))}
-                {prereqMode === 'MANDATORY' && !reqQ && !reqPack && !reqAck && (
-                  <p className="flex items-center gap-1.5 text-xs text-amber-600"><AlertCircle className="size-3.5" /> Pick at least one check or &ldquo;Required&rdquo; acts like &ldquo;No gate&rdquo;.</p>
-                )}
+        {materials.length > 0 && (
+          <div className="space-y-1.5">
+            {materials.map((f, i) => (
+              <div key={i} className="flex items-center gap-2 rounded-lg border border-input bg-muted/30 px-3 py-2 text-xs">
+                <span className="flex-1 truncate font-medium">{f.name}</span>
+                <button type="button" onClick={() => setMaterials(prev => prev.filter((_, j) => j !== i))}
+                  className="text-muted-foreground hover:text-destructive transition-colors">
+                  <X className="size-3.5" />
+                </button>
               </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            ))}
+          </div>
+        )}
       </div>
 
-      {/* Share link */}
-      <div className={cn('rounded-xl border-2 p-3.5 transition-colors duration-200', genLink ? 'border-primary/30 bg-primary/5' : 'border-input')}>
-        <label className="flex cursor-pointer items-center gap-2.5 text-sm font-semibold">
-          <input type="checkbox" checked={genLink} onChange={(e) => setGenLink(e.target.checked)} className="size-4 accent-primary" />
-          <Link2 className={cn('size-4 transition-colors', genLink ? 'text-primary' : 'text-muted-foreground')} />
-          Generate a share link
-          <span className="text-xs font-normal text-muted-foreground">(bypasses visibility)</span>
-        </label>
-        <AnimatePresence>
-          {genLink && (
-            <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
-              <div className="mt-3 flex items-center gap-3 border-t border-border pt-3">
-                <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap">Expires in</span>
-                <Select value={String(linkTtl)} onValueChange={(v) => setLinkTtl(parseInt(v ?? '48'))}>
-                  <SelectTrigger className="w-44 rounded-xl border-2 py-2">
-                    <SelectValue>{(v) => ({ '24': '24 hours', '48': '48 hours', '72': '72 hours', '168': '7 days' } as Record<string, string>)[String(v)] ?? '48 hours'}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="24">24 hours</SelectItem>
-                    <SelectItem value="48">48 hours (recommended)</SelectItem>
-                    <SelectItem value="72">72 hours</SelectItem>
-                    <SelectItem value="168">7 days</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </div>
     </div>
   )
 }
