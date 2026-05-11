@@ -24,7 +24,8 @@ interface AnalysisResult {
   visualBalanceScore: number; // 0–10
   suggestions: SlideSuggestion[];
   notes: string;
-  source: 'gemini' | 'heuristic';
+  /** Client-facing label. 'ai' = upstream AI analysis; 'heuristic' = rules-only fallback. We deliberately do not name the provider here. */
+  source: 'ai' | 'heuristic';
 }
 
 const PRESENTATION_SYSTEM_PROMPT = `You are a presentation design coach for medical educators at LV Prasad Eye Institute.
@@ -101,8 +102,8 @@ Return strict JSON only.`;
             message: String(s.message).slice(0, 200),
           }))
       : [],
-    notes: typeof parsed.notes === 'string' ? parsed.notes.slice(0, 500) : 'Gemini returned no notes.',
-    source: 'gemini',
+    notes: typeof parsed.notes === 'string' ? parsed.notes.slice(0, 500) : 'AI analysis returned no notes.',
+    source: 'ai',
   };
 }
 
@@ -136,7 +137,7 @@ function heuristicAnalyze(doc: { title: string; kind: DocumentKind; pageCount: n
     visualBalanceScore: balance,
     suggestions,
     notes:
-      'Phase A heuristic analysis (Gemini unavailable or no key). Phase B: Gemini-vision over slide images.',
+      'Heuristic analysis (AI assistant unavailable). Falls back to rules-only scoring of slide count and density.',
     source: 'heuristic',
   };
 }
@@ -167,7 +168,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         result = await geminiAnalyze(doc);
       } catch (err) {
         if (err instanceof GeminiUnavailableError || err instanceof GeminiUnparseableError) {
-          console.warn('[doc-analyze] Gemini failed, falling back to heuristic:', (err as Error).message);
+          console.warn('[doc-analyze] AI analysis failed, falling back to heuristic:', err);
           result = heuristicAnalyze(doc);
         } else {
           throw err;

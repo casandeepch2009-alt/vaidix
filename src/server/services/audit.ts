@@ -123,6 +123,10 @@ export const AUDIT_EVENTS = {
   DECK_SUGGESTION_APPLIED: 'deck.suggestion.applied',
   DECK_SUGGESTION_DISMISSED: 'deck.suggestion.dismissed',
   DECK_SLIDE_REFINED: 'deck.slide.refined',
+  // Per-faculty AI style memory — PRELUDE/POPI-inspired personalization
+  STYLE_PROFILE_UPDATED: 'style_profile.updated',
+  STYLE_PROFILE_REBUILT: 'style_profile.rebuilt',
+  STYLE_PROFILE_CLEARED: 'style_profile.cleared',
   BLUEPRINT_GENERATED: 'blueprint.generated',
   BLUEPRINT_DELETED: 'blueprint.deleted',
   CASE_FORGE_REQUESTED: 'case_forge.requested',

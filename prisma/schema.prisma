@@ -519,6 +519,10 @@ model User {
   sessionFilesUploaded    SessionFile[]                 @relation("SessionFileUploader")
   whiteboardSnapshots     WhiteboardSnapshot[]          @relation("WhiteboardSnapshotAuthor")
   caseTemplatesAuthored   CaseTemplate[]                @relation("CaseTemplateOwner")
+  // Per-faculty AI style memory — raw edit signals captured during deck refinement,
+  // and the distilled rule profile that gets injected into the next forge prompt.
+  facultyEditSignals      FacultyEditSignal[]
+  facultyStyleProfile     FacultyStyleProfile?
 
   @@index([email])
   @@index([role])
@@ -909,11 +913,11 @@ model CaseTemplate {
   analysisResult   Json?
   forgedAt         DateTime?
 
-  program        Program          @relation(fields: [programId], references: [id])
-  topic          Topic?           @relation(fields: [topicId], references: [id])
-  owner          User?            @relation("CaseTemplateOwner", fields: [ownerId], references: [id], onDelete: SetNull)
-  sourceDocument Document?        @relation("CaseTemplateSource", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
-  cases          Case[]
+  program         Program          @relation(fields: [programId], references: [id])
+  topic           Topic?           @relation(fields: [topicId], references: [id])
+  owner           User?            @relation("CaseTemplateOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  sourceDocument  Document?        @relation("CaseTemplateSource", fields: [sourceDocumentId], references: [id], onDelete: SetNull)
+  cases           Case[]
   sessionPreCases SessionPreCase[]
 
   @@index([programId])
@@ -1094,23 +1098,23 @@ model ReviewItem {
 // ════════════════════════════════════════════════════════════════════════════
 
 model Pearl {
-  id                String    @id @default(cuid())
-  title             String
-  body              String    @db.Text
-  topicId           String?
+  id                        String    @id @default(cuid())
+  title                     String
+  body                      String    @db.Text
+  topicId                   String?
   /// W6.11 tenancy. Pearls library is per-program.
-  programId         String
-  sourceType               String // 'recording' | 'document' | 'manual' | 'session_transcript'
-  sourceRecordingId        String?
-  sourceDocumentId         String?
+  programId                 String
+  sourceType                String // 'recording' | 'document' | 'manual' | 'session_transcript'
+  sourceRecordingId         String?
+  sourceDocumentId          String?
   sourceSessionTranscriptId String? // W8.3 — set when extracted from live session transcript
-  extractedByAi            Boolean   @default(false)
-  approved          Boolean   @default(false)
-  approvedById      String?
-  approvedAt        DateTime?
-  citations         Json?
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  extractedByAi             Boolean   @default(false)
+  approved                  Boolean   @default(false)
+  approvedById              String?
+  approvedAt                DateTime?
+  citations                 Json?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   program Program     @relation(fields: [programId], references: [id])
   topic   Topic?      @relation(fields: [topicId], references: [id])
@@ -1570,7 +1574,7 @@ model SessionTranscript {
   finalizedAt DateTime?
   updatedAt   DateTime  @updatedAt
 
-  session      TeachingSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session      TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   qaPairs      PostSessionQa[]
   sjtCases     SjtCase[]
   pblScenarios PblScenario[]
@@ -1600,7 +1604,7 @@ model SjtCase {
   id                  String    @id @default(cuid())
   sessionTranscriptId String
   stem                String    @db.Text
-  options             Json      // string[]
+  options             Json // string[]
   correctIndex        Int?
   rationale           String    @db.Text
   createdByAi         Boolean   @default(true)
@@ -1619,7 +1623,7 @@ model PblScenario {
   id                  String    @id @default(cuid())
   sessionTranscriptId String
   trigger             String    @db.Text
-  objectives          Json      // string[]
+  objectives          Json // string[]
   content             String    @db.Text
   createdByAi         Boolean   @default(true)
   approved            Boolean   @default(false)
@@ -1981,12 +1985,12 @@ model Document {
   createdAt        DateTime       @default(now())
   updatedAt        DateTime       @updatedAt
 
-  uploader         User                  @relation("DocumentUploader", fields: [uploadedById], references: [id])
-  tags             DocumentTag[]
-  sessionLinks     DocumentSessionLink[]
-  deckForgeJobs    DeckForgeJob[]
-  deckForgeInputs  DeckForgeJobInput[]
-  forgedCases      CaseTemplate[]        @relation("CaseTemplateSource")
+  uploader        User                  @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  tags            DocumentTag[]
+  sessionLinks    DocumentSessionLink[]
+  deckForgeJobs   DeckForgeJob[]
+  deckForgeInputs DeckForgeJobInput[]
+  forgedCases     CaseTemplate[]        @relation("CaseTemplateSource")
 
   @@index([uploadedById])
   @@index([status])
@@ -2027,29 +2031,29 @@ model DocumentSessionLink {
 }
 
 model DeckForgeJob {
-  id              String          @id @default(cuid())
+  id              String           @id @default(cuid())
   // Legacy source — jobs created via the document-detail "Forge presentation"
   // quick-start (no briefing, no intent gate). Wizard jobs use `inputs` below.
   documentId      String?
   recordingId     String?
-  sourceKind      DeckForgeSource @default(DOCUMENT)
+  sourceKind      DeckForgeSource  @default(DOCUMENT)
   // Wizard fields (Phase 1A redesign). Null on legacy quick-start jobs.
   intent          DeckForgeIntent?
   briefing        Json? // { audience, sessionType, durationMin, objectives, localContext }
   requestedById   String
-  status          DeckForgeStatus @default(QUEUED)
+  status          DeckForgeStatus  @default(QUEUED)
   inputTitle      String?
   template        String?
   outputS3Key     String?
   extractedPearls Json?
   analysisResult  Json? // W4 C10: { readabilityScore, slideDensityScore, visualBalanceScore, suggestions: [{ slideIdx, kind, message }] }
   slideCount      Int?
-  errorMessage    String?         @db.Text
-  phiBlocked      Boolean         @default(false)
+  errorMessage    String?          @db.Text
+  phiBlocked      Boolean          @default(false)
   reviewedById    String?
   reviewedAt      DateTime?
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 
   document    Document?           @relation(fields: [documentId], references: [id])
   recording   Recording?          @relation(fields: [recordingId], references: [id])
@@ -2128,6 +2132,105 @@ model Blueprint {
   @@index([requestedById])
   @@index([createdAt])
   @@map("blueprints")
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// Per-faculty AI Style Memory (PRELUDE/POPI-inspired)
+// ════════════════════════════════════════════════════════════════════════════
+// Two tables in one cohesive feature:
+//
+//   1. FacultyEditSignal — raw "episode" record. Every time a faculty refines
+//      a slide via AI, manually edits a slide, accepts or dismisses an AI
+//      suggestion, we write one row. Tagged with topic/audience so we can
+//      *scope* retrieval (a glaucoma density-rule never leaks into a uveitis
+//      deck). Owned by the faculty — facultyId is set from auth, never body.
+//
+//   2. FacultyStyleProfile — distilled "category" record. A periodic Sonnet
+//      job reads recent un-processed signals and produces a small set of
+//      natural-language rules (5-10). That JSON is fed verbatim into the
+//      wizard-forge draft prompt as a "FACULTY STYLE PROFILE" block, beside
+//      the existing FacultyHistory engagement-signal block.
+//
+// Cross-user isolation: every read filters by `facultyId = auth.user.id` and
+// every write derives `facultyId` from the authenticated session. There is
+// no admin override and no global scope. Faculty A's rules never touch
+// Faculty B's prompt.
+
+enum FacultyEditSignalKind {
+  REFINE_INSTRUCTION // faculty typed "tighten this" / "drop dosage table" → captured instruction text
+  SLIDE_EDIT // faculty manually PATCHed a slide → before/after diff
+  SUGGESTION_ACCEPTED // faculty accepted an AI suggestion (commit=true)
+  SUGGESTION_DISMISSED // faculty explicitly rejected an AI suggestion
+}
+
+enum FacultyStyleProfileStatus {
+  EMPTY // no rules yet — not enough signals to distill
+  ACTIVE // rules exist and are injected on every forge
+  USER_DISABLED // faculty turned off AI memory in settings (UserPreferences.aiMemoryOptIn=false)
+}
+
+model FacultyEditSignal {
+  id              String                @id @default(cuid())
+  facultyId       String
+  kind            FacultyEditSignalKind
+  // Scope tags — read at distillation/retrieval time so rules are topic-
+  // bound. All optional because not every capture point carries every tag.
+  topicTag        String? // e.g. "glaucoma", "uveitis" — derived from deck inputTitle / briefing
+  audienceTag     String? // e.g. "PG-2", "fellow" — derived from briefing.audience
+  sessionType     String? // "LECTURE" | "CASE_CONFERENCE" | ...
+  // Deck/slide back-references for traceability in the settings UI's "where
+  // did this rule come from" trace. Nullable so signals survive deck deletion.
+  jobId           String?
+  slideId         String?
+  // For REFINE_INSTRUCTION: the user's typed instruction (<= 500 chars).
+  // For SUGGESTION_*: the suggestion message that was accepted/dismissed.
+  // For SLIDE_EDIT: a one-line summary of which fields changed.
+  instructionText String?               @db.Text
+  // Compact before/after snapshot — title, bullets (joined), notes length.
+  // Kept small on purpose: distillation reads patterns, not full payloads.
+  beforeJson      Json?
+  afterJson       Json?
+  // Distillation bookkeeping. Set when this row was rolled into the active
+  // FacultyStyleProfile so we never re-process the same signal twice.
+  processedAt     DateTime?
+  createdAt       DateTime              @default(now())
+
+  faculty User @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  // Distillation reads by (facultyId, processedAt IS NULL, createdAt DESC).
+  // The settings UI lists by (facultyId, createdAt DESC).
+  @@index([facultyId, processedAt])
+  @@index([facultyId, createdAt])
+  @@index([facultyId, topicTag])
+  @@map("faculty_edit_signals")
+}
+
+model FacultyStyleProfile {
+  id                 String                    @id @default(cuid())
+  facultyId          String                    @unique // 1:1 with User — one active profile per faculty
+  status             FacultyStyleProfileStatus @default(EMPTY)
+  // Rules is an array of { id, rule, scopeTags, sourceSignalIds, createdAt }.
+  // 5-10 short natural-language rules, each tied back to the signal ids that
+  // produced it so the settings UI can show "this rule came from these edits".
+  rules              Json                      @default("[]")
+  // Pre-rendered "promptContext" string the wizard-forge service appends to
+  // the Opus draft prompt verbatim. Cached so we don't re-stringify on every
+  // forge — distillation writes this once and reads are free thereafter.
+  promptContext      String?                   @db.Text
+  // How many signals had been written when this profile was last rebuilt.
+  // Compared against current FacultyEditSignal count to decide if a rebuild
+  // is due (RebuildThreshold default = 5 new signals since last build).
+  signalCountAtBuild Int                       @default(0)
+  // Monotonic version so the UI can show "profile v3, updated 2 days ago"
+  // and so audit rows have something to point at when faculty inspects history.
+  version            Int                       @default(1)
+  lastBuildAt        DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  faculty User @relation(fields: [facultyId], references: [id], onDelete: Cascade)
+
+  @@map("faculty_style_profiles")
 }
 
 // ════════════════════════════════════════════════════════════════════════════

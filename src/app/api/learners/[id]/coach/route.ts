@@ -31,7 +31,8 @@ interface CoachReply {
   answer: string;
   followUpQuiz: string;
   caseExample: string;
-  source: 'gemini' | 'stub';
+  /** Client-facing label. 'ai' = real coach reply; 'stub' = offline fallback. Provider name is deliberately omitted. */
+  source: 'ai' | 'stub';
 }
 
 const COACH_SYSTEM_PROMPT = `You are a senior ophthalmology consultant at LV Prasad Eye Institute coaching a resident outside session hours.
@@ -61,14 +62,16 @@ async function geminiCoachResponse(question: string): Promise<CoachReply> {
     answer: typeof parsed.answer === 'string' && parsed.answer.length > 0 ? parsed.answer : 'No answer returned.',
     followUpQuiz: typeof parsed.followUpQuiz === 'string' ? parsed.followUpQuiz : '',
     caseExample: typeof parsed.caseExample === 'string' ? parsed.caseExample : '',
-    source: 'gemini',
+    source: 'ai',
   };
 }
 
 function stubCoachResponse(question: string): CoachReply {
-  // Used when GEMINI_API_KEY is absent or Gemini fails. Keeps dev unblocked.
+  // Used when the upstream AI key is absent or the provider fails. Keeps dev
+  // unblocked. The user-facing answer text must NOT name the provider — ops
+  // can read server logs for the real reason.
   return {
-    answer: `Stub coach response for: "${question.slice(0, 80)}". (GEMINI_API_KEY absent or Gemini unavailable — set the key to enable real coaching.)`,
+    answer: `Offline coach reply for: "${question.slice(0, 80)}". The AI assistant is unavailable right now — please try again in a moment.`,
     followUpQuiz: 'Follow-up: which finding most reliably differentiates the two diagnoses?',
     caseExample: 'Case example: 58 y/o diabetic with sudden vision loss — apply the framework above.',
     source: 'stub',
@@ -109,7 +112,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         reply = await geminiCoachResponse(body.data.question);
       } catch (err) {
         if (err instanceof GeminiUnavailableError || err instanceof GeminiUnparseableError) {
-          console.warn('[coach] gemini failed, falling back to stub:', (err as Error).message);
+          console.warn('[coach] AI failed, falling back to stub:', err);
           reply = stubCoachResponse(body.data.question);
         } else {
           throw err;

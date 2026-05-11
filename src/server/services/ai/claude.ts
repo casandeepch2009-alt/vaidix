@@ -11,8 +11,30 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { env } from '@/lib/env';
 
-export class ClaudeUnavailableError extends Error {}
-export class ClaudeUnparseableError extends Error {}
+// User-safe messages — every `err.message` from this module is treated as
+// client-visible. Upstream identity and rich payloads go into `.detail` for
+// server logs ONLY. Never include `.detail` in API responses.
+const AI_UNAVAILABLE_USER_MESSAGE =
+  'The AI assistant is temporarily unavailable. Please try again in a moment.';
+const AI_UNPARSEABLE_USER_MESSAGE =
+  'The AI assistant returned an unexpected response. Please try again.';
+
+export class ClaudeUnavailableError extends Error {
+  public readonly detail: string;
+  constructor(detail: string) {
+    super(AI_UNAVAILABLE_USER_MESSAGE);
+    this.name = 'ClaudeUnavailableError';
+    this.detail = detail;
+  }
+}
+export class ClaudeUnparseableError extends Error {
+  public readonly detail: string;
+  constructor(detail: string) {
+    super(AI_UNPARSEABLE_USER_MESSAGE);
+    this.name = 'ClaudeUnparseableError';
+    this.detail = detail;
+  }
+}
 
 let _client: Anthropic | null = null;
 function getClient(): Anthropic {

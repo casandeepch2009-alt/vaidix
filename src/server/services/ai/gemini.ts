@@ -15,8 +15,32 @@ import { env } from '@/lib/env';
 
 const GEMINI_BASE = 'https://generativelanguage.googleapis.com/v1beta/models';
 
-export class GeminiUnavailableError extends Error {}
-export class GeminiUnparseableError extends Error {}
+// User-safe messages — every `err.message` from this module is treated as
+// client-visible (toasts, JSON error bodies). Upstream payloads, provider
+// identity, status codes, and raw API JSON go into `.detail` for server logs
+// ONLY. Never include `.detail` in API responses.
+const AI_UNAVAILABLE_USER_MESSAGE =
+  'The AI assistant is temporarily unavailable. Please try again in a moment.';
+const AI_UNPARSEABLE_USER_MESSAGE =
+  'The AI assistant returned an unexpected response. Please try again.';
+
+export class GeminiUnavailableError extends Error {
+  /** Upstream provider+status+body. Server-log only — never sent to clients. */
+  public readonly detail: string;
+  constructor(detail: string) {
+    super(AI_UNAVAILABLE_USER_MESSAGE);
+    this.name = 'GeminiUnavailableError';
+    this.detail = detail;
+  }
+}
+export class GeminiUnparseableError extends Error {
+  public readonly detail: string;
+  constructor(detail: string) {
+    super(AI_UNPARSEABLE_USER_MESSAGE);
+    this.name = 'GeminiUnparseableError';
+    this.detail = detail;
+  }
+}
 
 interface GenerateInput {
   systemInstruction: string;

@@ -32,7 +32,8 @@ export interface GeminiGradeResponse {
   axisScores: Partial<Record<Axis, number>>
   overallVerdict: 'strong' | 'borderline' | 'weak'
   shortFeedback: string
-  source: 'gemini' | 'heuristic'
+  /** Provider-neutral: 'ai' = upstream grader; 'heuristic' = local fallback. */
+  source: 'ai' | 'heuristic'
 }
 
 /**
@@ -66,7 +67,7 @@ export async function gradeWithGemini(
       axisScores: data.axisScores ?? {},
       overallVerdict: data.overallVerdict ?? 'borderline',
       shortFeedback: data.shortFeedback ?? '',
-      source: 'gemini',
+      source: 'ai',
     }
   } catch (err) {
     console.warn('[gradeWithGemini] failed, falling back', err)

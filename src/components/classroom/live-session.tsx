@@ -41,7 +41,7 @@ import {
   saveCaptionPrefs,
   type CaptionLangCode,
 } from '@/components/engagement/live-captions-overlay'
-import { DeepgramCaptionsProducer } from './deepgram-captions-producer'
+import { CaptionsProducer } from './captions-producer'
 import { PreflightBanner } from './preflight-banner'
 import { BreakoutsPanel } from './breakouts-panel'
 import { BreakoutRoomView } from './breakout-room-view'
@@ -780,8 +780,8 @@ function InnerRoom({
           to Deepgram with a server-minted scoped token, and POSTs finalized
           utterances to /captions/publish for fan-out + persistence.
           Gated on `session.status === 'LIVE'` so pre-flight test runs don't
-          burn Deepgram quota and don't leak chatter into the transcript. */}
-      <DeepgramCaptionsProducer
+          burn ASR quota and don't leak chatter into the transcript. */}
+      <CaptionsProducer
         sessionId={session.id}
         enabled={
           role === 'HOST' &&

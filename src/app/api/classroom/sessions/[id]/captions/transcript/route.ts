@@ -88,7 +88,8 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
       transcripts: transcripts.map((t) => ({
         id: t.id,
         language: t.language,
-        source: t.source,
+        // Vendor name ('deepgram', 'sarvam') redacted to 'asr' before wire.
+        source: t.source === 'manual' ? 'manual' : 'asr',
         finalized: t.finalized,
         startedAt: t.startedAt.toISOString(),
         finalizedAt: t.finalizedAt?.toISOString() ?? null,

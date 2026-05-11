@@ -1,10 +1,11 @@
 // ════════════════════════════════════════════════════════════════════════════
-// POST /api/classroom/sessions/[id]/captions/deepgram-token
+// POST /api/classroom/sessions/[id]/captions/captions-token
 // ════════════════════════════════════════════════════════════════════════════
-// Mints a 30-second Deepgram access token for the host's browser to open a
-// direct WebSocket to api.deepgram.com. Host-only — only the speaker
-// publishes captions in Phase 1 (single-feed mic). The master DEEPGRAM_API_KEY
-// never leaves the server.
+// Mints a 30-second access token for the host's browser to open a direct
+// WebSocket to the upstream ASR provider. Host-only — only the speaker
+// publishes captions in Phase 1 (single-feed mic). The provider's master API
+// key never leaves the server. Route path is intentionally vendor-neutral so
+// the URL alone doesn't disclose the ASR vendor in the browser Network tab.
 
 import {
   handleUnexpected,
@@ -28,7 +29,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   const { id: sessionId } = await ctx.params;
 
   // Only the session HOST or CO_HOST can produce captions in Phase 1. Anything
-  // else risks crossed audio streams + uncontrolled Deepgram billing.
+  // else risks crossed audio streams + uncontrolled ASR billing.
   const role = await getEffectiveSessionRole(sessionId, auth.user.id, auth.user.role);
   if (role !== 'HOST' && role !== 'CO_HOST') {
     return jsonError('FORBIDDEN', 'Only the session host can produce captions', 403);
@@ -58,7 +59,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       eventType: AUDIT_EVENTS.CAPTIONS_TOKEN_MINTED,
       entityType: 'TeachingSession',
       entityId: sessionId,
-      summary: 'Deepgram caption token minted',
+      summary: 'Caption producer token minted',
       ...extractRequestMetadata(req),
     });
     return jsonOk({
@@ -68,7 +69,15 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     });
   } catch (err) {
     if (err instanceof DeepgramUnavailableError) {
-      return jsonError('DEEPGRAM_UNAVAILABLE', err.message, 503);
+      // Vendor name redacted from the error code AND message. Rich detail
+      // stays in `err.detail` (or err.message for legacy errors) on the
+      // server for ops; the client only sees a neutral failure code.
+      console.error('[captions-token] ASR provider unavailable', err);
+      return jsonError(
+        'CAPTIONS_UNAVAILABLE',
+        'Captions are temporarily unavailable. Please try again in a moment.',
+        503,
+      );
     }
     return handleUnexpected(err);
   }

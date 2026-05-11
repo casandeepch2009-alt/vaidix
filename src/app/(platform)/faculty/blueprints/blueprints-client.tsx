@@ -271,7 +271,7 @@ function BlueprintDetail({ blueprint }: { blueprint: BlueprintFull }) {
           <h2 className="mt-1 text-xl font-semibold">{blueprint.topic}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             {blueprint.learnerLevel ?? 'Level unspecified'} · Generated{' '}
-            {new Date(blueprint.createdAt).toLocaleString()} · Source: {blueprint.source}
+            {new Date(blueprint.createdAt).toLocaleString()}
           </p>
         </div>
         <div className="flex gap-2">

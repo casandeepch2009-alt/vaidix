@@ -110,7 +110,9 @@ Generate the Precision Education Blueprint now.`;
       topic: input.topic.trim().slice(0, 280),
       learnerLevel: input.learnerLevel?.trim().slice(0, 80) ?? null,
       content: cleaned,
-      source: 'gemini',
+      // Persisted source label is provider-neutral. Concrete provider routing
+      // lives in env config and logs — never in the DB or API surface.
+      source: 'ai',
     },
     select: {
       id: true,

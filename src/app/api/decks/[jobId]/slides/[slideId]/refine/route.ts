@@ -19,8 +19,21 @@ import {
   refineSlideWithInstruction,
   DeckRefineError,
 } from '@/server/services/decks/deck-refine-service';
+import { recordEditSignal } from '@/server/services/decks/faculty-style-profile';
+import { FacultyEditSignalKind } from '@prisma/client';
 
 const FACULTY_LIKE: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
+
+/** Mirrors deriveTopicTag in slides/[slideId]/route.ts — kept inline rather
+ *  than extracted because each call site has slightly different selects and
+ *  inlining keeps the hot path tight. Same rule: first content word of the
+ *  deck title, lowercased, length > 2. */
+function deriveTopicTag(inputTitle: string | null | undefined): string | null {
+  if (!inputTitle) return null;
+  const cleaned = inputTitle.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim();
+  const first = cleaned.split(/\s+/)[0];
+  return first && first.length > 2 ? first : null;
+}
 
 const bodySchema = z.object({
   instruction: z.string().trim().min(2).max(500),
@@ -44,7 +57,7 @@ export async function POST(
 
   const job = await db.deckForgeJob.findUnique({
     where: { id: jobId },
-    select: { requestedById: true },
+    select: { requestedById: true, inputTitle: true, briefing: true },
   });
   if (!job) return jsonError('NOT_FOUND', 'Deck not found', 404);
   if (
@@ -72,6 +85,30 @@ export async function POST(
       instruction: body.data.instruction,
       intent: body.data.intent,
     });
+
+    // Capture the instruction as a style signal — only when the refiner is
+    // the deck owner. Refines on someone else's deck (admin/PD) do NOT
+    // pollute either user's profile.
+    if (job.requestedById === auth.user.id) {
+      const briefing = (job.briefing ?? null) as
+        | { audience?: string; sessionType?: string }
+        | null;
+      void recordEditSignal({
+        facultyId: auth.user.id,
+        kind: FacultyEditSignalKind.REFINE_INSTRUCTION,
+        topicTag: deriveTopicTag(job.inputTitle),
+        audienceTag: briefing?.audience ?? null,
+        sessionType: briefing?.sessionType ?? null,
+        jobId,
+        slideId,
+        instructionText: body.data.instruction,
+        beforeJson: proposal.before,
+        afterJson: proposal.after,
+      }).catch((err) => {
+        console.warn('[style-profile] capture failed (non-fatal):', err);
+      });
+    }
+
     await audit({
       actorId: auth.user.id,
       actorRole: auth.user.role,
@@ -79,7 +116,10 @@ export async function POST(
       entityType: 'Slide',
       entityId: slideId,
       summary: `Refined slide via ${body.data.intent}`,
-      details: { jobId, intent: body.data.intent, source: proposal.source },
+      // `intent` (english | content) is recorded as the routing signal.
+      // The actual model tier is intentionally NOT stored in audit details —
+      // it would let anyone with audit-read access reverse the routing map.
+      details: { jobId, intent: body.data.intent },
       ...extractRequestMetadata(req),
     });
     return jsonOk({ proposal });

@@ -1703,7 +1703,8 @@ interface CoachReport {
   strengths: CoachStrength[]
   growthAreas: CoachGrowthArea[]
   closingNote?: string
-  source?: 'gemini' | 'fallback'
+  /** Provider-neutral: 'ai' = upstream coach; 'fallback' = local deterministic report. */
+  source?: 'ai' | 'fallback'
 }
 
 function ReviewReport({

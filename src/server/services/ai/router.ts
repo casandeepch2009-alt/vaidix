@@ -41,34 +41,65 @@ import {
 } from './deepseek';
 
 // ─── Errors ────────────────────────────────────────────────────────────────
+//
+// Every `err.message` on these classes is treated as **client-visible**: it
+// flows through `jsonError(code, err.message, status)` and into faculty
+// toasts. So we keep `.message` generic and put the provider identity +
+// upstream payload into `.detail` (server-log only).
+//
+// HARDENING: never log `provider` or `detail` to the wire. If you need to
+// surface diagnostic context to ops, log it via `console.error` on the
+// server — it lands in CloudWatch, not in the browser.
+
+const AI_UNAVAILABLE_USER_MESSAGE =
+  'The AI assistant is temporarily unavailable. Please try again in a moment.';
+const AI_UNPARSEABLE_USER_MESSAGE =
+  'The AI assistant returned an unexpected response. Please try again.';
 
 export class AiUnavailableError extends Error {
+  /** Server-log only — must never appear in API responses or client toasts. */
+  public readonly detail: string;
   constructor(
     public readonly provider: 'opus' | 'sonnet' | 'gemini' | 'gemini-image',
-    message: string,
+    detail: string,
   ) {
-    super(`[${provider}] ${message}`);
+    super(AI_UNAVAILABLE_USER_MESSAGE);
+    this.name = 'AiUnavailableError';
+    this.detail = detail;
   }
 }
 
 export class AiUnparseableError extends Error {
+  public readonly detail: string;
   constructor(
     public readonly provider: 'opus' | 'sonnet' | 'gemini' | 'gemini-image',
-    message: string,
+    detail: string,
   ) {
-    super(`[${provider}] ${message}`);
+    super(AI_UNPARSEABLE_USER_MESSAGE);
+    this.name = 'AiUnparseableError';
+    this.detail = detail;
   }
 }
 
+// Pull the rich diagnostic detail off a provider-level error so we can forward
+// it to the router-level wrapper without losing context for server logs.
+function detailOf(err: unknown): string {
+  if (err && typeof err === 'object' && 'detail' in err && typeof (err as { detail: unknown }).detail === 'string') {
+    return (err as { detail: string }).detail;
+  }
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
 function wrapAnthropicError(provider: 'opus' | 'sonnet', err: unknown): never {
-  if (err instanceof ClaudeUnavailableError) throw new AiUnavailableError(provider, err.message);
-  if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError(provider, err.message);
+  if (err instanceof ClaudeUnavailableError) throw new AiUnavailableError(provider, detailOf(err));
+  if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError(provider, detailOf(err));
   throw err;
 }
 
 function wrapGeminiError(provider: 'gemini' | 'gemini-image', err: unknown): never {
-  if (err instanceof GeminiUnavailableError) throw new AiUnavailableError(provider, err.message);
-  if (err instanceof GeminiUnparseableError) throw new AiUnparseableError(provider, err.message);
+  if (err instanceof GeminiUnavailableError) throw new AiUnavailableError(provider, detailOf(err));
+  if (err instanceof GeminiUnparseableError) throw new AiUnparseableError(provider, detailOf(err));
   throw err;
 }
 
@@ -161,10 +192,10 @@ async function callReasoningProvider(opts: ReasoningCallOpts): Promise<string> {
           'Anthropic out of credit — falling through to DeepSeek/Gemini. Top up at console.anthropic.com to restore Opus.',
         );
       } else if (err instanceof ClaudeUnavailableError) {
-        warnOnce('anthropic-unavailable', `Anthropic unavailable: ${err.message}. Falling through.`);
+        warnOnce('anthropic-unavailable', `Anthropic unavailable: ${err.detail}. Falling through.`);
       } else {
         if (err instanceof ClaudeUnparseableError) {
-          throw new AiUnparseableError('opus', err.message);
+          throw new AiUnparseableError('opus', err.detail);
         }
         throw err;
       }
@@ -189,10 +220,10 @@ async function callReasoningProvider(opts: ReasoningCallOpts): Promise<string> {
           'DeepSeek out of credit — falling through to Gemini. Top up at platform.deepseek.com.',
         );
       } else if (err instanceof DeepseekUnavailableError) {
-        warnOnce('deepseek-unavailable', `DeepSeek unavailable: ${err.message}. Falling through.`);
+        warnOnce('deepseek-unavailable', `DeepSeek unavailable: ${err.detail}. Falling through.`);
       } else {
         if (err instanceof DeepseekUnparseableError) {
-          throw new AiUnparseableError('gemini', `[deepseek] ${err.message}`);
+          throw new AiUnparseableError('gemini', `deepseek: ${err.detail}`);
         }
         throw err;
       }
@@ -260,7 +291,7 @@ export async function aiReviewJson<T>(input: ReasoningInput): Promise<T> {
   try {
     return tryParseClaudeJson<T>(text);
   } catch (err) {
-    if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError('opus', err.message);
+    if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError('opus', err.detail);
     throw err;
   }
 }
@@ -288,7 +319,7 @@ export async function aiDesignJson<T>(input: ReasoningInput): Promise<T> {
   try {
     return tryParseClaudeJson<T>(text);
   } catch (err) {
-    if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError('sonnet', err.message);
+    if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError('sonnet', err.detail);
     throw err;
   }
 }
@@ -333,7 +364,7 @@ export async function aiEnhanceContentJson<T>(input: ReasoningInput): Promise<T>
   try {
     return tryParseClaudeJson<T>(text);
   } catch (err) {
-    if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError('opus', err.message);
+    if (err instanceof ClaudeUnparseableError) throw new AiUnparseableError('opus', err.detail);
     throw err;
   }
 }
@@ -383,7 +414,7 @@ export async function aiExtractFromSourceJson<T>(input: ExtractSourceInput): Pro
   try {
     return tryParseGeminiJson<T>(text);
   } catch (err) {
-    if (err instanceof GeminiUnparseableError) throw new AiUnparseableError('gemini', err.message);
+    if (err instanceof GeminiUnparseableError) throw new AiUnparseableError('gemini', err.detail);
     throw err;
   }
 }
