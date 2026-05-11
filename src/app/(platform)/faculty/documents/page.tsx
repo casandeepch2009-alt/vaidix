@@ -18,7 +18,13 @@ export default async function FacultyDocumentsPage() {
   if (!session?.user) redirect('/login?next=/faculty/documents');
   if (!FACULTY_LIKE.includes(session.user.role)) redirect('/dashboard');
 
-  const documents = await listDocuments({ userId: session.user.id, role: session.user.role });
+  // Faculty get a true personal folder — only their own uploads. Program
+  // directors and admins keep the full view for moderation.
+  const personalOnly = session.user.role === Role.FACULTY;
+  const documents = await listDocuments(
+    { userId: session.user.id, role: session.user.role },
+    { mine: personalOnly },
+  );
 
   return (
     <div className="mx-auto max-w-6xl space-y-5 px-4 py-8">
@@ -28,9 +34,13 @@ export default async function FacultyDocumentsPage() {
           <BookOpen className="size-4 text-primary" />
         </div>
         <div>
-          <h1 className="text-xl font-bold tracking-tight">My Documents</h1>
+          <h1 className="text-xl font-bold tracking-tight">
+            {personalOnly ? 'My Documents' : 'Faculty library'}
+          </h1>
           <p className="text-xs text-muted-foreground">
-            Your personal folder — PDFs, slides, notes &amp; videos.{' '}
+            {personalOnly
+              ? 'Your personal folder — PDFs, slides, notes & videos.'
+              : 'All faculty uploads — moderation view.'}{' '}
             <span className="font-semibold text-foreground">{documents.length}</span> saved.
           </p>
         </div>

@@ -1,0 +1,415 @@
+// ════════════════════════════════════════════════════════════════════════════
+// Deck PPTX Renderer
+// ════════════════════════════════════════════════════════════════════════════
+// Server-side .pptx renderer used by both the on-demand export route and the
+// auto-save-to-Document pipeline. Theme + layouts are ported from the
+// standalone vaidix-pptx-generator.html so the on-screen and exported decks
+// read the same.
+
+import PptxGenJS from 'pptxgenjs';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import {
+  DocumentKind,
+  DocumentRoute,
+  DocumentStatus,
+  type SlideLayout,
+} from '@prisma/client';
+import { db } from '@/lib/db';
+import { s3, BUCKET } from '@/lib/storage';
+
+// ─── Theme ──────────────────────────────────────────────────────────────────
+const C = {
+  bg: '040817',
+  navy: '070e28',
+  navy2: '0b1535',
+  panel: '0f1d48',
+  teal: '00d4f0',
+  gold: 'f5b731',
+  w: 'ffffff',
+  w85: 'dde0f0',
+  w65: 'a0a8c8',
+  w40: '555577',
+  panelDark: '111428',
+};
+
+const LAYOUT_W = 13.33; // wide layout
+const LAYOUT_H = 7.5;
+
+export const DECK_PPTX_MIME =
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+
+interface SlideRow {
+  layout: SlideLayout;
+  title: string;
+  bullets: string[];
+  speakerNotes: string | null;
+  accentHex: string | null;
+}
+
+function accentOf(s: SlideRow): string {
+  return s.accentHex && /^[0-9a-fA-F]{6}$/.test(s.accentHex) ? s.accentHex : C.teal;
+}
+
+function addHeader(slide: PptxGenJS.Slide, n: number, total: number) {
+  slide.addShape('rect', {
+    x: 0, y: 0, w: LAYOUT_W, h: 0.52,
+    fill: { color: C.navy }, line: { color: C.panel, width: 0.5 },
+  });
+  slide.addShape('rect', {
+    x: 0, y: 0.52, w: LAYOUT_W / 2, h: 0.028,
+    fill: { color: C.teal }, line: { type: 'none' },
+  });
+  slide.addShape('rect', {
+    x: LAYOUT_W / 2, y: 0.52, w: LAYOUT_W / 2, h: 0.028,
+    fill: { color: C.gold }, line: { type: 'none' },
+  });
+  slide.addText('VAIDIX', {
+    x: 0.3, y: 0.07, w: 2.5, h: 0.28,
+    fontSize: 15, bold: true, color: C.teal, fontFace: 'Georgia', charSpacing: 1.2,
+  });
+  slide.addText('LV Prasad Eye Institute', {
+    x: 0.3, y: 0.36, w: 3, h: 0.14,
+    fontSize: 6.5, color: C.w40, charSpacing: 1.5,
+  });
+  slide.addText(
+    `${String(n).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
+    {
+      x: LAYOUT_W - 1.3, y: 0.17, w: 1.1, h: 0.18,
+      fontSize: 9, color: C.w40, fontFace: 'Courier New', align: 'right',
+    },
+  );
+}
+
+function addFooter(slide: PptxGenJS.Slide, deckTitle: string) {
+  slide.addShape('rect', {
+    x: 0, y: LAYOUT_H - 0.42, w: LAYOUT_W, h: 0.42,
+    fill: { color: C.bg }, line: { color: C.panel, width: 0.5 },
+  });
+  slide.addText(deckTitle, {
+    x: 0.3, y: LAYOUT_H - 0.34, w: 7, h: 0.22,
+    fontSize: 7.5, color: C.w40,
+  });
+  slide.addText('LV Prasad Eye Institute · Confidential', {
+    x: 6, y: LAYOUT_H - 0.34, w: 7, h: 0.22,
+    fontSize: 7.5, color: C.w40, align: 'right',
+  });
+}
+
+function renderTitleOnly(s: PptxGenJS.Slide, slide: SlideRow, deckTitle: string, accent: string) {
+  s.background = { color: C.navy };
+  s.addText(deckTitle.toUpperCase(), {
+    x: 0.7, y: 1.4, w: 11.9, h: 0.3,
+    fontSize: 11, bold: true, color: accent, charSpacing: 4,
+  });
+  s.addText(slide.title, {
+    x: 0.7, y: 1.85, w: 11.9, h: 3,
+    fontSize: 56, bold: true, color: C.w, fontFace: 'Georgia', lineSpacingMultiple: 1.05,
+  });
+  s.addShape('rect', {
+    x: 0.7, y: 5.0, w: 1.6, h: 0.045,
+    fill: { color: accent }, line: { type: 'none' },
+  });
+}
+
+function renderClosing(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
+  s.background = { color: C.navy };
+  s.addText(slide.title, {
+    x: 0.7, y: 2.4, w: 11.9, h: 2,
+    fontSize: 64, bold: true, color: C.w, align: 'center', fontFace: 'Georgia',
+  });
+  if (slide.bullets.length > 0) {
+    s.addText(slide.bullets.join('  ·  '), {
+      x: 1.5, y: 4.6, w: 10.3, h: 0.6,
+      fontSize: 16, color: C.w65, align: 'center',
+    });
+  }
+  s.addShape('rect', {
+    x: LAYOUT_W / 2 - 0.6, y: 5.4, w: 1.2, h: 0.04,
+    fill: { color: accent }, line: { type: 'none' },
+  });
+}
+
+function renderTitleBullets(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
+  s.background = { color: C.navy2 };
+  s.addText(slide.title, {
+    x: 0.7, y: 0.95, w: 11.9, h: 1.0,
+    fontSize: 30, bold: true, color: C.w, fontFace: 'Georgia', lineSpacingMultiple: 1.15,
+  });
+  s.addShape('rect', {
+    x: 0.7, y: 2.0, w: 1.0, h: 0.04,
+    fill: { color: accent }, line: { type: 'none' },
+  });
+  if (slide.bullets.length > 0) {
+    s.addText(
+      slide.bullets.map((b) => ({ text: b, options: { bullet: { code: '25B8' } } })),
+      {
+        x: 0.9, y: 2.4, w: 11.5, h: 4.2,
+        fontSize: 18, color: C.w85, lineSpacingMultiple: 1.45, valign: 'top', paraSpaceAfter: 8,
+      },
+    );
+  }
+}
+
+function renderTwoColumn(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
+  s.background = { color: C.navy2 };
+  s.addText(slide.title, {
+    x: 0.7, y: 0.95, w: 11.9, h: 1.0,
+    fontSize: 28, bold: true, color: C.w, fontFace: 'Georgia',
+  });
+  s.addShape('rect', {
+    x: 0.7, y: 2.0, w: 1.0, h: 0.04,
+    fill: { color: accent }, line: { type: 'none' },
+  });
+  const half = Math.ceil(slide.bullets.length / 2);
+  const left = slide.bullets.slice(0, half);
+  const right = slide.bullets.slice(half);
+  if (left.length > 0) {
+    s.addText(
+      left.map((b) => ({ text: b, options: { bullet: { code: '25B8' } } })),
+      { x: 0.9, y: 2.4, w: 5.7, h: 4.2, fontSize: 16, color: C.w85, lineSpacingMultiple: 1.4 },
+    );
+  }
+  if (right.length > 0) {
+    s.addText(
+      right.map((b) => ({ text: b, options: { bullet: { code: '25B8' } } })),
+      { x: 6.9, y: 2.4, w: 5.7, h: 4.2, fontSize: 16, color: C.w85, lineSpacingMultiple: 1.4 },
+    );
+  }
+}
+
+function renderQuote(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
+  s.background = { color: C.navy };
+  s.addText('"', {
+    x: 0.9, y: 1.6, w: 1, h: 1.6,
+    fontSize: 110, color: accent, fontFace: 'Georgia',
+  });
+  s.addText(slide.title, {
+    x: 1.5, y: 2.6, w: 10.5, h: 2.5,
+    fontSize: 26, color: C.w, italic: true, fontFace: 'Georgia', lineSpacingMultiple: 1.4,
+  });
+  if (slide.bullets[0]) {
+    s.addText(`— ${slide.bullets[0]}`, {
+      x: 1.5, y: 5.2, w: 10.5, h: 0.5,
+      fontSize: 14, color: C.w65, italic: true,
+    });
+  }
+}
+
+function renderInteraction(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
+  s.background = { color: C.navy2 };
+  s.addShape('rect', {
+    x: 0.7, y: 0.95, w: 1.4, h: 0.36,
+    fill: { color: accent }, line: { type: 'none' },
+  });
+  s.addText('INTERACT', {
+    x: 0.7, y: 0.95, w: 1.4, h: 0.36,
+    fontSize: 10, bold: true, color: C.bg, align: 'center', valign: 'middle', charSpacing: 3,
+  });
+  s.addText(slide.title, {
+    x: 0.7, y: 1.55, w: 11.9, h: 1.4,
+    fontSize: 28, bold: true, color: C.w, fontFace: 'Georgia',
+  });
+  for (let i = 0; i < slide.bullets.length; i++) {
+    const y = 3.2 + i * 0.7;
+    s.addShape('rect', {
+      x: 0.9, y, w: 11.5, h: 0.6,
+      fill: { color: C.panel }, line: { color: C.panelDark, width: 0.5 },
+    });
+    s.addText(`${String.fromCharCode(65 + i)}.`, {
+      x: 1.05, y, w: 0.5, h: 0.6,
+      fontSize: 16, bold: true, color: accent, valign: 'middle',
+    });
+    s.addText(slide.bullets[i], {
+      x: 1.55, y, w: 10.7, h: 0.6,
+      fontSize: 14, color: C.w85, valign: 'middle',
+    });
+  }
+}
+
+function renderImageFocus(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
+  s.background = { color: C.navy2 };
+  s.addText(slide.title, {
+    x: 0.7, y: 0.95, w: 11.9, h: 0.9,
+    fontSize: 26, bold: true, color: C.w, fontFace: 'Georgia',
+  });
+  s.addShape('rect', {
+    x: 0.9, y: 2.1, w: 11.5, h: 4.0,
+    fill: { color: C.panelDark }, line: { color: accent, width: 1.2, dashType: 'dash' },
+  });
+  s.addText('[ Image / OCT / fundus photo placeholder ]', {
+    x: 0.9, y: 3.8, w: 11.5, h: 0.5,
+    fontSize: 12, color: C.w40, align: 'center',
+  });
+  if (slide.bullets[0]) {
+    s.addText(slide.bullets[0], {
+      x: 0.9, y: 6.3, w: 11.5, h: 0.5,
+      fontSize: 14, color: C.w85,
+    });
+  }
+}
+
+function renderSlide(
+  pptx: PptxGenJS,
+  slide: SlideRow,
+  index: number,
+  total: number,
+  deckTitle: string,
+) {
+  const s = pptx.addSlide();
+  const accent = accentOf(slide);
+  switch (slide.layout) {
+    case 'TITLE_ONLY':    renderTitleOnly(s, slide, deckTitle, accent); break;
+    case 'CLOSING':       renderClosing(s, slide, accent); break;
+    case 'TWO_COLUMN':    renderTwoColumn(s, slide, accent); break;
+    case 'QUOTE':         renderQuote(s, slide, accent); break;
+    case 'INTERACTION':   renderInteraction(s, slide, accent); break;
+    case 'IMAGE_FOCUS':   renderImageFocus(s, slide, accent); break;
+    case 'TITLE_BULLETS':
+    default:              renderTitleBullets(s, slide, accent);
+  }
+  addHeader(s, index + 1, total);
+  addFooter(s, deckTitle);
+  if (slide.speakerNotes) s.addNotes(slide.speakerNotes);
+  return s;
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+export interface RenderedDeck {
+  buffer: Buffer;
+  slideCount: number;
+  deckTitle: string;
+  requestedById: string;
+}
+
+/**
+ * Load a forge job's slides and render to a .pptx buffer. Returns null if the
+ * job has no slides yet (e.g. forge failed mid-flight).
+ */
+export async function renderDeckPptxBuffer(opts: {
+  jobId: string;
+  authorName: string;
+}): Promise<RenderedDeck | null> {
+  const job = await db.deckForgeJob.findUnique({
+    where: { id: opts.jobId },
+    select: {
+      id: true,
+      inputTitle: true,
+      requestedById: true,
+      slides: { orderBy: { order: 'asc' } },
+    },
+  });
+  if (!job || job.slides.length === 0) return null;
+
+  const pptx = new PptxGenJS();
+  pptx.layout = 'LAYOUT_WIDE';
+  pptx.title = job.inputTitle ?? 'Vaidix Deck';
+  pptx.company = 'LV Prasad Eye Institute';
+  pptx.author = opts.authorName;
+
+  const deckTitle = job.inputTitle ?? 'Vaidix Deck';
+  const total = job.slides.length;
+  job.slides.forEach((s, i) => {
+    renderSlide(
+      pptx,
+      {
+        layout: s.layout,
+        title: s.title,
+        bullets: s.bullets,
+        speakerNotes: s.speakerNotes,
+        accentHex: s.accentHex,
+      },
+      i, total, deckTitle,
+    );
+  });
+
+  const buffer = (await pptx.write({ outputType: 'nodebuffer' })) as Buffer;
+  return { buffer, slideCount: total, deckTitle, requestedById: job.requestedById };
+}
+
+/**
+ * Render the latest slides for a DeckForgeJob, upload to S3, and upsert a
+ * Document row (matched by deckForgeJobId) so the forged deck shows up in the
+ * faculty's documents library. Idempotent — on re-render it overwrites both
+ * the S3 object and the Document metadata. Soft-deleted Documents are NOT
+ * revived; a fresh row is created instead so the user's deletion sticks.
+ *
+ * Best-effort by design: if rendering or upload fails, returns null so the
+ * caller (forge / finalize / export) can continue without surfacing the
+ * failure to the user. Errors are logged.
+ */
+export async function persistDeckAsDocument(opts: {
+  jobId: string;
+}): Promise<{ documentId: string } | null> {
+  try {
+    const job = await db.deckForgeJob.findUnique({
+      where: { id: opts.jobId },
+      select: { id: true, requestedById: true },
+    });
+    if (!job) return null;
+
+    const uploader = await db.user.findUnique({
+      where: { id: job.requestedById },
+      select: { name: true },
+    });
+    const authorName = uploader?.name ?? 'Vaidix';
+
+    const rendered = await renderDeckPptxBuffer({ jobId: opts.jobId, authorName });
+    if (!rendered) return null;
+
+    const s3Key = `documents/deck-forge/${job.requestedById}/${opts.jobId}.pptx`;
+    await s3.send(
+      new PutObjectCommand({
+        Bucket: BUCKET,
+        Key: s3Key,
+        Body: rendered.buffer,
+        ContentType: DECK_PPTX_MIME,
+      }),
+    );
+
+    const existing = await db.document.findFirst({
+      where: { deckForgeJobId: opts.jobId, deletedAt: null },
+      select: { id: true },
+    });
+
+    if (existing) {
+      await db.document.update({
+        where: { id: existing.id },
+        data: {
+          title: rendered.deckTitle,
+          s3Key,
+          sizeBytes: BigInt(rendered.buffer.byteLength),
+          pageCount: rendered.slideCount,
+          mimeType: DECK_PPTX_MIME,
+          kind: DocumentKind.PPT,
+          route: DocumentRoute.DECK_FORGE,
+        },
+      });
+      return { documentId: existing.id };
+    }
+
+    const created = await db.document.create({
+      data: {
+        uploadedById: job.requestedById,
+        title: rendered.deckTitle,
+        kind: DocumentKind.PPT,
+        route: DocumentRoute.DECK_FORGE,
+        s3Key,
+        sizeBytes: BigInt(rendered.buffer.byteLength),
+        pageCount: rendered.slideCount,
+        mimeType: DECK_PPTX_MIME,
+        status: DocumentStatus.UPLOADED,
+        visibility: DocumentStatus.PRIVATE_FACULTY,
+        deckForgeJobId: opts.jobId,
+      },
+      select: { id: true },
+    });
+    return { documentId: created.id };
+  } catch (err) {
+    console.error('[deck-pptx-renderer] persistDeckAsDocument failed', {
+      jobId: opts.jobId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}

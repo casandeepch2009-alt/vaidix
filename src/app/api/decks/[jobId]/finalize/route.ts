@@ -17,6 +17,7 @@ import {
 } from '@/server/services/api-helpers';
 import { db } from '@/lib/db';
 import { audit, AUDIT_EVENTS, extractRequestMetadata } from '@/server/services/audit';
+import { persistDeckAsDocument } from '@/server/services/decks/deck-pptx-renderer';
 
 const FACULTY_LIKE: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
 
@@ -71,6 +72,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ jobId: string 
         reviewedAt: new Date(),
       },
     });
+
+    // Refresh the saved Document copy to the finalized slide set. Best-effort.
+    await persistDeckAsDocument({ jobId });
 
     await audit({
       actorId: auth.user.id,

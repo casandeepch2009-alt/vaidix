@@ -32,6 +32,7 @@ import {
   FileVideo,
   FileAudio,
   File as FileIcon,
+  Trash2,
 } from 'lucide-react';
 import { csrfHeaders } from '@/lib/csrf-client';
 import {
@@ -277,6 +278,38 @@ export function DocumentDetailClient({
       setLinking(false);
     }
   }, [pickedSessionId, doc.id, availableSessions, router]);
+
+  // ─── Delete ───────────────────────────────────────────────────────────────
+  // Mirrors `canManage` in document-service.ts: admins and program directors
+  // can delete any document; faculty only their own. The DELETE endpoint
+  // re-validates, so this is purely a visibility toggle.
+  const canDelete =
+    actor.role === Role.ADMIN ||
+    actor.role === Role.PROGRAM_DIRECTOR ||
+    actor.id === doc.uploaderId;
+
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  const deleteDocument = useCallback(async () => {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      const res = await fetch(`/api/documents/${doc.id}`, {
+        method: 'DELETE',
+        headers: { ...csrfHeaders() },
+      });
+      const json = (await res.json()) as { ok: boolean; error?: { message: string } };
+      if (!res.ok || !json.ok) {
+        throw new Error(json.error?.message ?? `Delete failed (${res.status})`);
+      }
+      router.push('/faculty/documents');
+    } catch (err) {
+      setDeleteError((err as Error).message);
+      setDeleting(false);
+    }
+  }, [doc.id, router]);
 
   // ─── Header values ────────────────────────────────────────────────────────
 
@@ -598,6 +631,33 @@ export function DocumentDetailClient({
               </Row>
             </dl>
           </motion.section>
+
+          {/* Danger zone */}
+          {canDelete && (
+            <motion.section
+              variants={{ hidden: { opacity: 0, y: 10 }, visible: { opacity: 1, y: 0 } }}
+              className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-5 backdrop-blur"
+            >
+              <h2 className="mb-1 text-sm font-semibold text-rose-700 dark:text-rose-300">
+                Delete document
+              </h2>
+              <p className="mb-3 text-[11px] text-muted-foreground">
+                Removes the document from your library and session study packs. Forged
+                decks and cases stay. This can be undone within 30 days by an admin.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleteError(null);
+                  setConfirmDeleteOpen(true);
+                }}
+                className="inline-flex w-full items-center justify-center gap-1.5 rounded-lg border border-rose-500/40 bg-rose-500/10 px-3 py-2 text-xs font-medium text-rose-700 transition hover:bg-rose-500/15 dark:text-rose-300"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete document
+              </button>
+            </motion.section>
+          )}
         </div>
       </div>
 
@@ -605,6 +665,93 @@ export function DocumentDetailClient({
       <p className="text-[10px] text-muted-foreground">
         Viewing as {actor.role.toLowerCase().replace(/_/g, ' ')}.
       </p>
+
+      {/* Delete confirm modal */}
+      <AnimatePresence>
+        {confirmDeleteOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md"
+            onClick={() => !deleting && setConfirmDeleteOpen(false)}
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.93, y: 12 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="w-full max-w-md overflow-hidden rounded-3xl border border-border bg-card shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start gap-3 border-b border-border/60 px-6 py-4">
+                <div className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-rose-500/15">
+                  <Trash2 className="size-4 text-rose-600 dark:text-rose-400" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold">Delete this document?</p>
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{doc.title}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteOpen(false)}
+                  disabled={deleting}
+                  className="rounded-xl p-2 text-muted-foreground transition hover:bg-muted/60 disabled:opacity-40"
+                  aria-label="Close"
+                >
+                  <X className="size-4" />
+                </button>
+              </div>
+
+              <div className="space-y-3 px-6 py-5 text-xs text-muted-foreground">
+                <p>
+                  It will disappear from the library and from any session study pack it&apos;s
+                  attached to. Forged decks and cases that came from this document stay
+                  intact.
+                </p>
+                <p>
+                  An admin can restore it within 30 days. After that it&apos;s purged
+                  permanently.
+                </p>
+                {deleteError && (
+                  <div className="flex items-start gap-1.5 rounded-md bg-rose-500/10 px-2.5 py-2 text-rose-700 dark:text-rose-300">
+                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                    <span>{deleteError}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-2 border-t border-border/60 bg-muted/20 px-6 py-4">
+                <button
+                  type="button"
+                  onClick={() => setConfirmDeleteOpen(false)}
+                  disabled={deleting}
+                  className="rounded-lg border border-input bg-background px-3 py-1.5 text-xs font-medium transition hover:bg-muted/60 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={deleteDocument}
+                  disabled={deleting}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-medium text-white transition hover:bg-rose-500 disabled:opacity-60"
+                >
+                  {deleting ? (
+                    <>
+                      <Loader2 className="size-3.5 animate-spin" /> Deleting…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="size-3.5" /> Delete
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
