@@ -6,7 +6,7 @@ import {
   X, Clock, Users, RefreshCw, ExternalLink, BookOpen, Activity,
   Search, BookMarked, Wrench, ClipboardList, ChevronDown, ChevronUp,
   ArrowRight, Zap, Video, CheckCircle2, Circle, Radio,
-  MessageSquare, BarChart3, CalendarClock,
+  MessageSquare, BarChart3, CalendarClock, Link2, Check,
 } from 'lucide-react'
 import Link from 'next/link'
 import { format, differenceInMinutes } from 'date-fns'
@@ -382,6 +382,11 @@ export function SessionPreviewPanel({ event, allEvents, onClose, onNavigate }: S
   const [preview, setPreview]   = useState<SessionPreview | null>(null)
   const [loading, setLoading]   = useState(false)
   const [activeId, setActiveId] = useState<string | null>(null)
+  // `copied` flips to true for ~1.6s after the host clicks the guest-link
+  // copy button, swapping the icon to a checkmark. Cheap visual feedback —
+  // the alternative (a toast) would require pulling a global notification
+  // primitive into a leaf component.
+  const [copied, setCopied] = useState(false)
 
   const targetId = activeId ?? event?.sessionId
 
@@ -598,6 +603,44 @@ export function SessionPreviewPanel({ event, allEvents, onClose, onNavigate }: S
                           <CalendarClock className="size-3.5" />
                           Reschedule
                         </Link>
+                      )}
+                      {/* Copy guest link — only meaningful when the session is
+                          openToAll (Teams-style "anyone with the link can
+                          join"). For invite-only sessions the URL would just
+                          bounce visitors to /login, which isn't a "share
+                          link" UX, so we hide the button there. The host can
+                          flip openToAll on the /edit page. */}
+                      {preview.openToAll && preview.status !== 'CANCELLED' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const url = `${window.location.origin}/classroom/${preview.id}`
+                            // Modern Clipboard API is HTTPS-only; on prod
+                            // (https://vaidix.arthivaa.com) we're fine. The
+                            // fallback is a no-op — clipboard write rejection
+                            // just leaves `copied` false and the user can
+                            // long-press the button to read the tooltip URL.
+                            navigator.clipboard?.writeText(url).then(() => {
+                              setCopied(true)
+                              setTimeout(() => setCopied(false), 1600)
+                            }).catch(() => {})
+                          }}
+                          title={`Copy: ${typeof window !== 'undefined' ? window.location.origin : ''}/classroom/${preview.id}`}
+                          className="flex items-center gap-1.5 rounded-lg border border-border px-4 py-2 text-xs font-semibold text-foreground transition hover:bg-accent active:scale-95"
+                          data-testid="copy-guest-link"
+                        >
+                          {copied ? (
+                            <>
+                              <Check className="size-3.5 text-emerald-600 dark:text-emerald-400" />
+                              Copied
+                            </>
+                          ) : (
+                            <>
+                              <Link2 className="size-3.5" />
+                              Copy guest link
+                            </>
+                          )}
+                        </button>
                       )}
                       <button
                         onClick={() => onNavigate(preview.id)}
