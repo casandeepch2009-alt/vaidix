@@ -42,6 +42,7 @@ import {
   GridLayout,
   ParticipantTile,
   useLocalParticipant,
+  useParticipants,
   useTracks,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
@@ -361,20 +362,15 @@ function GuestLiveRoom({
       token={token}
       serverUrl={url}
       connect
-      audio
-      video
+      audio={canPublish}
+      video={canPublish}
       onDisconnected={onLeave}
       data-lk-theme="default"
       className="h-screen w-screen"
     >
-      <div className="flex h-full flex-col bg-black text-white">
-        <header className="flex items-center justify-between px-4 py-2 text-sm">
-          <span className="truncate font-semibold">{title}</span>
-          <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
-            Guest
-          </span>
-        </header>
-        <main className="flex-1 overflow-hidden p-2">
+      <div className="flex h-full flex-col bg-slate-950 text-white">
+        <GuestHeader title={title} />
+        <main className="flex-1 overflow-hidden p-3">
           <GuestStage />
         </main>
         <RoomAudioRenderer />
@@ -384,16 +380,66 @@ function GuestLiveRoom({
   )
 }
 
+function GuestHeader({ title }: { title: string }) {
+  // Show all participants in the room so the guest knows who they're with —
+  // matches what authenticated users see in their header strip.
+  const participants = useParticipants()
+  const count = participants.length
+  return (
+    <header className="flex items-center justify-between border-b border-white/5 bg-black/40 px-4 py-2.5 text-sm">
+      <div className="flex min-w-0 items-center gap-3">
+        <span className="truncate font-semibold">{title}</span>
+        <span className="hidden items-center gap-1.5 rounded-full bg-white/5 px-2 py-0.5 text-xs text-white/70 sm:inline-flex">
+          <span className="relative flex size-1.5">
+            <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+            <span className="relative inline-flex size-1.5 rounded-full bg-emerald-400" />
+          </span>
+          {count} {count === 1 ? 'person' : 'people'}
+        </span>
+      </div>
+      <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300">
+        Guest
+      </span>
+    </header>
+  )
+}
+
 function GuestStage() {
+  // Surface every kind of activity, not just camera/screen-share:
+  //   - Camera with placeholder — participants get a tile even if their
+  //     camera is off (avatar + name placeholder).
+  //   - Microphone with placeholder — audio-only participants (host
+  //     speaking with no camera, common for lectures) still get a tile
+  //     instead of vanishing from the grid.
+  //   - ScreenShare — appears as its own tile when someone shares.
+  // The previous version only subscribed to Camera + ScreenShare, which
+  // is why a session where the host had camera off looked like an empty
+  // black screen to guests.
   const tracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
+      { source: Track.Source.Microphone, withPlaceholder: true },
     ],
     { onlySubscribed: false },
   )
+  // Dedupe by participant — useTracks returns one row per source per
+  // participant, so a host with mic+camera would get TWO tiles otherwise.
+  // Prefer camera/screen-share when both exist for the same participant.
+  const seen = new Set<string>()
+  const sorted = [...tracks].sort((a, b) => {
+    const rank = (s: Track.Source) =>
+      s === Track.Source.ScreenShare ? 0 : s === Track.Source.Camera ? 1 : 2
+    return rank(a.source) - rank(b.source)
+  })
+  const deduped = sorted.filter((t) => {
+    const key = `${t.participant.identity}:${t.source === Track.Source.ScreenShare ? 'ss' : 'main'}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
   return (
-    <GridLayout tracks={tracks} className="h-full">
+    <GridLayout tracks={deduped} className="h-full rounded-2xl bg-black/30 ring-1 ring-white/5">
       <ParticipantTile />
     </GridLayout>
   )
