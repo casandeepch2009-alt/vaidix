@@ -289,14 +289,21 @@ export async function POST(req: Request) {
           });
         }
 
-        // Status flip + recording start are gated to the scheduled window.
-        // Outside the window this room_started is a pre-flight test — the
-        // host is just opening the room early to A/V check. Status stays
-        // SCHEDULED, no recording, no LIVE pill on the classroom feed.
-        const flip = await maybeFlipToLive(sessionId, null);
-        if (flip.flipped) {
-          await maybeStartRecording(sessionId);
-        }
+        // Status flip is gated to the scheduled window. Outside the window
+        // this room_started is a pre-flight test — the host is just opening
+        // the room early to A/V check. Status stays SCHEDULED, no LIVE pill.
+        //
+        // NOTE on recording: we intentionally do NOT start egress here.
+        // `room_started` fires the instant the first WebSocket handshake
+        // completes — before the browser has finished getUserMedia, ICE
+        // negotiation, or published any track. If we kick off the egress
+        // bot at this moment it joins an empty room, waits ~15s for media
+        // that hasn't arrived yet, and aborts with "Start signal not
+        // received" (LiveKit egress error code 412). Egress only succeeds
+        // when there's actually media flowing, so the trigger lives in
+        // `track_published` below — that event guarantees at least one
+        // participant is sending audio/video at the moment we dispatch.
+        await maybeFlipToLive(sessionId, null);
         break;
       }
       case 'room_finished': {
@@ -357,13 +364,15 @@ export async function POST(req: Request) {
         });
         // Catch-up: a host may have opened the room early (pre-flight, status
         // stayed SCHEDULED). Once a participant arrives *and* the window is
-        // open, this is the moment to flip and start recording. Also handles
+        // open, this is the moment to flip status to LIVE. Also handles
         // recurring sessions where the master row is ENDED from a prior
         // occurrence — `maybeFlipToLive` allows ENDED→LIVE for recurring.
-        const flip = await maybeFlipToLive(sessionId, userId);
-        if (flip.flipped) {
-          await maybeStartRecording(sessionId);
-        }
+        //
+        // Recording is intentionally NOT triggered here. See the note in
+        // the `room_started` case above — getUserMedia + ICE haven't
+        // completed at participant_joined time, so egress would join an
+        // empty room and abort. Recording fires from `track_published`.
+        await maybeFlipToLive(sessionId, userId);
         break;
       }
       case 'participant_left': {
@@ -373,6 +382,27 @@ export async function POST(req: Request) {
           where: { sessionId, userId, leftAt: null },
           data: { leftAt: new Date() },
         });
+        break;
+      }
+      case 'track_published': {
+        // This is the correct moment to start egress: a participant has
+        // negotiated ICE, completed getUserMedia, and is actively pushing
+        // media into the room. The egress recorder bot will get its
+        // "start signal" immediately on join instead of timing out.
+        //
+        // maybeStartRecording is idempotent — multiple track_published
+        // events (host's mic, then camera, then a guest's mic, etc.)
+        // all hit the same code path but only the first one actually
+        // dispatches; subsequent calls see an ACTIVE Recording row and
+        // short-circuit. Subscriber-only participants (webinar viewers)
+        // never publish a track, which is correct — there's nothing for
+        // egress to capture in a viewer-only session.
+        //
+        // We don't filter by track type (audio vs video) here. Both are
+        // valid recording starts: an audio-only session (e.g. case
+        // discussion with slides shared but no camera) should still
+        // record the audio.
+        await maybeStartRecording(sessionId);
         break;
       }
       default:
