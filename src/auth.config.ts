@@ -102,7 +102,19 @@ export const authConfig: NextAuthConfig = {
         /^\/api\/p\/[^/]+$/.test(nextUrl.pathname) ||
         // Live-captions ingest is bearer-token authed inside the route handler
         // (LiveKit Agent uses a shared secret, not session cookies).
-        /^\/api\/classroom\/sessions\/[^/]+\/live-captions\/ingest$/.test(nextUrl.pathname);
+        /^\/api\/classroom\/sessions\/[^/]+\/live-captions\/ingest$/.test(nextUrl.pathname) ||
+        // Anonymous guest join (Teams parity) — middleware lets these through
+        // so the (call) route page + /guest API can perform their own
+        // openToAll check. /classroom/[id]/edit, /study, etc. are NOT matched
+        // by this regex (they have an additional path segment) and still
+        // require auth via the (platform) layout chain.
+        //   - /classroom/<id>         → renders authed live-session OR
+        //                                <GuestPrejoin> OR redirects to
+        //                                /login depending on openToAll.
+        //   - /api/.../guest          → POST registers a guest + sets cookie;
+        //                                GET polls + mints LiveKit token.
+        /^\/classroom\/[^/]+$/.test(nextUrl.pathname) ||
+        /^\/api\/classroom\/sessions\/[^/]+\/guest$/.test(nextUrl.pathname);
       if (isPublic) return true;
       if (!isLoggedIn) return false;
       return true;
