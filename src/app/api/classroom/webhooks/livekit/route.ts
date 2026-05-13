@@ -320,14 +320,23 @@ export async function POST(req: Request) {
         // Egress recorder bot joins as a participant too — its identity is the
         // egressId (EG_*). Don't track it as a real attendee.
         if (userId.startsWith('EG_')) break;
+        // Anonymous guests get the identity `guest_<admissionId>` (see
+        // /api/classroom/sessions/[id]/guest/route.ts:149). There is no
+        // corresponding User row for them — guests are tracked in
+        // SessionAdmission (with a nullable userId + guestKey, added in
+        // migration 20260514000000_session_admission_guest_support). Trying
+        // to write them into SessionParticipant violates the FK constraint
+        // `session_participants_userId_fkey` and spams the app log on every
+        // guest join. Skip cleanly.
+        if (userId.startsWith('guest_')) break;
         // Resolve the participant's role at join time so SessionParticipant
-        // captures it (HOST / FACULTY / RESIDENT / etc.). Falls back to a
-        // generic 'PARTICIPANT' if the user record has been deleted.
+        // captures it (HOST / FACULTY / RESIDENT / etc.). If the User row
+        // has been deleted in the meantime, also skip — the FK would fail.
         const u = await db.user.findUnique({
           where: { id: userId },
           select: { role: true },
         });
-        const roleStr = u?.role ?? 'PARTICIPANT';
+        if (!u) break;
         // Upsert so we record joins even if there was no pre-created row
         // (e.g. an open-to-all session where attendance wasn't pre-seeded).
         // The unique constraint on (sessionId, userId) makes this idempotent.
@@ -336,7 +345,7 @@ export async function POST(req: Request) {
           create: {
             sessionId,
             userId,
-            role: roleStr,
+            role: u.role,
             joinedAt: new Date(),
             livekitIdentity: userId,
           },
