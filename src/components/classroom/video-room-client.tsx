@@ -69,7 +69,9 @@ export interface FileReservation {
 export interface PendingAdmission {
   id: string
   displayName: string | null
-  user: { id: string; name: string; email: string; avatarUrl: string | null; role: string }
+  // Null when this is an anonymous guest (Teams-style join without a Vaidix
+  // account). Host UI falls back to `displayName` and shows a "Guest" badge.
+  user: { id: string; name: string; email: string; avatarUrl: string | null; role: string } | null
 }
 
 export interface ShareLink {

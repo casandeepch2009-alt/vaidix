@@ -132,8 +132,19 @@ export function ParticipantSidebar({
             {pending.map((p) => (
               <li key={p.id} className="flex items-center justify-between gap-2 rounded-md bg-card p-2">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{p.displayName ?? p.user.name}</div>
-                  <div className="truncate text-xs text-muted-foreground">{p.user.email}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-sm font-medium">
+                      {p.displayName ?? p.user?.name ?? 'Guest'}
+                    </span>
+                    {!p.user && (
+                      <span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                        Guest
+                      </span>
+                    )}
+                  </div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    {p.user?.email ?? 'Anonymous guest — joined via link'}
+                  </div>
                 </div>
                 <div className="flex shrink-0 gap-1">
                   <Button size="icon-sm" variant="ghost" onClick={() => admit(p.id)}>

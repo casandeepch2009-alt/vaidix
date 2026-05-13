@@ -1,3 +1,25 @@
+// ════════════════════════════════════════════════════════════════════════════
+// /classroom/[id] — the in-call entry point
+// ════════════════════════════════════════════════════════════════════════════
+// Reachable both by authenticated members AND by anonymous guests joining
+// an openToAll session via a shared link (Teams-style "anyone with the link
+// can join"). Branches:
+//
+//   1. session exists, viewer is signed in
+//        → render the full authed LiveSession (existing flow)
+//        → forward shareToken (?t=) so the waiting-room path still works for
+//          non-cohort signed-in viewers
+//
+//   2. session exists, viewer is NOT signed in
+//        a) TeachingSession.openToAll = true
+//             → render <GuestPrejoin>, which asks for a display name then
+//               polls /api/classroom/sessions/[id]/guest until ADMITTED.
+//        b) openToAll = false
+//             → redirect to /login?next=/classroom/[id] so they can sign in
+//               and re-attempt with their member identity.
+//
+//   3. session not found → 404.
+
 import Link from 'next/link'
 import { notFound, redirect } from 'next/navigation'
 import { Pencil, BookOpen } from 'lucide-react'
@@ -6,6 +28,7 @@ import { db } from '@/lib/db'
 import { LiveSession } from '@/components/classroom/live-session'
 import { PendingSessionManager } from '@/components/classroom/pending-session-manager'
 import { PostSessionInsightsPanel } from '@/components/classroom/post-session-insights-panel'
+import { GuestPrejoin } from '@/components/classroom/guest-prejoin'
 import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
 import { computePrereqStatus } from '@/server/services/sessions/prereq'
 
@@ -20,10 +43,59 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     searchParams,
     auth(),
   ])
-  if (!session?.user) redirect(`/login?next=/classroom/${(await params).id}`)
 
-  // Host is fetched separately to tolerate orphaned FK data — see
-  // src/server/services/calendar-service.ts for the full rationale.
+  // Lightweight visibility lookup that runs even for anonymous visitors —
+  // we need to know openToAll before deciding between the guest prejoin
+  // and the login redirect.
+  const gate = await db.teachingSession.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      title: true,
+      openToAll: true,
+      approvalStatus: true,
+      status: true,
+      scheduledStart: true,
+      scheduledEnd: true,
+      hostId: true,
+      recurrenceRule: true,
+      recurrenceUntil: true,
+    },
+  })
+  if (!gate) notFound()
+
+  // Anonymous visitor → guest prejoin (openToAll) or login redirect.
+  if (!session?.user) {
+    if (gate.openToAll && gate.approvalStatus === 'APPROVED') {
+      const host = await db.user.findUnique({
+        where: { id: gate.hostId },
+        select: { name: true, avatarUrl: true },
+      })
+      // Project recurring sessions to the next occurrence so the lobby card
+      // doesn't show a stale past start time.
+      const now = new Date()
+      const next = gate.recurrenceRule
+        ? nextOccurrenceStart(gate.scheduledStart, gate.recurrenceRule, gate.recurrenceUntil, now)
+        : null
+      const effectiveStart = next ?? gate.scheduledStart
+      const effectiveEnd = next
+        ? new Date(next.getTime() + (gate.scheduledEnd.getTime() - gate.scheduledStart.getTime()))
+        : gate.scheduledEnd
+      return (
+        <GuestPrejoin
+          sessionId={gate.id}
+          title={gate.title}
+          hostName={host?.name ?? 'Vaidix faculty'}
+          hostAvatarUrl={host?.avatarUrl ?? null}
+          scheduledStart={effectiveStart.toISOString()}
+          scheduledEnd={effectiveEnd.toISOString()}
+        />
+      )
+    }
+    redirect(`/login?next=/classroom/${id}`)
+  }
+
+  // ── Authed path — identical to the prior (platform) page ──────────────────
   const s = await db.teachingSession.findUnique({
     where: { id },
     select: {
@@ -48,11 +120,6 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
   })
   if (!s) notFound()
 
-  // For recurring sessions, the master row's status is often stale (e.g. ENDED
-  // after a prior occurrence finished) even though the series still has future
-  // occurrences. Project to SCHEDULED so the Pre-Conference Prep block renders
-  // for the next occurrence. LIVE wins — an active occurrence right now still
-  // routes to the live room.
   const now = new Date()
   const next = s.recurrenceRule
     ? nextOccurrenceStart(s.scheduledStart, s.recurrenceRule, s.recurrenceUntil, now)
@@ -73,22 +140,12 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
       where: { id: s.proposedBy },
       select: { id: true, name: true },
     }),
-    // Authoritative profile lookup for the local viewer. The Vaidix flow
-    // requires every joiner to be a registered user (no anonymous guests),
-    // so we always have name / email / avatar on file — pull all three so
-    // the live-room UI shows their real photo + display name + handle,
-    // not a placeholder. Auth.js's session.user.name can be null on
-    // legacy JWTs minted before the name-claim fix; the DB row is the
-    // source of truth.
     db.user.findUnique({
       where: { id: session.user.id },
       select: { name: true, email: true, avatarUrl: true },
     }),
   ])
 
-  // Fallback chain: DB row → JWT claim → email-prefix → empty.
-  // We deliberately never use placeholder labels like "Guest" because
-  // Vaidix only admits registered users.
   const viewerEmail = viewer?.email ?? session.user.email ?? ''
   const viewerName =
     viewer?.name?.trim() ||
@@ -96,25 +153,12 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     (viewerEmail ? viewerEmail.split('@')[0] : '')
   const viewerAvatarUrl = viewer?.avatarUrl ?? null
 
-  // Diagnostic — logs every render so we can verify the DB lookup is
-  // returning what we expect. Remove once the name pipeline is confirmed
-  // to be working end-to-end.
-  console.log('[classroom/page] viewer profile resolved', {
-    sessionUserId: session.user.id,
-    dbName: viewer?.name,
-    dbEmail: viewer?.email,
-    dbAvatarUrl: viewer?.avatarUrl,
-    sessionName: session.user.name,
-    finalViewerName: viewerName,
-  })
-
   const canEdit =
     session.user.id === s.hostId ||
     session.user.id === s.proposedBy ||
     session.user.role === 'ADMIN' ||
     session.user.role === 'PROGRAM_DIRECTOR'
 
-  // Pending / draft / rejected sessions get the management UI instead of the live room.
   if (s.approvalStatus !== 'APPROVED') {
     return (
       <>
@@ -145,8 +189,6 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
     )
   }
 
-  // Pre-conference prep (objectives, study pack, readiness, etc.) lives on
-  // /classroom/[id]/study now — surfaced via a shortcut for SCHEDULED sessions.
   const isCurator =
     session.user.id === s.hostId ||
     session.user.role === 'FACULTY' ||
@@ -155,15 +197,10 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
 
   const showStudyHubLink = effectiveStatus === 'SCHEDULED'
 
-  // Compute the prereq gate state for non-curators only — host/faculty/PD/admin
-  // bypass the gate so they can always start/manage the room.
   const prereqStatus = !isCurator
     ? await computePrereqStatus(s.id, session.user.id)
     : null
 
-  // W8.3 — render the post-session insights panel only when a finalized
-  // English transcript exists for this session. Cheap select, runs on every
-  // detail-page render but is a single indexed lookup.
   const finalizedTranscript = await db.sessionTranscript.findUnique({
     where: { sessionId_language: { sessionId: s.id, language: 'en' } },
     select: { finalized: true },
@@ -196,8 +233,6 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
           recordingEnabled: s.recordingEnabled,
           consentRequired: s.consentRequired,
           host: host ?? { id: s.hostId, name: 'Unknown host', email: '', avatarUrl: null },
-          // Live captions provider for this session, set at scheduling time.
-          // Read off the metadata bag the v2.8 form already persists into.
           captionsProfile: ((s.metadata as { captionsProfile?: string } | null | undefined)
             ?.captionsProfile ?? 'off') as 'english-only' | 'indic-mix' | 'off',
         }}

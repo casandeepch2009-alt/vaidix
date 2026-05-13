@@ -1,12 +1,15 @@
 import { redirect } from 'next/navigation'
 import { auth } from '@/auth'
+import { Landing } from '@/components/marketing/Landing'
 
-// Root entrypoint. Authenticated users go straight to the dashboard;
-// unauthenticated users land on /login. We do this server-side so the
-// browser never sees an intermediate URL with a `?callbackUrl=...` query
-// string — that param is added by the auth middleware when it intercepts a
-// protected route, and we keep `/` out of that protected set (see auth.config.ts).
+// Root entrypoint.
+// Authenticated visitors go straight to the dashboard. Unauthenticated
+// visitors see the public marketing landing page (Vaidix LXS pitch) and
+// can either Request a Demo or click Login to reach `/login`.
+// `/` is listed as a public path in auth.config.ts so middleware never
+// prepends `?callbackUrl=...` to this URL.
 export default async function Home() {
   const session = await auth()
-  redirect(session?.user ? '/dashboard' : '/login')
+  if (session?.user) redirect('/dashboard')
+  return <Landing />
 }
