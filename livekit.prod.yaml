@@ -1,0 +1,66 @@
+# ════════════════════════════════════════════════════════════════════════════
+# Vaidix — LiveKit Server Config (PRODUCTION)
+# ════════════════════════════════════════════════════════════════════════════
+# Mounted by docker-compose.prod.yml at /etc/livekit.yaml inside the container.
+# DEV uses livekit.yaml in the repo root — DO NOT collapse the two; the dev
+# file hardcodes a LAN IP so the host browser can ICE-connect, and that
+# strategy breaks on a cloud host.
+#
+# Keep `keys:` and `webhook.api_key` in sync with .env LIVEKIT_API_KEY /
+# LIVEKIT_API_SECRET on the production host. Both files must use the same
+# pair or every token mint will fail validation with "invalid API key".
+
+port: 7880
+bind_addresses:
+  - ""
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 50000
+  port_range_end: 50100
+  # On EC2 / any cloud VM: LiveKit queries the instance metadata service
+  # (169.254.169.254 on AWS) at startup and uses the discovered public IP
+  # as nodeIP. ICE candidates then advertise that public IP to clients,
+  # which is what they can actually route to. The earlier prod outage was
+  # caused by the dev `node_ip: 192.168.1.7` shipping unchanged to prod —
+  # the browser tried to send media to a private Docker IP and ICE timed
+  # out. Hence the split-config approach.
+  use_external_ip: true
+  # node_ip is intentionally omitted. With use_external_ip:true LiveKit
+  # auto-fills it from the metadata service. If you ever need to pin it
+  # (e.g. a host without metadata service access), uncomment and set
+  # to the Elastic IP, NOT the private/docker IP.
+  # node_ip: "13.234.37.54"
+
+redis:
+  address: redis:6379
+
+keys:
+  # MUST match .env LIVEKIT_API_KEY / LIVEKIT_API_SECRET on the same host.
+  # Rotate both together; the secret needs to be at least 32 chars.
+  devkey: secret_change_me_in_week_0_day_5_32chars_min
+
+logging:
+  level: info
+  pion_level: warn
+  json: false
+
+turn:
+  # Disabled here — the standalone coturn container handles relay.
+  enabled: false
+
+room:
+  auto_create: true
+  enable_remote_unmute: true
+  max_participants: 1000
+  empty_timeout: 300
+  departure_timeout: 20
+
+webhook:
+  api_key: devkey
+  urls:
+    # In prod everything runs inside Docker on vaidix-net, so we address the
+    # Next.js app by service name. host.docker.internal works on Docker
+    # Desktop (mac/win dev) but does NOT exist on Linux without explicit
+    # extra_hosts mapping — that's why dev and prod webhook URLs differ.
+    - http://app:3000/api/classroom/webhooks/livekit

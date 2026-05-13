@@ -513,16 +513,47 @@ Common offenders:
 
 ### LiveKit video room won't connect
 
-**Cause** usually one of:
-1. UDP 7882 / 50000-50100 blocked at the security group
-2. coturn not running
-3. `LIVEKIT_URL` in `.env` doesn't match the actual WSS endpoint
+The signal connection (WebSocket over 443) works but the call shows
+"Connection trouble" or stays at "Connecting…" forever. There are four
+layers to check in order — fix the first one that doesn't pass.
 
-**Fix**:
+1. **Security group missing UDP rules.** AWS launches with a default SG that
+   only opens 22/80/443. Without the LiveKit + coturn UDP rules, every
+   STUN binding request from the browser is dropped at the firewall, ICE
+   negotiation times out. Verify the table in §2 lines up with your real
+   SG inbound rules — specifically UDP 7882, 50000-50100, 3478, and TCP 7881/5349.
+2. **`LIVEKIT_URL` in `.env` points at the wrong host.** Must be the public
+   domain (e.g. `wss://livekit.vaidix.arthivaa.com`), not the EC2 IP or a
+   dev placeholder. The app returns this URL to the client at token-mint
+   time, so the browser will dial whatever you've put here.
+3. **`livekit.yaml` advertising a private IP in ICE candidates.** If
+   LiveKit logs show `[local][trickle] udp4 host 192.168.x.x:50044`
+   instead of the EC2 public IP, the wrong yaml is mounted. Prod must
+   use `livekit.prod.yaml` (use_external_ip:true). docker-compose.prod.yml
+   should have `./livekit.prod.yaml:/etc/livekit.yaml:ro`, NOT `livekit.yaml`.
+4. **nginx HTTP/2 stripping the WebSocket upgrade.** Browser console shows
+   `wss://livekit.../rtc` returning 404 even though `/` returns 200. nginx
+   advertises h2 per-listener, not per-server, so `http2 on;` on any 443
+   vhost forces h2 on the entire port and breaks the legacy WS upgrade
+   that LiveKit needs. All 443 vhosts must keep `http2 on;` commented out.
+
+Diagnostics in priority order:
+
 ```bash
-sudo ss -tunlp | grep -E ':(7881|7882|3478)'
-docker logs vaidix-livekit --tail 50
-docker logs vaidix-coturn --tail 30
+# (a) Real ICE candidate IPs LiveKit is advertising — should be the public IP
+docker logs vaidix-livekit --tail 200 2>&1 | grep "local\]\[trickle\]" | tail -5
+
+# (b) End-to-end WS upgrade — must return 401, not 404. 401 means LiveKit
+#     received the upgrade and asked for a token. 404 means nginx is breaking
+#     the upgrade (probably http2) or the wrong yaml is mounted.
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  --max-time 5 https://livekit.<your-domain>/rtc
+
+# (c) Browser console — open DevTools while joining. ICE candidates listed
+#     in the NegotiationError log entry must contain the EC2 public IP. If
+#     all local candidates are 192.168.x.x, layer (3) above is the issue.
 ```
 
 ### Out of memory

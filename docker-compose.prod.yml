@@ -133,7 +133,11 @@ services:
       - "7882:7882/udp"
       - "50000-50100:50000-50100/udp"
     volumes:
-      - ./livekit.yaml:/etc/livekit.yaml:ro
+      # Prod-specific yaml: use_external_ip:true + webhook URL via service
+      # name. DO NOT swap to ./livekit.yaml — that hardcodes a dev LAN IP
+      # in node_ip and a host.docker.internal webhook URL that doesn't
+      # exist on Linux. See livekit.prod.yaml comments for the reasoning.
+      - ./livekit.prod.yaml:/etc/livekit.yaml:ro
       - vaidix-livekit-data:/data
     networks:
       - vaidix-net
