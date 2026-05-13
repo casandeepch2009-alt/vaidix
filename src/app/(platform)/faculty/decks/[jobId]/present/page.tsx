@@ -28,6 +28,7 @@ export default async function PresentPage({
       id: true,
       inputTitle: true,
       requestedById: true,
+      template: true,
       slides: { orderBy: { order: 'asc' } },
     },
   });
@@ -44,6 +45,7 @@ export default async function PresentPage({
     <DeckPresenterClient
       jobId={job.id}
       deckTitle={job.inputTitle ?? 'Untitled Deck'}
+      themeId={job.template ?? undefined}
       slides={job.slides.map((s) => ({
         id: s.id,
         order: s.order,

@@ -48,21 +48,37 @@ interface GenerateInput {
   userMessage: string;
   /** Specific Anthropic model id. Defaults to env.ANTHROPIC_MODEL. Use the router instead of hardcoding here. */
   model?: string;
+  /**
+   * Caller-provided temperature is accepted for backwards compatibility but
+   * NOT forwarded to the Anthropic SDK. Newer reasoning models (Opus 4.7+)
+   * have deprecated the `temperature` parameter and return 400
+   * `invalid_request_error` when it is sent. The model-side default produces
+   * the same output quality for our system-prompt-constrained ops.
+   */
   temperature?: number;
   maxTokens?: number;
 }
 
 export async function claudeGenerate(input: GenerateInput): Promise<string> {
   const client = getClient();
-  const msg = await client.messages.create({
-    model: input.model ?? env.ANTHROPIC_MODEL,
-    max_tokens: input.maxTokens ?? 4096,
-    system: input.systemInstruction,
-    messages: [{ role: 'user', content: input.userMessage }],
-    temperature: input.temperature ?? 0.3,
-  });
+  let msg: Awaited<ReturnType<typeof client.messages.create>>;
+  try {
+    msg = await client.messages.create({
+      model: input.model ?? env.ANTHROPIC_MODEL,
+      max_tokens: input.maxTokens ?? 4096,
+      system: input.systemInstruction,
+      messages: [{ role: 'user', content: input.userMessage }],
+    });
+  } catch (err) {
+    // Anthropic SDK errors carry rich diagnostic JSON in `.message`. Keep that
+    // payload on `.detail` (server-log only) and surface the safe generic
+    // message to the wire. Billing errors are preserved verbatim on `.detail`
+    // so router.ts can still detect them via isAnthropicBillingError.
+    const detail = err instanceof Error ? err.message : String(err);
+    throw new ClaudeUnavailableError(detail);
+  }
   const block = msg.content[0];
-  const text = block.type === 'text' ? block.text : '';
+  const text = block && block.type === 'text' ? block.text : '';
   if (!text) throw new ClaudeUnparseableError('Empty Claude response');
   return text;
 }

@@ -17,6 +17,12 @@ import { env } from '@/lib/env';
 
 const SYSTEM_PROMPT = `You are an expert Ophthalmology Medical Educator, Curriculum Designer, and Instructional Strategist at LV Prasad Eye Institute. For the topic provided, generate a Precision Education Blueprint tailored to the learner, content, and clinical context. Your response must be specific to ophthalmology, practical for postgraduate / fellowship-level teaching, and free of generic educational filler.
 
+AUDIENCE INPUTS — when the user provides them, treat them as HARD constraints, not suggestions:
+- Session length (minutes): allocate tactic time and faculty hours so they sum to roughly this duration. Do not propose a 90-minute wet-lab if the session is 45 minutes.
+- Clinical setting (OPD / OT / wet-lab / emergency / retina clinic / simulation lab / etc.): anchor every tactic to this setting. A "wet-lab" blueprint must include hands-on microsurgical or model-eye drills; an "OPD" blueprint leans on live patient encounters and slit-lamp teaching.
+- Prior knowledge assumed: do NOT re-teach what the faculty has stated learners already know. Pitch the blueprint one rung above this baseline.
+- Constraints / available resources: if the faculty has declared a piece of equipment unavailable (e.g. "no Heidelberg Spectralis", "single shared OCT"), DO NOT recommend tactics or assessments that require it. Substitute with what is available and call out the substitution in Faculty/Resource Needs.
+
 OUTPUT FORMAT — markdown only, no JSON, no preamble. Use these headings IN THIS ORDER:
 
 # Topic/Module
@@ -63,24 +69,54 @@ export interface GenerateBlueprintInput {
   requestedById: string;
   topic: string;
   learnerLevel?: string;
+  sessionLengthMinutes?: number;
+  clinicalSetting?: string;
+  priorKnowledgeAssumed?: string;
+  constraints?: string;
 }
 
 export interface BlueprintRow {
   id: string;
   topic: string;
   learnerLevel: string | null;
+  sessionLengthMinutes: number | null;
+  clinicalSetting: string | null;
+  priorKnowledgeAssumed: string | null;
+  constraints: string | null;
   content: string;
   source: string;
   createdAt: Date;
 }
 
+const BLUEPRINT_SELECT = {
+  id: true,
+  topic: true,
+  learnerLevel: true,
+  sessionLengthMinutes: true,
+  clinicalSetting: true,
+  priorKnowledgeAssumed: true,
+  constraints: true,
+  content: true,
+  source: true,
+  createdAt: true,
+} as const;
+
 export async function generateBlueprint(input: GenerateBlueprintInput): Promise<BlueprintRow> {
   if (!env.GEMINI_API_KEY) {
     throw new BlueprintError('AI_UNAVAILABLE', 'GEMINI_API_KEY is not set');
   }
-  const userPrompt = `Topic/Module: ${input.topic}${
-    input.learnerLevel ? `\nIntended learner: ${input.learnerLevel}` : ''
-  }
+  const audienceLines: string[] = [`Topic/Module: ${input.topic}`];
+  if (input.learnerLevel) audienceLines.push(`Intended learner: ${input.learnerLevel}`);
+  if (input.sessionLengthMinutes)
+    audienceLines.push(`Session length: ${input.sessionLengthMinutes} minutes (allocate tactic time so the total fits this budget)`);
+  if (input.clinicalSetting)
+    audienceLines.push(`Clinical setting: ${input.clinicalSetting} (anchor every tactic to this setting)`);
+  if (input.priorKnowledgeAssumed)
+    audienceLines.push(`Prior knowledge assumed: ${input.priorKnowledgeAssumed} (do not re-teach this)`);
+  if (input.constraints)
+    audienceLines.push(`Constraints / available resources: ${input.constraints} (do not recommend tactics that violate this)`);
+
+  const userPrompt = `${audienceLines.join('\n')}
 
 Generate the Precision Education Blueprint now.`;
 
@@ -109,19 +145,16 @@ Generate the Precision Education Blueprint now.`;
       requestedById: input.requestedById,
       topic: input.topic.trim().slice(0, 280),
       learnerLevel: input.learnerLevel?.trim().slice(0, 80) ?? null,
+      sessionLengthMinutes: input.sessionLengthMinutes ?? null,
+      clinicalSetting: input.clinicalSetting?.trim().slice(0, 400) ?? null,
+      priorKnowledgeAssumed: input.priorKnowledgeAssumed?.trim().slice(0, 1000) ?? null,
+      constraints: input.constraints?.trim().slice(0, 1000) ?? null,
       content: cleaned,
       // Persisted source label is provider-neutral. Concrete provider routing
       // lives in env config and logs — never in the DB or API surface.
       source: 'ai',
     },
-    select: {
-      id: true,
-      topic: true,
-      learnerLevel: true,
-      content: true,
-      source: true,
-      createdAt: true,
-    },
+    select: BLUEPRINT_SELECT,
   });
   return row;
 }
@@ -143,15 +176,7 @@ export async function getBlueprintForUser(
 ): Promise<BlueprintRow | null> {
   const row = await db.blueprint.findUnique({
     where: { id: blueprintId },
-    select: {
-      id: true,
-      topic: true,
-      learnerLevel: true,
-      content: true,
-      source: true,
-      createdAt: true,
-      requestedById: true,
-    },
+    select: { ...BLUEPRINT_SELECT, requestedById: true },
   });
   if (!row || row.requestedById !== userId) return null;
   // strip the requestedById from the return shape

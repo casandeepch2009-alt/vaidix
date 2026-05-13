@@ -137,15 +137,17 @@ function hasDeepseekKey(): boolean {
 }
 
 // Detect Anthropic billing/credit errors so we can fall through to DeepSeek
-// without surfacing a 503 to the faculty user. Anthropic's SDK throws an
-// Error whose .message contains this exact phrase on out-of-credit.
+// without surfacing a 503 to the faculty user. `claude.ts` now wraps every
+// SDK error in `ClaudeUnavailableError` with the raw payload on `.detail`,
+// so we check `.detail` first and fall back to `.message` for safety.
 function isAnthropicBillingError(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  const m = err.message;
+  const detail = (err as { detail?: unknown }).detail;
+  const haystack = (typeof detail === 'string' ? detail : '') + ' ' + err.message;
   return (
-    m.includes('credit balance is too low') ||
-    m.includes('credit balance too low') ||
-    m.includes('insufficient_quota')
+    haystack.includes('credit balance is too low') ||
+    haystack.includes('credit balance too low') ||
+    haystack.includes('insufficient_quota')
   );
 }
 

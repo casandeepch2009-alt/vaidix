@@ -2119,13 +2119,17 @@ model Slide {
 // *content*. Future: wire blueprintId onto DeckForgeJob to chain blueprint →
 // slide generation when faculty wants pedagogically-grounded decks.
 model Blueprint {
-  id            String   @id @default(cuid())
-  requestedById String
-  topic         String   @db.Text // the ophthalmology topic / module name
-  learnerLevel  String? // "PGY-1", "senior resident", "vitreoretinal fellow", etc.
-  content       String   @db.Text // generated markdown
-  source        String   @default("gemini") // "gemini" | "vaidix-core" (Phase B)
-  createdAt     DateTime @default(now())
+  id                    String   @id @default(cuid())
+  requestedById         String
+  topic                 String   @db.Text // the ophthalmology topic / module name
+  learnerLevel          String? // "PGY-1", "senior resident", "vitreoretinal fellow", etc.
+  sessionLengthMinutes  Int? // intended live-session duration; drives time budget + faculty hours
+  clinicalSetting       String?  @db.Text // OPD / OT / wet-lab / emergency / retina clinic / simulation, etc.
+  priorKnowledgeAssumed String?  @db.Text // what faculty asserts learners already know — stops the model from guessing
+  constraints           String?  @db.Text // equipment / resource caveats ("no Heidelberg Spectralis", "single OCT shared")
+  content               String   @db.Text // generated markdown
+  source                String   @default("gemini") // "gemini" | "vaidix-core" (Phase B)
+  createdAt             DateTime @default(now())
 
   requestedBy User @relation("BlueprintRequester", fields: [requestedById], references: [id])
 

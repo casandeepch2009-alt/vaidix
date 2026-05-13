@@ -6,16 +6,17 @@
 // reorder via POST /api/decks/[jobId]/reorder.
 // ════════════════════════════════════════════════════════════════════════════
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Sparkles, Pencil } from 'lucide-react';
+import { Sparkles, Pencil, ChevronDown } from 'lucide-react';
 import { SlideCanvas, type SlideViewModel } from '@/components/decks/slide-canvas';
 import { DeckAiCoach } from '@/components/decks/deck-ai-coach';
 import type { DeckAnalysisResult } from '@/server/services/decks/deck-analyze-service';
 import type { DeckForgeStatus, SlideLayout } from '@prisma/client';
 import { csrfHeaders } from '@/lib/csrf-client';
+import { DECK_THEMES, THEME_IDS, type DeckThemeId } from '@/lib/deck-themes';
 
 const LAYOUT_OPTIONS: SlideLayout[] = [
   'TITLE_ONLY',
@@ -34,6 +35,7 @@ interface Props {
   sourceLabel: string;
   initialSlides: SlideViewModel[];
   initialAnalysis: DeckAnalysisResult | null;
+  initialTheme?: string | null;
 }
 
 type RightTab = 'edit' | 'coach';
@@ -45,6 +47,7 @@ export function DeckEditorClient({
   sourceLabel,
   initialSlides,
   initialAnalysis,
+  initialTheme,
 }: Props) {
   const router = useRouter();
   const [slides, setSlides] = useState<SlideViewModel[]>(initialSlides);
@@ -53,6 +56,7 @@ export function DeckEditorClient({
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [rightTab, setRightTab] = useState<RightTab>('coach');
+  const [themeId, setThemeId] = useState<string>(initialTheme ?? 'deep-space');
 
   const active = useMemo(
     () => slides.find((s) => s.id === activeId) ?? slides[0] ?? null,
@@ -80,6 +84,23 @@ export function DeckEditorClient({
       setError((err as Error).message);
     } finally {
       setSavingId(null);
+    }
+  }
+
+  async function persistTheme(id: string) {
+    setThemeId(id);
+    try {
+      const res = await fetch(`/api/decks/${jobId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+        body: JSON.stringify({ template: id }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => null)) as { error?: { message?: string } } | null;
+        throw new Error(j?.error?.message ?? `Theme save failed (${res.status})`);
+      }
+    } catch (err) {
+      setError((err as Error).message);
     }
   }
 
@@ -151,7 +172,12 @@ export function DeckEditorClient({
             {sourceLabel} · {slides.length} slides · {status}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+
+        <div className="flex items-center gap-3">
+          <ThemePicker value={themeId} onChange={persistTheme} />
+
+          <span className="h-5 w-px bg-border" />
+
           {error && <span className="text-xs text-destructive">{error}</span>}
           <button
             type="button"
@@ -210,6 +236,7 @@ export function DeckEditorClient({
                         index={i}
                         total={slides.length}
                         deckTitle={deckTitle}
+                        themeId={themeId}
                       />
                     </div>
                     <p className="mt-1.5 line-clamp-2 text-xs">{s.title}</p>
@@ -249,6 +276,7 @@ export function DeckEditorClient({
                 index={slides.findIndex((s) => s.id === active.id)}
                 total={slides.length}
                 deckTitle={deckTitle}
+                themeId={themeId}
               />
               {active.speakerNotes && (
                 <section className="mt-4 rounded-lg border border-border bg-card p-4">
@@ -320,8 +348,6 @@ export function DeckEditorClient({
                 activeSlideId={active?.id ?? null}
                 onFocusSlide={(slideId) => setActiveId(slideId)}
                 onSlideCommitted={async (slideId, patch) => {
-                  // Mirror to local state so the canvas updates immediately,
-                  // then persist via PATCH.
                   updateLocal(slideId, {
                     title: patch.title,
                     bullets: patch.bullets,
@@ -340,6 +366,112 @@ export function DeckEditorClient({
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+// ─── Theme picker ────────────────────────────────────────────────────────────
+
+const PREVIEW_SLIDE: SlideViewModel = {
+  id: 'preview',
+  order: 0,
+  layout: 'TITLE_BULLETS',
+  title: 'Diabetic Retinopathy',
+  bullets: ['Anti-VEGF first line for DME', 'PRP for high-risk PDR', 'HbA1c control slows progression'],
+  speakerNotes: null,
+  accentHex: null,
+};
+
+function ThemePicker({ value, onChange }: { value: string; onChange: (id: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const current = DECK_THEMES[value as DeckThemeId] ?? DECK_THEMES['deep-space'];
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(e: PointerEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('pointerdown', onPointerDown);
+    return () => document.removeEventListener('pointerdown', onPointerDown);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-xs font-medium hover:bg-muted"
+        aria-expanded={open}
+        aria-haspopup="listbox"
+      >
+        <span
+          className="h-2.5 w-2.5 rounded-sm border border-border/60"
+          style={{ background: current.swatch }}
+        />
+        {current.label}
+        <ChevronDown
+          className="h-3 w-3 text-muted-foreground transition-transform"
+          style={{ transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}
+        />
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            role="listbox"
+            aria-label="Choose theme"
+            initial={{ opacity: 0, y: -6, scale: 0.97 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+            transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+            className="absolute right-0 top-full z-50 mt-2 grid grid-cols-2 gap-2.5 rounded-xl border border-border bg-card p-3 shadow-2xl"
+            style={{ width: 360 }}
+          >
+            {THEME_IDS.map((id) => {
+              const t = DECK_THEMES[id as DeckThemeId];
+              const isActive = value === id;
+              return (
+                <motion.button
+                  key={id}
+                  role="option"
+                  type="button"
+                  aria-selected={isActive}
+                  aria-label={t.label}
+                  aria-pressed={isActive}
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => { onChange(id); setOpen(false); }}
+                  className={`rounded-lg border-2 p-1.5 text-left transition-colors ${
+                    isActive
+                      ? 'border-primary shadow-sm'
+                      : 'border-transparent hover:border-border'
+                  }`}
+                >
+                  <div className="overflow-hidden rounded-md">
+                    <SlideCanvas
+                      slide={PREVIEW_SLIDE}
+                      index={0}
+                      total={1}
+                      deckTitle="Vaidix"
+                      themeId={id}
+                    />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between px-0.5">
+                    <span className="text-[11px] font-medium">{t.label}</span>
+                    {isActive && (
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ background: t.primary }}
+                      />
+                    )}
+                  </div>
+                </motion.button>
+              );
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -389,7 +521,7 @@ function SlideEditPanel({
           value={slide.title}
           onChange={(e) => onChange({ title: e.target.value })}
           onBlur={() => onCommit({ title: slide.title })}
-          className="min-h-[60px] w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
+          className="min-h-15 w-full rounded-md border border-input bg-background px-2 py-1.5 text-sm"
         />
       </label>
 
@@ -406,7 +538,7 @@ function SlideEditPanel({
                   onChange({ bullets: next });
                 }}
                 onBlur={() => onCommit({ bullets: slide.bullets })}
-                className="min-h-[40px] flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
+                className="min-h-10 flex-1 rounded-md border border-input bg-background px-2 py-1 text-xs"
               />
               <button
                 type="button"
@@ -442,7 +574,7 @@ function SlideEditPanel({
           value={slide.speakerNotes ?? ''}
           onChange={(e) => onChange({ speakerNotes: e.target.value })}
           onBlur={() => onCommit({ speakerNotes: slide.speakerNotes ?? null })}
-          className="min-h-[100px] w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
+          className="min-h-25 w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs"
           placeholder="What you'll say while presenting…"
         />
       </label>

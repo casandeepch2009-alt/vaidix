@@ -2,7 +2,8 @@
 // and/or a recording transcript. Faculty-only. Phase A: synchronous Gemini.
 
 import { z } from 'zod';
-import { Role } from '@prisma/client';
+import { Role, DeckForgeStatus } from '@prisma/client';
+import { db } from '@/lib/db';
 import {
   handleUnexpected,
   jsonError,
@@ -23,6 +24,12 @@ const ForgeBody = z
     recordingId: z.string().min(1).optional(),
     inputTitle: z.string().min(1).max(120).optional(),
     learnerLevel: z.string().min(1).max(80).optional(),
+    /**
+     * When true, bypass the same-source dedupe and force a fresh forge even
+     * if a usable job already exists for this document/recording. Faculty
+     * triggers this via the explicit "Re-forge" link on the doc card.
+     */
+    force: z.boolean().optional(),
   })
   .refine((v) => Boolean(v.documentId || v.recordingId), {
     message: 'Either documentId or recordingId must be provided',
@@ -40,6 +47,33 @@ export async function POST(req: Request) {
 
   const parsed = await parseBody(req, ForgeBody);
   if (!parsed.ok) return parsed.response;
+
+  // Dedupe guard: if a usable (non-FAILED, non-REJECTED) job already exists
+  // for the same source + requester, return it instead of paying for another
+  // Gemini call. Faculty can force a fresh forge with `force: true`. Without
+  // this, every re-click of the doc-card "Forge slides" button (or a stale
+  // browser tab) spawns a duplicate deck and burns provider credit.
+  if (!parsed.data.force && (parsed.data.documentId || parsed.data.recordingId)) {
+    const existing = await db.deckForgeJob.findFirst({
+      where: {
+        requestedById: auth.user.id,
+        status: { notIn: [DeckForgeStatus.FAILED, DeckForgeStatus.REJECTED] },
+        ...(parsed.data.documentId ? { documentId: parsed.data.documentId } : {}),
+        ...(parsed.data.recordingId ? { recordingId: parsed.data.recordingId } : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      select: { id: true, inputTitle: true, slideCount: true, status: true },
+    });
+    if (existing) {
+      return jsonOk({
+        jobId: existing.id,
+        deckTitle: existing.inputTitle ?? 'Forged Deck',
+        slideCount: existing.slideCount ?? 0,
+        reused: true,
+        status: existing.status,
+      });
+    }
+  }
 
   const rl = await checkRateLimit({ bucket: `deck-forge:${auth.user.id}`, ...LIMITS.DECK_FORGE });
   if (!rl.allowed) {
