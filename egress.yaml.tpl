@@ -35,10 +35,24 @@ log_level: info
 # Health check endpoint (used by docker healthcheck if enabled)
 health_port: 7889
 
-# Resource limits — prevent container OOM
+# Self-reported CPU cost per egress job type. Egress refuses to accept a job
+# unless `available CPU >= cost`. The defaults below come from LiveKit's
+# upstream sample config (sized for 1080p60 rendering) and were way too
+# pessimistic for our actual workload:
+#
+#   - The app calls startRoomCompositeEgress with H264_720P_30 (see
+#     src/lib/livekit.ts:249). At that resolution + framerate, room composite
+#     uses ~1.2–1.5 CPU on a t3.large equivalent, not 3.5.
+#   - With the upstream values, a 2 vCPU host (t3.large) would refuse every
+#     room composite job ("not enough cpu"), and LiveKit's egress API would
+#     return "no response from servers" to the app. Sessions ended without
+#     a Recording row being created → /classroom/[id]/recording 404s.
+#
+# Values below are sized for 720p30 H.264 on a 2 vCPU box. If you upgrade to
+# t3.xlarge AND want to record at 1080p, raise these back closer to upstream.
 cpu_cost:
-  room_composite_cpu_cost: 3.5
-  audio_room_composite_cpu_cost: 0.5
-  track_composite_cpu_cost: 2.0
-  track_cpu_cost: 1.0
-  web_cpu_cost: 3.0
+  room_composite_cpu_cost: 1.5
+  audio_room_composite_cpu_cost: 0.3
+  track_composite_cpu_cost: 1.0
+  track_cpu_cost: 0.5
+  web_cpu_cost: 1.5
