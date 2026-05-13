@@ -269,7 +269,9 @@ async function runReviewPass(
     };
   } catch (err) {
     if (err instanceof AiUnavailableError || err instanceof AiUnparseableError) {
-      console.warn('[deck-analyze] review pass failed:', err.message);
+      // Pass the error object (not just `.message`, which is now a generic
+      // user-safe string) so `.detail` shows up alongside in the server log.
+      console.warn('[deck-analyze] review pass failed:', err);
       return { readability: 6, suggestions: [], notes: '', status: 'failed' };
     }
     throw err;
@@ -297,7 +299,7 @@ async function runDesignPass(
     };
   } catch (err) {
     if (err instanceof AiUnavailableError || err instanceof AiUnparseableError) {
-      console.warn('[deck-analyze] design pass failed:', err.message);
+      console.warn('[deck-analyze] design pass failed:', err);
       return { density: 6, balance: 6, suggestions: [], notes: '', status: 'failed' };
     }
     throw err;

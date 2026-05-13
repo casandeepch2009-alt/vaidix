@@ -54,7 +54,8 @@ interface PromoCopy {
   programLabel: string | null;
   /** Optional tag chips like ["Uveitis", "CME"]. */
   tags: string[];
-  source?: 'gemini' | 'heuristic';
+  /** Provider-neutral: 'ai' = upstream copy generator; 'heuristic' = rules-only fallback. */
+  source?: 'ai' | 'heuristic';
 }
 
 const PROMO_SYSTEM_PROMPT = `You are a marketing writer for LV Prasad Eye Institute's clinical education program.
@@ -234,18 +235,18 @@ async function buildCopy(input: {
   if (!env.GEMINI_API_KEY) return baseHeuristic;
   try {
     const aiCopy = await geminiPromoCopy(input);
-    // Prefer Gemini-derived highlights; fall back to heuristic-derived if Gemini
+    // Prefer AI-derived highlights; fall back to heuristic-derived if the AI
     // returned an empty list. The structural fields (host, when, tags) stay.
     return {
       ...baseHeuristic,
       subtitle: aiCopy.subtitle,
       hook: aiCopy.hook,
       highlights: aiCopy.highlights.length > 0 ? aiCopy.highlights : baseHeuristic.highlights,
-      source: 'gemini',
+      source: 'ai',
     };
   } catch (err) {
     if (err instanceof GeminiUnavailableError || err instanceof GeminiUnparseableError) {
-      console.warn('[promo] gemini failed, falling back to heuristic:', (err as Error).message);
+      console.warn('[promo] AI copy failed, falling back to heuristic:', err);
       return baseHeuristic;
     }
     throw err;

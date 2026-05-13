@@ -96,7 +96,8 @@ export default async function ClassroomRecordingPage({ params }: PageProps) {
       failureReason: null,
       transcripts: [{
         language: 'en',
-        source: 'deepgram',
+        // Provider-neutral label — never expose the upstream ASR vendor name.
+        source: 'asr',
         vttUrl: `/api/classroom/sessions/${sessionId}/captions/transcript?format=vtt`,
       }],
     };

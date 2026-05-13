@@ -16,21 +16,7 @@ import {
 } from '@prisma/client';
 import { db } from '@/lib/db';
 import { s3, BUCKET } from '@/lib/storage';
-
-// ─── Theme ──────────────────────────────────────────────────────────────────
-const C = {
-  bg: '040817',
-  navy: '070e28',
-  navy2: '0b1535',
-  panel: '0f1d48',
-  teal: '00d4f0',
-  gold: 'f5b731',
-  w: 'ffffff',
-  w85: 'dde0f0',
-  w65: 'a0a8c8',
-  w40: '555577',
-  panelDark: '111428',
-};
+import { getDeckTheme, type PptxColors } from '@/lib/deck-themes';
 
 const LAYOUT_W = 13.33; // wide layout
 const LAYOUT_H = 7.5;
@@ -46,64 +32,70 @@ interface SlideRow {
   accentHex: string | null;
 }
 
-function accentOf(s: SlideRow): string {
-  return s.accentHex && /^[0-9a-fA-F]{6}$/.test(s.accentHex) ? s.accentHex : C.teal;
+function accentOf(s: SlideRow, c: PptxColors): string {
+  return s.accentHex && /^[0-9a-fA-F]{6}$/.test(s.accentHex) ? s.accentHex : c.primary;
 }
 
-function addHeader(slide: PptxGenJS.Slide, n: number, total: number) {
+function addHeader(slide: PptxGenJS.Slide, n: number, total: number, c: PptxColors) {
   slide.addShape('rect', {
     x: 0, y: 0, w: LAYOUT_W, h: 0.52,
-    fill: { color: C.navy }, line: { color: C.panel, width: 0.5 },
+    fill: { color: c.titleBg }, line: { color: c.panelBg, width: 0.5 },
   });
   slide.addShape('rect', {
     x: 0, y: 0.52, w: LAYOUT_W / 2, h: 0.028,
-    fill: { color: C.teal }, line: { type: 'none' },
+    fill: { color: c.primary }, line: { type: 'none' },
   });
   slide.addShape('rect', {
     x: LAYOUT_W / 2, y: 0.52, w: LAYOUT_W / 2, h: 0.028,
-    fill: { color: C.gold }, line: { type: 'none' },
+    fill: { color: c.secondary }, line: { type: 'none' },
   });
   slide.addText('VAIDIX', {
     x: 0.3, y: 0.07, w: 2.5, h: 0.28,
-    fontSize: 15, bold: true, color: C.teal, fontFace: 'Georgia', charSpacing: 1.2,
+    fontSize: 15, bold: true, color: c.primary, fontFace: 'Georgia', charSpacing: 1.2,
   });
   slide.addText('LV Prasad Eye Institute', {
     x: 0.3, y: 0.36, w: 3, h: 0.14,
-    fontSize: 6.5, color: C.w40, charSpacing: 1.5,
+    fontSize: 6.5, color: c.text40, charSpacing: 1.5,
   });
   slide.addText(
     `${String(n).padStart(2, '0')} / ${String(total).padStart(2, '0')}`,
     {
       x: LAYOUT_W - 1.3, y: 0.17, w: 1.1, h: 0.18,
-      fontSize: 9, color: C.w40, fontFace: 'Courier New', align: 'right',
+      fontSize: 9, color: c.text40, fontFace: 'Courier New', align: 'right',
     },
   );
 }
 
-function addFooter(slide: PptxGenJS.Slide, deckTitle: string) {
+function addFooter(slide: PptxGenJS.Slide, deckTitle: string, c: PptxColors) {
   slide.addShape('rect', {
     x: 0, y: LAYOUT_H - 0.42, w: LAYOUT_W, h: 0.42,
-    fill: { color: C.bg }, line: { color: C.panel, width: 0.5 },
+    fill: { color: c.bg }, line: { color: c.panelBg, width: 0.5 },
   });
   slide.addText(deckTitle, {
     x: 0.3, y: LAYOUT_H - 0.34, w: 7, h: 0.22,
-    fontSize: 7.5, color: C.w40,
+    fontSize: 7.5, color: c.text40,
   });
   slide.addText('LV Prasad Eye Institute · Confidential', {
     x: 6, y: LAYOUT_H - 0.34, w: 7, h: 0.22,
-    fontSize: 7.5, color: C.w40, align: 'right',
+    fontSize: 7.5, color: c.text40, align: 'right',
   });
 }
 
-function renderTitleOnly(s: PptxGenJS.Slide, slide: SlideRow, deckTitle: string, accent: string) {
-  s.background = { color: C.navy };
+function renderTitleOnly(
+  s: PptxGenJS.Slide,
+  slide: SlideRow,
+  deckTitle: string,
+  accent: string,
+  c: PptxColors,
+) {
+  s.background = { color: c.titleBg };
   s.addText(deckTitle.toUpperCase(), {
     x: 0.7, y: 1.4, w: 11.9, h: 0.3,
     fontSize: 11, bold: true, color: accent, charSpacing: 4,
   });
   s.addText(slide.title, {
     x: 0.7, y: 1.85, w: 11.9, h: 3,
-    fontSize: 56, bold: true, color: C.w, fontFace: 'Georgia', lineSpacingMultiple: 1.05,
+    fontSize: 56, bold: true, color: c.text, fontFace: 'Georgia', lineSpacingMultiple: 1.05,
   });
   s.addShape('rect', {
     x: 0.7, y: 5.0, w: 1.6, h: 0.045,
@@ -111,16 +103,16 @@ function renderTitleOnly(s: PptxGenJS.Slide, slide: SlideRow, deckTitle: string,
   });
 }
 
-function renderClosing(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
-  s.background = { color: C.navy };
+function renderClosing(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c: PptxColors) {
+  s.background = { color: c.titleBg };
   s.addText(slide.title, {
     x: 0.7, y: 2.4, w: 11.9, h: 2,
-    fontSize: 64, bold: true, color: C.w, align: 'center', fontFace: 'Georgia',
+    fontSize: 64, bold: true, color: c.text, align: 'center', fontFace: 'Georgia',
   });
   if (slide.bullets.length > 0) {
     s.addText(slide.bullets.join('  ·  '), {
       x: 1.5, y: 4.6, w: 10.3, h: 0.6,
-      fontSize: 16, color: C.w65, align: 'center',
+      fontSize: 16, color: c.text65, align: 'center',
     });
   }
   s.addShape('rect', {
@@ -129,11 +121,11 @@ function renderClosing(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
   });
 }
 
-function renderTitleBullets(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
-  s.background = { color: C.navy2 };
+function renderTitleBullets(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c: PptxColors) {
+  s.background = { color: c.contentBg };
   s.addText(slide.title, {
     x: 0.7, y: 0.95, w: 11.9, h: 1.0,
-    fontSize: 30, bold: true, color: C.w, fontFace: 'Georgia', lineSpacingMultiple: 1.15,
+    fontSize: 30, bold: true, color: c.text, fontFace: 'Georgia', lineSpacingMultiple: 1.15,
   });
   s.addShape('rect', {
     x: 0.7, y: 2.0, w: 1.0, h: 0.04,
@@ -144,17 +136,17 @@ function renderTitleBullets(s: PptxGenJS.Slide, slide: SlideRow, accent: string)
       slide.bullets.map((b) => ({ text: b, options: { bullet: { code: '25B8' } } })),
       {
         x: 0.9, y: 2.4, w: 11.5, h: 4.2,
-        fontSize: 18, color: C.w85, lineSpacingMultiple: 1.45, valign: 'top', paraSpaceAfter: 8,
+        fontSize: 18, color: c.text85, lineSpacingMultiple: 1.45, valign: 'top', paraSpaceAfter: 8,
       },
     );
   }
 }
 
-function renderTwoColumn(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
-  s.background = { color: C.navy2 };
+function renderTwoColumn(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c: PptxColors) {
+  s.background = { color: c.contentBg };
   s.addText(slide.title, {
     x: 0.7, y: 0.95, w: 11.9, h: 1.0,
-    fontSize: 28, bold: true, color: C.w, fontFace: 'Georgia',
+    fontSize: 28, bold: true, color: c.text, fontFace: 'Georgia',
   });
   s.addShape('rect', {
     x: 0.7, y: 2.0, w: 1.0, h: 0.04,
@@ -166,54 +158,54 @@ function renderTwoColumn(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
   if (left.length > 0) {
     s.addText(
       left.map((b) => ({ text: b, options: { bullet: { code: '25B8' } } })),
-      { x: 0.9, y: 2.4, w: 5.7, h: 4.2, fontSize: 16, color: C.w85, lineSpacingMultiple: 1.4 },
+      { x: 0.9, y: 2.4, w: 5.7, h: 4.2, fontSize: 16, color: c.text85, lineSpacingMultiple: 1.4 },
     );
   }
   if (right.length > 0) {
     s.addText(
       right.map((b) => ({ text: b, options: { bullet: { code: '25B8' } } })),
-      { x: 6.9, y: 2.4, w: 5.7, h: 4.2, fontSize: 16, color: C.w85, lineSpacingMultiple: 1.4 },
+      { x: 6.9, y: 2.4, w: 5.7, h: 4.2, fontSize: 16, color: c.text85, lineSpacingMultiple: 1.4 },
     );
   }
 }
 
-function renderQuote(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
-  s.background = { color: C.navy };
+function renderQuote(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c: PptxColors) {
+  s.background = { color: c.titleBg };
   s.addText('"', {
     x: 0.9, y: 1.6, w: 1, h: 1.6,
     fontSize: 110, color: accent, fontFace: 'Georgia',
   });
   s.addText(slide.title, {
     x: 1.5, y: 2.6, w: 10.5, h: 2.5,
-    fontSize: 26, color: C.w, italic: true, fontFace: 'Georgia', lineSpacingMultiple: 1.4,
+    fontSize: 26, color: c.text, italic: true, fontFace: 'Georgia', lineSpacingMultiple: 1.4,
   });
   if (slide.bullets[0]) {
     s.addText(`— ${slide.bullets[0]}`, {
       x: 1.5, y: 5.2, w: 10.5, h: 0.5,
-      fontSize: 14, color: C.w65, italic: true,
+      fontSize: 14, color: c.text65, italic: true,
     });
   }
 }
 
-function renderInteraction(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
-  s.background = { color: C.navy2 };
+function renderInteraction(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c: PptxColors) {
+  s.background = { color: c.contentBg };
   s.addShape('rect', {
     x: 0.7, y: 0.95, w: 1.4, h: 0.36,
     fill: { color: accent }, line: { type: 'none' },
   });
   s.addText('INTERACT', {
     x: 0.7, y: 0.95, w: 1.4, h: 0.36,
-    fontSize: 10, bold: true, color: C.bg, align: 'center', valign: 'middle', charSpacing: 3,
+    fontSize: 10, bold: true, color: c.bg, align: 'center', valign: 'middle', charSpacing: 3,
   });
   s.addText(slide.title, {
     x: 0.7, y: 1.55, w: 11.9, h: 1.4,
-    fontSize: 28, bold: true, color: C.w, fontFace: 'Georgia',
+    fontSize: 28, bold: true, color: c.text, fontFace: 'Georgia',
   });
   for (let i = 0; i < slide.bullets.length; i++) {
     const y = 3.2 + i * 0.7;
     s.addShape('rect', {
       x: 0.9, y, w: 11.5, h: 0.6,
-      fill: { color: C.panel }, line: { color: C.panelDark, width: 0.5 },
+      fill: { color: c.panelBg }, line: { color: c.panelDark, width: 0.5 },
     });
     s.addText(`${String.fromCharCode(65 + i)}.`, {
       x: 1.05, y, w: 0.5, h: 0.6,
@@ -221,29 +213,29 @@ function renderInteraction(s: PptxGenJS.Slide, slide: SlideRow, accent: string) 
     });
     s.addText(slide.bullets[i], {
       x: 1.55, y, w: 10.7, h: 0.6,
-      fontSize: 14, color: C.w85, valign: 'middle',
+      fontSize: 14, color: c.text85, valign: 'middle',
     });
   }
 }
 
-function renderImageFocus(s: PptxGenJS.Slide, slide: SlideRow, accent: string) {
-  s.background = { color: C.navy2 };
+function renderImageFocus(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c: PptxColors) {
+  s.background = { color: c.contentBg };
   s.addText(slide.title, {
     x: 0.7, y: 0.95, w: 11.9, h: 0.9,
-    fontSize: 26, bold: true, color: C.w, fontFace: 'Georgia',
+    fontSize: 26, bold: true, color: c.text, fontFace: 'Georgia',
   });
   s.addShape('rect', {
     x: 0.9, y: 2.1, w: 11.5, h: 4.0,
-    fill: { color: C.panelDark }, line: { color: accent, width: 1.2, dashType: 'dash' },
+    fill: { color: c.panelDark }, line: { color: accent, width: 1.2, dashType: 'dash' },
   });
   s.addText('[ Image / OCT / fundus photo placeholder ]', {
     x: 0.9, y: 3.8, w: 11.5, h: 0.5,
-    fontSize: 12, color: C.w40, align: 'center',
+    fontSize: 12, color: c.text40, align: 'center',
   });
   if (slide.bullets[0]) {
     s.addText(slide.bullets[0], {
       x: 0.9, y: 6.3, w: 11.5, h: 0.5,
-      fontSize: 14, color: C.w85,
+      fontSize: 14, color: c.text85,
     });
   }
 }
@@ -254,21 +246,22 @@ function renderSlide(
   index: number,
   total: number,
   deckTitle: string,
+  c: PptxColors,
 ) {
   const s = pptx.addSlide();
-  const accent = accentOf(slide);
+  const accent = accentOf(slide, c);
   switch (slide.layout) {
-    case 'TITLE_ONLY':    renderTitleOnly(s, slide, deckTitle, accent); break;
-    case 'CLOSING':       renderClosing(s, slide, accent); break;
-    case 'TWO_COLUMN':    renderTwoColumn(s, slide, accent); break;
-    case 'QUOTE':         renderQuote(s, slide, accent); break;
-    case 'INTERACTION':   renderInteraction(s, slide, accent); break;
-    case 'IMAGE_FOCUS':   renderImageFocus(s, slide, accent); break;
+    case 'TITLE_ONLY':    renderTitleOnly(s, slide, deckTitle, accent, c); break;
+    case 'CLOSING':       renderClosing(s, slide, accent, c); break;
+    case 'TWO_COLUMN':    renderTwoColumn(s, slide, accent, c); break;
+    case 'QUOTE':         renderQuote(s, slide, accent, c); break;
+    case 'INTERACTION':   renderInteraction(s, slide, accent, c); break;
+    case 'IMAGE_FOCUS':   renderImageFocus(s, slide, accent, c); break;
     case 'TITLE_BULLETS':
-    default:              renderTitleBullets(s, slide, accent);
+    default:              renderTitleBullets(s, slide, accent, c);
   }
-  addHeader(s, index + 1, total);
-  addFooter(s, deckTitle);
+  addHeader(s, index + 1, total, c);
+  addFooter(s, deckTitle, c);
   if (slide.speakerNotes) s.addNotes(slide.speakerNotes);
   return s;
 }
@@ -296,10 +289,14 @@ export async function renderDeckPptxBuffer(opts: {
       id: true,
       inputTitle: true,
       requestedById: true,
+      template: true,
       slides: { orderBy: { order: 'asc' } },
     },
   });
   if (!job || job.slides.length === 0) return null;
+
+  const theme = getDeckTheme(job.template);
+  const c = theme.pptx;
 
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
@@ -319,7 +316,7 @@ export async function renderDeckPptxBuffer(opts: {
         speakerNotes: s.speakerNotes,
         accentHex: s.accentHex,
       },
-      i, total, deckTitle,
+      i, total, deckTitle, c,
     );
   });
 

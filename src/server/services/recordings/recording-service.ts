@@ -35,6 +35,17 @@ export interface RecordingViewModel {
   transcripts: Array<{ language: string; source: string; vttUrl: string }>;
 }
 
+/**
+ * Map the DB-level transcript source (vendor name — 'deepgram', 'sarvam', …)
+ * to a provider-neutral label before it crosses the wire. Faculty and
+ * residents never need to know which ASR vendor produced the transcript;
+ * leaking it tells outside observers our infra stack. 'manual' edits stay
+ * 'manual' because that is a meaningful workflow distinction for reviewers.
+ */
+function wireTranscriptSource(dbSource: string): 'asr' | 'manual' {
+  return dbSource === 'manual' ? 'manual' : 'asr';
+}
+
 export interface RecordingAccessActor {
   userId: string;
   role: Role;
@@ -118,7 +129,7 @@ export async function listSessionRecordings(
     for (const t of r.transcripts) {
       const vttKey = `captions/${sessionId}/${t.language}.vtt`;
       const vttUrl = await presignDownload(vttKey, 6 * 3600).catch(() => '');
-      transcripts.push({ language: t.language, source: t.source, vttUrl });
+      transcripts.push({ language: t.language, source: wireTranscriptSource(t.source), vttUrl });
     }
     out.push({
       id: r.id,

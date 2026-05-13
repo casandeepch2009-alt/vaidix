@@ -228,7 +228,7 @@ Now write the debrief following the rules in your system instruction. Output str
       }
     }
 
-    return NextResponse.json({ ...parsed, source: 'gemini' })
+    return NextResponse.json({ ...parsed, source: 'ai' })
   } catch (err) {
     console.error('[ReportCoach] Exception:', err)
     return NextResponse.json({ error: 'Internal report error' }, { status: 500 })

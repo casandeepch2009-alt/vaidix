@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { Mail, Phone, AtSign, ShieldCheck, Calendar, GraduationCap, Building2, Languages, Globe, Lock, Bookmark, ArrowRight } from 'lucide-react'
+import { Mail, Phone, AtSign, ShieldCheck, Calendar, GraduationCap, Building2, Languages, Globe, Lock, Bookmark, ArrowRight, Brain } from 'lucide-react'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -179,6 +179,29 @@ export default async function ProfilePage() {
           <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
         </Link>
       </StaggerItem>
+
+      {(user.role === 'FACULTY' || user.role === 'PROGRAM_DIRECTOR' || user.role === 'ADMIN') && (
+        <StaggerItem>
+          <Link
+            href="/profile/style"
+            data-testid="link-style-profile"
+            className="group flex items-center justify-between rounded-2xl border border-border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-border/80 hover:shadow-sm"
+          >
+            <div className="flex items-center gap-3">
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Brain className="size-5" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold">AI style memory</div>
+                <div className="text-xs text-muted-foreground">
+                  Rules the AI uses to match your teaching style on new decks
+                </div>
+              </div>
+            </div>
+            <ArrowRight className="size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
+          </Link>
+        </StaggerItem>
+      )}
 
       <StaggerItem>
         <Card>

@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
   try {
     if (!GEMINI_API_KEY) {
       return NextResponse.json(
-        { error: 'GEMINI_API_KEY not configured', fallback: true },
+        { error: 'AI grading is not configured on this environment', fallback: true },
         { status: 503 }
       )
     }
@@ -169,9 +169,10 @@ Now score this answer following the rules in your system instruction. Output str
 
     if (!response.ok) {
       const errBody = await response.text()
-      console.error('[Gemini Grade] Error:', response.status, errBody)
+      // Upstream payload (errBody) stays in server logs only — never the wire.
+      console.error('[grade] upstream failure', response.status, errBody)
       return NextResponse.json(
-        { error: 'Gemini grading failed', fallback: true, detail: errBody },
+        { error: 'AI grading is temporarily unavailable. Please try again.', fallback: true },
         { status: 502 }
       )
     }
@@ -193,9 +194,9 @@ Now score this answer following the rules in your system instruction. Output str
       if (m) {
         parsed = JSON.parse(m[1].trim())
       } else {
-        console.error('[Gemini Grade] Unparseable:', rawText)
+        console.error('[grade] unparseable upstream response', rawText)
         return NextResponse.json(
-          { error: 'Gemini returned unparseable JSON', fallback: true },
+          { error: 'AI grading returned an unexpected response. Please try again.', fallback: true },
           { status: 502 }
         )
       }

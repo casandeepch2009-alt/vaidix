@@ -11,7 +11,7 @@
 
 import { db } from '@/lib/db';
 import { presignUpload, presignDownload } from '@/lib/storage';
-import { Role, DocumentKind, DocumentRoute, DocumentStatus } from '@prisma/client';
+import { Role, DocumentKind, DocumentRoute, DocumentStatus, DeckForgeStatus } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { getQueue, QUEUES } from '@/lib/queue';
 
@@ -153,6 +153,9 @@ export async function listDocuments(
   uploaderName: string;
   sizeBytes: number;
   createdAt: string;
+  latestForgeJobId: string | null;
+  latestForgeStatus: DeckForgeStatus | null;
+  latestForgeSlideCount: number | null;
 }>> {
   if (!FACULTY_ROLES.includes(actor.role)) {
     throw new DocumentAccessError('FORBIDDEN', 'Only faculty/PD/admin can browse the document library');
@@ -179,17 +182,52 @@ export async function listDocuments(
     : [];
   const nameById = new Map(uploaders.map((u) => [u.id, u.name]));
 
-  return docs.map((d) => ({
-    id: d.id,
-    title: d.title,
-    kind: d.kind,
-    route: d.route,
-    status: d.status,
-    visibility: d.visibility,
-    uploaderName: nameById.get(d.uploadedById) ?? 'Unknown user',
-    sizeBytes: Number(d.sizeBytes),
-    createdAt: d.createdAt.toISOString(),
-  }));
+  // For each document, surface its most recent forge job so the UI can render
+  // "View slides" instead of "Forge slides" when a deck already exists. We
+  // ignore FAILED/REJECTED jobs — the UI treats them as "needs retry", not a
+  // viewable deck. One batched query, grouped client-side.
+  const docIds = docs.map((d) => d.id);
+  const latestForgeByDoc = new Map<
+    string,
+    { id: string; status: DeckForgeStatus; slideCount: number | null }
+  >();
+  if (docIds.length) {
+    const jobs = await db.deckForgeJob.findMany({
+      where: {
+        documentId: { in: docIds },
+        status: { notIn: [DeckForgeStatus.FAILED, DeckForgeStatus.REJECTED] },
+      },
+      select: { id: true, documentId: true, status: true, slideCount: true, createdAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    for (const j of jobs) {
+      if (!j.documentId) continue;
+      if (latestForgeByDoc.has(j.documentId)) continue; // already have a newer one
+      latestForgeByDoc.set(j.documentId, {
+        id: j.id,
+        status: j.status,
+        slideCount: j.slideCount,
+      });
+    }
+  }
+
+  return docs.map((d) => {
+    const forge = latestForgeByDoc.get(d.id) ?? null;
+    return {
+      id: d.id,
+      title: d.title,
+      kind: d.kind,
+      route: d.route,
+      status: d.status,
+      visibility: d.visibility,
+      uploaderName: nameById.get(d.uploadedById) ?? 'Unknown user',
+      sizeBytes: Number(d.sizeBytes),
+      createdAt: d.createdAt.toISOString(),
+      latestForgeJobId: forge?.id ?? null,
+      latestForgeStatus: forge?.status ?? null,
+      latestForgeSlideCount: forge?.slideCount ?? null,
+    };
+  });
 }
 
 export async function getDocumentForActor(

@@ -1361,7 +1361,10 @@ function FacultyPrepPanel({ sessionId, sessionTitle, questionCount }: { sessionI
                                 <p className="mt-0.5 text-[10px] italic text-muted-foreground line-clamp-1">{s.rationale}</p>
                               )}
                             </div>
-                            <span className={cn('mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold', BLOOMS[s.blooms]?.cls ?? 'bg-muted text-muted-foreground')}>
+                            <span
+                              className={cn('mt-0.5 shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-bold', BLOOMS[s.blooms]?.cls ?? 'bg-muted text-muted-foreground')}
+                              title={BLOOMS[s.blooms] ? `Bloom’s level ${s.blooms} — ${BLOOMS[s.blooms].label}` : `Bloom’s level ${s.blooms}`}
+                            >
                               L{s.blooms}
                             </span>
                             <button
@@ -1385,6 +1388,21 @@ function FacultyPrepPanel({ sessionId, sessionTitle, questionCount }: { sessionI
                       <p className="mt-2 text-[10px] text-muted-foreground/80">
                         Tap Accept to add as an objective. You can still edit before sharing.
                       </p>
+                      {/* Compact legend so faculty don't need to know Bloom's
+                          taxonomy by heart to read the L1-L6 badges above. */}
+                      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-violet-200/40 pt-2 text-[9px] text-muted-foreground dark:border-violet-800/30">
+                        <span className="font-semibold uppercase tracking-wider text-violet-700/80 dark:text-violet-300/80">
+                          Bloom’s
+                        </span>
+                        {([1, 2, 3, 4, 5, 6] as const).map((lvl) => (
+                          <span key={lvl} className="inline-flex items-center gap-1">
+                            <span className={cn('rounded-full px-1 py-px text-[8px] font-bold', BLOOMS[lvl].cls)}>
+                              L{lvl}
+                            </span>
+                            <span>{BLOOMS[lvl].label}</span>
+                          </span>
+                        ))}
+                      </div>
                     </motion.div>
                   )}
                 </AnimatePresence>

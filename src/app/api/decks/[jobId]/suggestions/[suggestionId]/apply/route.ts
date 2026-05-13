@@ -25,8 +25,17 @@ import {
   applySuggestionToSlide,
   DeckRefineError,
 } from '@/server/services/decks/deck-refine-service';
+import { recordEditSignal } from '@/server/services/decks/faculty-style-profile';
+import { FacultyEditSignalKind } from '@prisma/client';
 
 const FACULTY_LIKE: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
+
+function deriveTopicTag(inputTitle: string | null | undefined): string | null {
+  if (!inputTitle) return null;
+  const cleaned = inputTitle.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim();
+  const first = cleaned.split(/\s+/)[0];
+  return first && first.length > 2 ? first : null;
+}
 
 export async function POST(
   req: Request,
@@ -45,7 +54,12 @@ export async function POST(
 
   const job = await db.deckForgeJob.findUnique({
     where: { id: jobId },
-    select: { requestedById: true, analysisResult: true },
+    select: {
+      requestedById: true,
+      analysisResult: true,
+      inputTitle: true,
+      briefing: true,
+    },
   });
   if (!job) return jsonError('NOT_FOUND', 'Deck not found', 404);
   if (
@@ -65,6 +79,28 @@ export async function POST(
   if (commit) {
     try {
       const result = await markSuggestionApplied(jobId, suggestionId);
+
+      // Capture accept signal — only when the actor is the deck owner.
+      if (job.requestedById === auth.user.id) {
+        const briefing = (job.briefing ?? null) as
+          | { audience?: string; sessionType?: string }
+          | null;
+        void recordEditSignal({
+          facultyId: auth.user.id,
+          kind: FacultyEditSignalKind.SUGGESTION_ACCEPTED,
+          topicTag: deriveTopicTag(job.inputTitle),
+          audienceTag: briefing?.audience ?? null,
+          sessionType: briefing?.sessionType ?? null,
+          jobId,
+          slideId: suggestion.slideId ?? null,
+          instructionText: suggestion.message ?? null,
+          beforeJson: { kind: suggestion.kind, severity: suggestion.severity },
+          afterJson: null,
+        }).catch((err) => {
+          console.warn('[style-profile] capture failed (non-fatal):', err);
+        });
+      }
+
       await audit({
         actorId: auth.user.id,
         actorRole: auth.user.role,

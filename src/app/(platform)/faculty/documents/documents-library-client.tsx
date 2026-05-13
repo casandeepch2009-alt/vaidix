@@ -3,12 +3,12 @@
 import { useCallback, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { DocumentRoute } from '@prisma/client';
+import { DocumentRoute, DeckForgeStatus } from '@prisma/client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle, ArrowLeft, CheckCircle2, Clock, File, FileText, Film,
-  FolderOpen, HardDrive, LayoutGrid, List, Loader2, Plus, Search,
-  Sparkles, Upload, User, X,
+  FolderOpen, HardDrive, LayoutGrid, List, Loader2, Play, Plus,
+  RotateCw, Search, Sparkles, Upload, User, X,
 } from 'lucide-react';
 import { csrfHeaders } from '@/lib/csrf-client';
 import { Button } from '@/components/ui/button';
@@ -28,9 +28,27 @@ interface DocumentRow {
   uploaderName: string;
   sizeBytes: number;
   createdAt: string;
+  /** Latest non-FAILED, non-REJECTED forge job for this doc. Null if never forged. */
+  latestForgeJobId: string | null;
+  latestForgeStatus: DeckForgeStatus | null;
+  latestForgeSlideCount: number | null;
 }
 
 type RouteFilter = 'ALL' | DocumentRoute;
+
+const FORGE_IN_PROGRESS: DeckForgeStatus[] = [
+  'QUEUED',
+  'EXTRACTING',
+  'GENERATING_SLIDES',
+];
+const FORGE_TERMINAL_SUCCESS: DeckForgeStatus[] = ['REVIEW_PENDING', 'APPROVED'];
+
+function classifyForge(status: DeckForgeStatus | null): 'none' | 'in_progress' | 'ready' {
+  if (!status) return 'none';
+  if (FORGE_IN_PROGRESS.includes(status)) return 'in_progress';
+  if (FORGE_TERMINAL_SUCCESS.includes(status)) return 'ready';
+  return 'none';
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -369,7 +387,7 @@ interface DocActionProps {
   classifying: string | null;
   forging: string | null;
   onApprove: (id: string, route: DocumentRoute) => void;
-  onForge: (id: string) => void;
+  onForge: (id: string, opts?: { force?: boolean }) => void;
   linkingSessionId?: string | null;
   linked?: boolean;
   linkingBusy?: boolean;
@@ -504,18 +522,122 @@ function DocCard({ doc, classifying, forging, onApprove, onForge, linkingSession
           ))}
         </div>
 
-        <button
-          type="button"
-          disabled={forging === doc.id}
-          onClick={() => onForge(doc.id)}
-          className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-        >
-          {forging === doc.id
-            ? <><Loader2 className="size-3 animate-spin" /> Forging…</>
-            : <><Sparkles className="size-3" /> Forge slides</>}
-        </button>
+        <ForgeAction doc={doc} forging={forging} onForge={onForge} variant="card" />
       </div>
     </motion.div>
+  );
+}
+
+// ─── Forge action (state-aware) ───────────────────────────────────────────────
+//
+// Renders one of four states based on the document's latest forge job:
+//   - ready (REVIEW_PENDING / APPROVED) → "View slides" primary + "Re-forge"
+//   - in_progress (QUEUED / EXTRACTING / GENERATING_SLIDES) → "Forging…" link
+//   - none → "Forge slides" button
+//   - failed jobs are filtered out by the service so they look like "none" here
+
+interface ForgeActionProps {
+  doc: DocumentRow;
+  forging: string | null;
+  onForge: (id: string, opts?: { force?: boolean }) => void;
+  variant: 'card' | 'row';
+}
+
+function ForgeAction({ doc, forging, onForge, variant }: ForgeActionProps) {
+  const state = classifyForge(doc.latestForgeStatus);
+  const isBusy = forging === doc.id;
+
+  if (state === 'ready' && doc.latestForgeJobId) {
+    if (variant === 'card') {
+      return (
+        <div className="mt-auto flex flex-col gap-1.5">
+          <Link
+            href={`/faculty/decks/${doc.latestForgeJobId}`}
+            className="flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-500/10 px-3 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+          >
+            <Play className="size-3 fill-current" />
+            View slides {doc.latestForgeSlideCount ? `· ${doc.latestForgeSlideCount}` : ''}
+          </Link>
+          <button
+            type="button"
+            disabled={isBusy}
+            onClick={() => {
+              if (window.confirm('Re-forge will create a new deck and use AI credits. Continue?')) {
+                onForge(doc.id, { force: true });
+              }
+            }}
+            className="flex items-center justify-center gap-1 text-[10px] text-muted-foreground transition-colors hover:text-foreground disabled:opacity-50"
+          >
+            {isBusy ? <Loader2 className="size-3 animate-spin" /> : <RotateCw className="size-2.5" />}
+            Re-forge
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="flex shrink-0 items-center gap-2">
+        <Link
+          href={`/faculty/decks/${doc.latestForgeJobId}`}
+          className="flex items-center gap-1 rounded-lg bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-500/20 dark:text-emerald-400"
+        >
+          <Play className="size-3 fill-current" />
+          View slides
+        </Link>
+        <button
+          type="button"
+          disabled={isBusy}
+          title="Re-forge with AI"
+          onClick={() => {
+            if (window.confirm('Re-forge will create a new deck and use AI credits. Continue?')) {
+              onForge(doc.id, { force: true });
+            }
+          }}
+          className="rounded-lg p-1 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50"
+        >
+          {isBusy ? <Loader2 className="size-3 animate-spin" /> : <RotateCw className="size-3" />}
+        </button>
+      </div>
+    );
+  }
+
+  if (state === 'in_progress' && doc.latestForgeJobId) {
+    const linkClasses =
+      variant === 'card'
+        ? 'mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl bg-amber-500/10 px-3 py-1.5 text-[11px] font-semibold text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400'
+        : 'flex shrink-0 items-center gap-1 rounded-lg bg-amber-500/10 px-2.5 py-1 text-[11px] font-semibold text-amber-700 transition-colors hover:bg-amber-500/20 dark:text-amber-400';
+    return (
+      <Link href={`/faculty/decks/${doc.latestForgeJobId}`} className={linkClasses}>
+        <Loader2 className="size-3 animate-spin" />
+        Forging… view progress
+      </Link>
+    );
+  }
+
+  // none
+  if (variant === 'card') {
+    return (
+      <button
+        type="button"
+        disabled={isBusy}
+        onClick={() => onForge(doc.id)}
+        className="mt-auto flex w-full items-center justify-center gap-1.5 rounded-xl bg-primary/10 px-3 py-1.5 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+      >
+        {isBusy
+          ? <><Loader2 className="size-3 animate-spin" /> Forging…</>
+          : <><Sparkles className="size-3" /> Forge slides</>}
+      </button>
+    );
+  }
+  return (
+    <button
+      type="button"
+      disabled={isBusy}
+      onClick={() => onForge(doc.id)}
+      className="flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
+    >
+      {isBusy ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
+      Forge
+    </button>
   );
 }
 
@@ -598,15 +720,7 @@ function DocRow({ doc, classifying, forging, onApprove, onForge, linkingSessionI
         {ROUTE_LABEL[doc.route]}
       </span>
 
-      <button
-        type="button"
-        disabled={forging === doc.id}
-        onClick={() => onForge(doc.id)}
-        className="flex shrink-0 items-center gap-1 rounded-lg bg-primary/10 px-2.5 py-1 text-[11px] font-semibold text-primary transition-colors hover:bg-primary/20 disabled:opacity-50"
-      >
-        {forging === doc.id ? <Loader2 className="size-3 animate-spin" /> : <Sparkles className="size-3" />}
-        Forge
-      </button>
+      <ForgeAction doc={doc} forging={forging} onForge={onForge} variant="row" />
     </motion.li>
   );
 }
@@ -717,17 +831,17 @@ export function DocumentsLibraryClient({ initialDocuments }: { initialDocuments:
     }
   }
 
-  async function forgeSlides(id: string) {
+  async function forgeSlides(id: string, opts: { force?: boolean } = {}) {
     setForging(id);
     try {
       const res = await fetch('/api/decks/forge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
-        body: JSON.stringify({ documentId: id }),
+        body: JSON.stringify({ documentId: id, ...(opts.force ? { force: true } : {}) }),
       });
       const json = (await res.json()) as {
         ok: boolean;
-        data?: { jobId: string };
+        data?: { jobId: string; reused?: boolean };
         error?: { message: string };
       };
       if (!json.ok || !json.data) throw new Error(json.error?.message ?? `Forge failed (${res.status})`);

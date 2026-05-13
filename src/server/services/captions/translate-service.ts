@@ -119,7 +119,7 @@ export async function translateCaption(args: {
   }
 
   const out = raw.trim();
-  if (!out) throw new TranslateError('EMPTY_OUTPUT', 'Gemini returned empty translation');
+  if (!out) throw new TranslateError('EMPTY_OUTPUT', 'Translation returned no text. Please try again.');
 
   try {
     await redis.set(key, out, 'EX', CACHE_TTL_SEC);

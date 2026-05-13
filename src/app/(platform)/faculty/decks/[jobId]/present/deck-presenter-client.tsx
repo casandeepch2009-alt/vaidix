@@ -15,9 +15,10 @@ interface Props {
   jobId: string;
   deckTitle: string;
   slides: SlideViewModel[];
+  themeId?: string;
 }
 
-export function DeckPresenterClient({ jobId, deckTitle, slides }: Props) {
+export function DeckPresenterClient({ jobId, deckTitle, slides, themeId }: Props) {
   const router = useRouter();
   const [idx, setIdx] = useState(0);
   const [showNotes, setShowNotes] = useState(false);
@@ -110,6 +111,7 @@ export function DeckPresenterClient({ jobId, deckTitle, slides }: Props) {
                 total={slides.length}
                 deckTitle={deckTitle}
                 mode="present"
+                themeId={themeId}
               />
             </motion.div>
           </AnimatePresence>

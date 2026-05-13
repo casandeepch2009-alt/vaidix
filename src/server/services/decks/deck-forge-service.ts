@@ -427,14 +427,17 @@ export async function forgeDeck(input: ForgeInput): Promise<ForgeOutcome> {
 
     return { jobId: job.id, deckTitle: result.deckTitle, slideCount: result.slides.length };
   } catch (err) {
+    // `err.message` from provider errors is already a user-safe generic
+    // string. Rich upstream payload lives on `err.detail` for server logs.
+    if (err instanceof GeminiUnavailableError || err instanceof GeminiUnparseableError) {
+      console.error('[deck-forge] AI provider failure', err);
+    }
     const message =
-      err instanceof GeminiUnavailableError || err instanceof GeminiUnparseableError
-        ? `AI provider error: ${err.message}`
-        : err instanceof DeckForgeError
+      err instanceof DeckForgeError
+        ? err.message
+        : err instanceof Error
           ? err.message
-          : err instanceof Error
-            ? err.message
-            : 'Forge failed';
+          : 'We couldn’t complete this just now — please try again.';
     await db.deckForgeJob.update({
       where: { id: job.id },
       data: { status: DeckForgeStatus.FAILED, errorMessage: message.slice(0, 1000) },

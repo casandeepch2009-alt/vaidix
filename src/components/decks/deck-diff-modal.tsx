@@ -25,7 +25,11 @@ export interface DiffProposal {
   before: RefinedSlideView;
   after: RefinedSlideView;
   rationale: string;
-  source: 'opus' | 'sonnet' | 'gemini';
+  /**
+   * Always 'ai' on the wire — we deliberately do not expose which model
+   * produced the proposal. Concrete tier lives in server logs only.
+   */
+  source: 'ai';
 }
 
 interface Props {
@@ -40,17 +44,8 @@ interface Props {
   onCancel: () => void;
 }
 
-const SOURCE_LABEL: Record<DiffProposal['source'], string> = {
-  opus: 'Opus 4.7',
-  sonnet: 'Sonnet 4.6',
-  gemini: 'Gemini Flash',
-};
-
-const SOURCE_TONE: Record<DiffProposal['source'], string> = {
-  opus: 'border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-300',
-  sonnet: 'border-teal-500/30 bg-teal-500/10 text-teal-700 dark:text-teal-300',
-  gemini: 'border-sky-500/30 bg-sky-500/10 text-sky-700 dark:text-sky-300',
-};
+const SOURCE_BADGE_TONE =
+  'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300';
 
 export function DeckDiffModal({
   open,
@@ -88,9 +83,9 @@ export function DeckDiffModal({
                 <h2 className="text-sm font-semibold">AI proposal</h2>
                 {proposal && (
                   <span
-                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${SOURCE_TONE[proposal.source]}`}
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium ${SOURCE_BADGE_TONE}`}
                   >
-                    {SOURCE_LABEL[proposal.source]}
+                    AI suggestion
                   </span>
                 )}
               </div>

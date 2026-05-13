@@ -1,40 +1,95 @@
 // ════════════════════════════════════════════════════════════════════════════
 // Post-Session Content Pack — W8.3
 // ════════════════════════════════════════════════════════════════════════════
-// After a session transcript is finalized, this service uses Claude to extract:
-//   1. 3 key learning Pearls → pearls table (unapproved, extractedByAi=true)
-//   2. 5 Q&A pairs          → post_session_qa table
-//   3. 1 SJT case           → sjt_cases table (unapproved)
-//   4. 1 PBL scenario       → pbl_scenarios table (unapproved)
+// Two-pass pipeline for Pearls, Q&A, SJT, PBL extraction from session
+// transcripts. Routes through ai/router — never calls providers directly.
 //
-// NOTE: Uses $queryRaw / $executeRawUnsafe for the three new tables and for the
-// new sourceSessionTranscriptId field on pearls, because the Prisma client can
-// not be regenerated while the Next.js dev server holds the query-engine DLL.
-// Column names match the migration (camelCase, quoted in PostgreSQL).
-// Once Prisma client is regenerated, raw SQL can be replaced with typed methods.
+// Short transcripts (< SHORT_TRANSCRIPT_THRESHOLD chars):
+//   Single-pass Opus (aiEnhanceContent) per artifact — same quality, lower cost.
+//
+// Long transcripts (≥ threshold — typical 1-2 hr sessions):
+//   Pass 1 — Gemini aiExtractFromSource: segments full transcript into topics
+//             with summaries + key quotes. Gemini handles the full text in one
+//             call (1M-token context). Topic digest is the input for Pass 2.
+//   Pass 2 — Opus aiEnhanceContent per topic chunk for pearl candidates;
+//             Sonnet aiDesign dedupes and ranks to final 3.
+//             Q&A / SJT / PBL receive the condensed digest (high-signal).
+//
+// Fallback: if Gemini segmentation fails, the long path falls through to
+// single-pass on the last SHORT_TRANSCRIPT_THRESHOLD chars.
+//
+// NOTE: Uses $queryRaw / $executeRawUnsafe for three tables and the
+// sourceSessionTranscriptId column — see original W8.3 note at the bottom.
 
 import crypto from 'node:crypto';
 import { db } from '@/lib/db';
-import { claudeGenerate, tryParseJson, ClaudeUnavailableError } from '@/server/services/ai/claude';
+import {
+  aiExtractFromSourceJson,
+  aiEnhanceContentJson,
+  aiDesignJson,
+  AiUnavailableError,
+  AiUnparseableError,
+} from '@/server/services/ai/router';
 
 const MIN_CONTENT_LENGTH = 200;
-const MAX_CONTENT_LENGTH = 12_000;
+const SHORT_TRANSCRIPT_THRESHOLD = 12_000;
+const MAX_PARALLEL_CHUNKS = 4;
 
-// ─── System prompts ────────────────────────────────────────────────────────
+// ─── Segmentation prompt (Gemini — Pass 1) ─────────────────────────────────
 
-const PEARL_PROMPT = `You are a clinical educator at LVPEI (L V Prasad Eye Institute), one of India's premier ophthalmology institutions.
+const SEGMENT_PROMPT = `You are organizing an ophthalmology teaching session transcript from LVPEI (L V Prasad Eye Institute).
+Identify 4–8 distinct clinical topic segments that cover the full transcript.
+For each segment return:
+- topicLabel: concise title ≤8 words
+- summary: 3–6 sentence clinical summary of the key teaching points in this segment
+- keyQuotes: up to 3 verbatim quotes with the highest clinical teaching value
+
+Return a JSON array — exactly this shape:
+[{"topicLabel": "...", "summary": "...", "keyQuotes": ["...", "..."]}]
+
+Rules:
+- The segments must together cover the entire transcript content
+- summary must faithfully reflect what was actually said (no invention)
+- keyQuotes must be verbatim from the transcript`;
+
+// ─── Pearl prompts ──────────────────────────────────────────────────────────
+
+const PEARL_CHUNK_PROMPT = `You are a clinical educator at LVPEI (L V Prasad Eye Institute).
+Extract 1–2 key learning pearls from this ophthalmology topic segment.
+Each pearl must be:
+- Clinically actionable and specific (no generic statements)
+- Grounded in content from this segment
+- Written for ophthalmology trainees (residents / fellows)
+- Body under 60 words
+
+Return a JSON array with 1–2 objects:
+[{"title": "<concise pearl title ≤10 words>", "body": "<clinical pearl ≤60 words>"}]`;
+
+const PEARL_DEDUP_PROMPT = `You are a clinical educator reviewing AI-extracted pearls from an ophthalmology session.
+Given these pearl candidates from different topic segments, select and refine exactly 3 final pearls:
+- Remove near-duplicates (keep the sharper, more actionable version)
+- Prefer clinically actionable pearls over descriptive ones
+- Ensure the 3 pearls ideally span different clinical topics
+- Refine wording only if needed for clarity — preserve clinical accuracy
+
+Return a JSON array with exactly 3 objects:
+[{"title": "<concise pearl title ≤10 words>", "body": "<clinical pearl ≤60 words>"}]`;
+
+const PEARL_PROMPT_SHORT = `You are a clinical educator at LVPEI (L V Prasad Eye Institute).
 Extract exactly 3 key learning pearls from the ophthalmology session transcript.
 Each pearl must be:
 - Clinically actionable and specific (no generic statements)
 - Grounded in content from the transcript
 - Written for ophthalmology trainees (residents / fellows)
-- Under 60 words for body
+- Body under 60 words
 
 Return a JSON array with exactly 3 objects:
 [{"title": "<concise pearl title ≤10 words>", "body": "<clinical pearl ≤60 words>"}]`;
 
+// ─── Q&A / SJT / PBL prompts ───────────────────────────────────────────────
+
 const QA_PROMPT = `You are a clinical educator at LVPEI.
-Extract exactly 5 clinically relevant Q&A pairs from this ophthalmology session transcript.
+Extract exactly 5 clinically relevant Q&A pairs from this ophthalmology session content.
 Questions should be what a trainee might ask; answers should reflect content from the session.
 Each answer must be precise and under 80 words.
 
@@ -42,21 +97,27 @@ Return a JSON array with exactly 5 objects:
 [{"question": "<question>", "answer": "<answer ≤80 words>"}]`;
 
 const SJT_PROMPT = `You are a clinical educator at LVPEI.
-Generate exactly 1 Situational Judgment Test (SJT) case based on clinical content in this ophthalmology transcript.
+Generate exactly 1 Situational Judgment Test (SJT) case based on clinical content in this ophthalmology session.
 The case should present a realistic management dilemma that tests clinical reasoning.
-Choose a scenario explicitly present in or directly derivable from the transcript.
+Choose a scenario explicitly present in or directly derivable from the session content.
 
 Return a single JSON object:
 {"stem": "<clinical scenario ≤150 words>", "options": ["<A>", "<B>", "<C>", "<D>"], "correctIndex": 0, "rationale": "<why this is correct ≤100 words>"}`;
 
 const PBL_PROMPT = `You are a clinical educator at LVPEI.
-Generate exactly 1 Problem-Based Learning (PBL) scenario based on this ophthalmology session transcript.
+Generate exactly 1 Problem-Based Learning (PBL) scenario based on this ophthalmology session content.
 The scenario should trigger self-directed enquiry and promote deeper learning of the session's key concepts.
 
 Return a single JSON object:
 {"trigger": "<opening clinical trigger ≤100 words>", "objectives": ["<learning objective 1>", "<learning objective 2>", "<learning objective 3>"], "content": "<background notes for facilitators ≤200 words>"}`;
 
 // ─── Types ─────────────────────────────────────────────────────────────────
+
+interface TopicChunk {
+  topicLabel: string;
+  summary: string;
+  keyQuotes: string[];
+}
 
 interface RawPearl { title: string; body: string }
 interface RawQa { question: string; answer: string }
@@ -105,16 +166,39 @@ export async function generatePostSessionPack(
     return { pearls: 0, qaPairs: 0, sjtCases: 0, pblScenarios: 0, skipped: true, reason: 'already-generated' };
   }
 
-  const content = transcript.contentText.slice(-MAX_CONTENT_LENGTH);
-  const transcriptId = transcript.id;
-
+  const { contentText, id: transcriptId } = transcript;
   let pearlsCreated = 0;
   let qaCreated = 0;
   let sjtCreated = 0;
   let pblCreated = 0;
 
+  if (contentText.length >= SHORT_TRANSCRIPT_THRESHOLD) {
+    // ─── Long transcript: two-pass pipeline ────────────────────────────
+    let chunks: TopicChunk[] = [];
+    try {
+      chunks = await segmentTranscript(contentText);
+    } catch {
+      // segmentation failure — fall through to short-path below
+    }
+
+    if (chunks.length > 0) {
+      const digest = buildDigest(chunks);
+      await Promise.allSettled([
+        extractPearlsFromChunks(chunks, transcriptId, session.programId, session.topicId)
+          .then((n) => { pearlsCreated = n; }),
+        extractQaPairs(digest, transcriptId).then((n) => { qaCreated = n; }),
+        generateSjt(digest, transcriptId).then((n) => { sjtCreated = n; }),
+        generatePbl(digest, transcriptId).then((n) => { pblCreated = n; }),
+      ]);
+      return { pearls: pearlsCreated, qaPairs: qaCreated, sjtCases: sjtCreated, pblScenarios: pblCreated, skipped: false };
+    }
+  }
+
+  // ─── Short transcript or segmentation fallback ──────────────────────
+  const content = contentText.slice(-SHORT_TRANSCRIPT_THRESHOLD);
   await Promise.allSettled([
-    extractPearls(content, transcriptId, session.programId, session.topicId).then((n) => { pearlsCreated = n; }),
+    extractPearlsDirect(content, transcriptId, session.programId, session.topicId)
+      .then((n) => { pearlsCreated = n; }),
     extractQaPairs(content, transcriptId).then((n) => { qaCreated = n; }),
     generateSjt(content, transcriptId).then((n) => { sjtCreated = n; }),
     generatePbl(content, transcriptId).then((n) => { pblCreated = n; }),
@@ -123,48 +207,146 @@ export async function generatePostSessionPack(
   return { pearls: pearlsCreated, qaPairs: qaCreated, sjtCases: sjtCreated, pblScenarios: pblCreated, skipped: false };
 }
 
-// ─── Individual generators ─────────────────────────────────────────────────
+// ─── Segmentation (Gemini, Pass 1) ─────────────────────────────────────────
 
-async function extractPearls(
+async function segmentTranscript(text: string): Promise<TopicChunk[]> {
+  const chunks = await aiExtractFromSourceJson<TopicChunk[]>({
+    systemPrompt: SEGMENT_PROMPT,
+    parts: [{ text: `TRANSCRIPT:\n${text}` }],
+    responseMimeType: 'application/json',
+    temperature: 0.2,
+  });
+  if (!Array.isArray(chunks)) return [];
+  return chunks.filter((c) => c.topicLabel && c.summary);
+}
+
+/** Condenses all topic chunks into a high-signal digest for Q&A / SJT / PBL. */
+function buildDigest(chunks: TopicChunk[]): string {
+  return chunks
+    .map((c, i) =>
+      `[Topic ${i + 1}: ${c.topicLabel}]\n${c.summary}` +
+      (c.keyQuotes?.length
+        ? `\nKey quotes:\n${c.keyQuotes.map((q) => `  - "${q}"`).join('\n')}`
+        : ''),
+    )
+    .join('\n\n');
+}
+
+// ─── Pearl extraction — long path (per-chunk Opus → Sonnet dedup) ──────────
+
+async function extractPearlsFromChunks(
+  chunks: TopicChunk[],
+  transcriptId: string,
+  programId: string,
+  topicId: string | null,
+): Promise<number> {
+  try {
+    const candidates: RawPearl[] = [];
+    for (let i = 0; i < chunks.length; i += MAX_PARALLEL_CHUNKS) {
+      const batch = chunks.slice(i, i + MAX_PARALLEL_CHUNKS);
+      const results = await Promise.allSettled(
+        batch.map((chunk) =>
+          aiEnhanceContentJson<RawPearl[]>({
+            systemPrompt: PEARL_CHUNK_PROMPT,
+            userMessage:
+              `[Topic: ${chunk.topicLabel}]\n${chunk.summary}\n\n` +
+              (chunk.keyQuotes?.length
+                ? `Key quotes:\n${chunk.keyQuotes.map((q) => `- "${q}"`).join('\n')}`
+                : ''),
+            jsonOutput: true,
+            temperature: 0.3,
+            maxTokens: 1024,
+          }),
+        ),
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled' && Array.isArray(r.value)) {
+          candidates.push(...r.value.filter((p) => p.title && p.body));
+        }
+      }
+    }
+    if (candidates.length === 0) return 0;
+
+    // Sonnet dedup + rank → final 3
+    const final = await aiDesignJson<RawPearl[]>({
+      systemPrompt: PEARL_DEDUP_PROMPT,
+      userMessage: `Pearl candidates:\n${JSON.stringify(candidates, null, 2)}`,
+      jsonOutput: true,
+      temperature: 0.2,
+      maxTokens: 1024,
+    });
+    if (!Array.isArray(final)) return 0;
+    const valid = final.slice(0, 3).filter((p) => p.title && p.body);
+    return persistPearls(valid, transcriptId, programId, topicId);
+  } catch (err) {
+    if (!(err instanceof AiUnavailableError) && !(err instanceof AiUnparseableError)) {
+      console.error('[post-session-pack] pearls-from-chunks failed', err);
+    }
+    return 0;
+  }
+}
+
+// ─── Pearl extraction — short / fallback path ──────────────────────────────
+
+async function extractPearlsDirect(
   content: string,
   transcriptId: string,
   programId: string,
   topicId: string | null,
 ): Promise<number> {
   try {
-    const raw = await claudeGenerate({
-      systemInstruction: PEARL_PROMPT,
+    const parsed = await aiEnhanceContentJson<RawPearl[]>({
+      systemPrompt: PEARL_PROMPT_SHORT,
       userMessage: `TRANSCRIPT:\n${content}`,
+      jsonOutput: true,
+      temperature: 0.3,
+      maxTokens: 1024,
     });
-    const parsed = tryParseJson<RawPearl[]>(raw);
     if (!Array.isArray(parsed)) return 0;
     const valid = parsed.slice(0, 3).filter((p) => p.title && p.body);
-    for (const p of valid) {
-      await db.$executeRawUnsafe(
-        `INSERT INTO pearls (id, title, body, "programId", "topicId", "sourceType", "sourceSessionTranscriptId", "extractedByAi", approved, "createdAt", "updatedAt")
-         VALUES ($1, $2, $3, $4, $5, 'session_transcript', $6, true, false, now(), now())`,
-        newId(),
-        p.title.slice(0, 120),
-        p.body.slice(0, 500),
-        programId,
-        topicId ?? null,
-        transcriptId,
-      );
-    }
-    return valid.length;
+    return persistPearls(valid, transcriptId, programId, topicId);
   } catch (err) {
-    if (!(err instanceof ClaudeUnavailableError)) console.error('[post-session-pack] pearls failed', err);
+    if (!(err instanceof AiUnavailableError) && !(err instanceof AiUnparseableError)) {
+      console.error('[post-session-pack] pearls-direct failed', err);
+    }
     return 0;
   }
 }
 
+// ─── Pearl persistence (shared) ────────────────────────────────────────────
+
+async function persistPearls(
+  pearls: RawPearl[],
+  transcriptId: string,
+  programId: string,
+  topicId: string | null,
+): Promise<number> {
+  for (const p of pearls) {
+    await db.$executeRawUnsafe(
+      `INSERT INTO pearls (id, title, body, "programId", "topicId", "sourceType", "sourceSessionTranscriptId", "extractedByAi", approved, "createdAt", "updatedAt")
+       VALUES ($1, $2, $3, $4, $5, 'session_transcript', $6, true, false, now(), now())`,
+      newId(),
+      p.title.slice(0, 120),
+      p.body.slice(0, 500),
+      programId,
+      topicId ?? null,
+      transcriptId,
+    );
+  }
+  return pearls.length;
+}
+
+// ─── Q&A extraction ─────────────────────────────────────────────────────────
+
 async function extractQaPairs(content: string, transcriptId: string): Promise<number> {
   try {
-    const raw = await claudeGenerate({
-      systemInstruction: QA_PROMPT,
-      userMessage: `TRANSCRIPT:\n${content}`,
+    const parsed = await aiEnhanceContentJson<RawQa[]>({
+      systemPrompt: QA_PROMPT,
+      userMessage: `SESSION CONTENT:\n${content}`,
+      jsonOutput: true,
+      temperature: 0.3,
+      maxTokens: 2048,
     });
-    const parsed = tryParseJson<RawQa[]>(raw);
     if (!Array.isArray(parsed)) return 0;
     const valid = parsed.slice(0, 5).filter((q) => q.question && q.answer);
     for (const q of valid) {
@@ -179,18 +361,24 @@ async function extractQaPairs(content: string, transcriptId: string): Promise<nu
     }
     return valid.length;
   } catch (err) {
-    if (!(err instanceof ClaudeUnavailableError)) console.error('[post-session-pack] qa failed', err);
+    if (!(err instanceof AiUnavailableError) && !(err instanceof AiUnparseableError)) {
+      console.error('[post-session-pack] qa failed', err);
+    }
     return 0;
   }
 }
 
+// ─── SJT generation ─────────────────────────────────────────────────────────
+
 async function generateSjt(content: string, transcriptId: string): Promise<number> {
   try {
-    const raw = await claudeGenerate({
-      systemInstruction: SJT_PROMPT,
-      userMessage: `TRANSCRIPT:\n${content}`,
+    const parsed = await aiEnhanceContentJson<RawSjt>({
+      systemPrompt: SJT_PROMPT,
+      userMessage: `SESSION CONTENT:\n${content}`,
+      jsonOutput: true,
+      temperature: 0.3,
+      maxTokens: 1024,
     });
-    const parsed = tryParseJson<RawSjt>(raw);
     if (!parsed?.stem) return 0;
     const options = Array.isArray(parsed.options) ? parsed.options.slice(0, 4) : [];
     const correctIndex = typeof parsed.correctIndex === 'number' ? parsed.correctIndex : null;
@@ -206,18 +394,24 @@ async function generateSjt(content: string, transcriptId: string): Promise<numbe
     );
     return 1;
   } catch (err) {
-    if (!(err instanceof ClaudeUnavailableError)) console.error('[post-session-pack] sjt failed', err);
+    if (!(err instanceof AiUnavailableError) && !(err instanceof AiUnparseableError)) {
+      console.error('[post-session-pack] sjt failed', err);
+    }
     return 0;
   }
 }
 
+// ─── PBL generation ─────────────────────────────────────────────────────────
+
 async function generatePbl(content: string, transcriptId: string): Promise<number> {
   try {
-    const raw = await claudeGenerate({
-      systemInstruction: PBL_PROMPT,
-      userMessage: `TRANSCRIPT:\n${content}`,
+    const parsed = await aiEnhanceContentJson<RawPbl>({
+      systemPrompt: PBL_PROMPT,
+      userMessage: `SESSION CONTENT:\n${content}`,
+      jsonOutput: true,
+      temperature: 0.3,
+      maxTokens: 1024,
     });
-    const parsed = tryParseJson<RawPbl>(raw);
     if (!parsed?.trigger) return 0;
     const objectives = Array.isArray(parsed.objectives) ? parsed.objectives.slice(0, 5) : [];
     await db.$executeRawUnsafe(
@@ -231,12 +425,18 @@ async function generatePbl(content: string, transcriptId: string): Promise<numbe
     );
     return 1;
   } catch (err) {
-    if (!(err instanceof ClaudeUnavailableError)) console.error('[post-session-pack] pbl failed', err);
+    if (!(err instanceof AiUnavailableError) && !(err instanceof AiUnparseableError)) {
+      console.error('[post-session-pack] pbl failed', err);
+    }
     return 0;
   }
 }
 
 // ─── Read helpers (used by the GET /post-session route) ────────────────────
+// NOTE: $queryRaw / $executeRawUnsafe throughout because post_session_qa,
+// sjt_cases, pbl_scenarios, and the sourceSessionTranscriptId column on
+// pearls are not in the stale Prisma client. Replace with typed methods
+// once `prisma generate` can run (query-engine DLL not held by dev server).
 
 interface QaRow { id: string; question: string; answer: string; createdAt: Date }
 interface SjtRow { id: string; stem: string; options: unknown; correctIndex: number | null; rationale: string; createdAt: Date }

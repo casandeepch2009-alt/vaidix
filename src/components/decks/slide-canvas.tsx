@@ -9,6 +9,7 @@
 
 import { motion } from 'framer-motion';
 import type { SlideLayout } from '@prisma/client';
+import { getDeckTheme, type DeckTheme } from '@/lib/deck-themes';
 
 export interface SlideViewModel {
   id: string;
@@ -27,21 +28,7 @@ interface SlideCanvasProps {
   deckTitle: string;
   /** preview = inside an editor card; present = fullscreen */
   mode?: 'preview' | 'present';
-}
-
-const THEME = {
-  bg: '#040817',
-  panel: '#0b1535',
-  border: '#0f1d48',
-  teal: '#00d4f0',
-  gold: '#f5b731',
-  text: '#ffffff',
-  subtle: 'rgba(255,255,255,0.6)',
-  faint: 'rgba(255,255,255,0.32)',
-};
-
-function accent(slide: SlideViewModel): string {
-  return slide.accentHex ? `#${slide.accentHex}` : THEME.teal;
+  themeId?: string;
 }
 
 const LAYOUT_LABEL: Record<SlideLayout, string> = {
@@ -54,19 +41,27 @@ const LAYOUT_LABEL: Record<SlideLayout, string> = {
   CLOSING: 'CLOSING',
 };
 
-export function SlideCanvas({ slide, index, total, deckTitle, mode = 'preview' }: SlideCanvasProps) {
+export function SlideCanvas({
+  slide,
+  index,
+  total,
+  deckTitle,
+  mode = 'preview',
+  themeId,
+}: SlideCanvasProps) {
+  const theme = getDeckTheme(themeId);
   const isPresent = mode === 'present';
-  const accentColor = accent(slide);
+  const accentColor = slide.accentHex ? `#${slide.accentHex}` : theme.primary;
 
   return (
     <div
       className="relative w-full overflow-hidden"
       style={{
         aspectRatio: '16 / 9',
-        background: THEME.bg,
-        color: THEME.text,
+        background: theme.bg,
+        color: theme.text,
         borderRadius: isPresent ? 0 : 12,
-        border: isPresent ? 'none' : `1px solid ${THEME.border}`,
+        border: isPresent ? 'none' : `1px solid ${theme.border}`,
       }}
     >
       {/* Header bar */}
@@ -74,28 +69,28 @@ export function SlideCanvas({ slide, index, total, deckTitle, mode = 'preview' }
         className="absolute inset-x-0 top-0 flex items-center justify-between"
         style={{
           height: '6%',
-          background: THEME.panel,
-          borderBottom: `1px solid ${THEME.border}`,
+          background: theme.panel,
+          borderBottom: `1px solid ${theme.border}`,
           padding: '0 2.5%',
         }}
       >
         <div className="flex items-baseline gap-3">
           <span
             className="font-serif font-bold tracking-[0.12em]"
-            style={{ color: THEME.teal, fontSize: 'clamp(10px, 1.6cqw, 22px)' }}
+            style={{ color: theme.primary, fontSize: 'clamp(10px, 1.6cqw, 22px)' }}
           >
             VAIDIX
           </span>
           <span
             className="hidden tracking-[0.18em] sm:inline"
-            style={{ color: THEME.faint, fontSize: 'clamp(7px, 0.8cqw, 12px)' }}
+            style={{ color: theme.faint, fontSize: 'clamp(7px, 0.8cqw, 12px)' }}
           >
             {LAYOUT_LABEL[slide.layout]}
           </span>
         </div>
         <span
           className="font-mono"
-          style={{ color: THEME.faint, fontSize: 'clamp(7px, 0.85cqw, 12px)' }}
+          style={{ color: theme.faint, fontSize: 'clamp(7px, 0.85cqw, 12px)' }}
         >
           {String(index + 1).padStart(2, '0')} / {String(total).padStart(2, '0')}
         </span>
@@ -104,37 +99,31 @@ export function SlideCanvas({ slide, index, total, deckTitle, mode = 'preview' }
       {/* Accent strip just below header */}
       <div
         className="absolute"
-        style={{
-          left: 0,
-          right: '50%',
-          top: '6%',
-          height: '0.4%',
-          background: accentColor,
-        }}
+        style={{ left: 0, right: '50%', top: '6%', height: '0.4%', background: accentColor }}
       />
       <div
         className="absolute"
-        style={{
-          left: '50%',
-          right: 0,
-          top: '6%',
-          height: '0.4%',
-          background: THEME.gold,
-        }}
+        style={{ left: '50%', right: 0, top: '6%', height: '0.4%', background: theme.secondary }}
       />
 
       {/* Body */}
-      <SlideBody slide={slide} deckTitle={deckTitle} accentColor={accentColor} isPresent={isPresent} />
+      <SlideBody
+        slide={slide}
+        deckTitle={deckTitle}
+        accentColor={accentColor}
+        isPresent={isPresent}
+        theme={theme}
+      />
 
       {/* Footer */}
       <div
         className="absolute inset-x-0 bottom-0 flex items-center justify-between"
         style={{
           height: '5%',
-          background: THEME.bg,
-          borderTop: `1px solid ${THEME.border}`,
+          background: theme.bg,
+          borderTop: `1px solid ${theme.border}`,
           padding: '0 2.5%',
-          color: THEME.faint,
+          color: theme.faint,
           fontSize: 'clamp(7px, 0.8cqw, 11px)',
         }}
       >
@@ -150,11 +139,13 @@ function SlideBody({
   deckTitle,
   accentColor,
   isPresent,
+  theme,
 }: {
   slide: SlideViewModel;
   deckTitle: string;
   accentColor: string;
   isPresent: boolean;
+  theme: DeckTheme;
 }) {
   const padX = '6%';
   const padTop = '11%';
@@ -179,7 +170,7 @@ function SlideBody({
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="font-bold leading-[1.05]"
-            style={{ fontSize: titleSize, color: THEME.text }}
+            style={{ fontSize: titleSize, color: theme.text }}
           >
             {slide.title}
           </motion.h1>
@@ -198,12 +189,12 @@ function SlideBody({
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5 }}
             className="font-bold leading-[1.05]"
-            style={{ fontSize: titleSize, color: THEME.text }}
+            style={{ fontSize: titleSize, color: theme.text }}
           >
             {slide.title}
           </motion.h1>
           {slide.bullets.length > 0 && (
-            <p style={{ color: THEME.subtle, fontSize: bodySize }}>{slide.bullets.join(' · ')}</p>
+            <p style={{ color: theme.subtle, fontSize: bodySize }}>{slide.bullets.join(' · ')}</p>
           )}
         </div>
       );
@@ -214,18 +205,20 @@ function SlideBody({
           className="absolute flex flex-col justify-center gap-6"
           style={{ left: padX, right: padX, top: '14%', bottom: '14%' }}
         >
-          <span style={{ color: accentColor, fontSize: 'clamp(28px, 5cqw, 80px)', lineHeight: 1 }}>“</span>
+          <span style={{ color: accentColor, fontSize: 'clamp(28px, 5cqw, 80px)', lineHeight: 1 }}>
+            "
+          </span>
           <motion.p
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5 }}
             className="font-medium"
-            style={{ fontSize: bodySize, color: THEME.text, lineHeight: 1.4 }}
+            style={{ fontSize: bodySize, color: theme.text, lineHeight: 1.4 }}
           >
             {slide.title}
           </motion.p>
           {slide.bullets[0] && (
-            <span style={{ color: THEME.subtle, fontSize: bodySize, fontStyle: 'italic' }}>
+            <span style={{ color: theme.subtle, fontSize: bodySize, fontStyle: 'italic' }}>
               — {slide.bullets[0]}
             </span>
           )}
@@ -242,7 +235,7 @@ function SlideBody({
             className="self-start rounded-full px-3 py-1 font-bold tracking-[0.2em] uppercase"
             style={{
               background: accentColor,
-              color: THEME.bg,
+              color: theme.bg,
               fontSize: 'clamp(8px, 0.9cqw, 12px)',
             }}
           >
@@ -252,11 +245,11 @@ function SlideBody({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             className="font-bold leading-tight"
-            style={{ fontSize: titleSize, color: THEME.text }}
+            style={{ fontSize: titleSize, color: theme.text }}
           >
             {slide.title}
           </motion.h2>
-          <ul className="grid gap-3" style={{ color: THEME.subtle, fontSize: bodySize }}>
+          <ul className="grid gap-3" style={{ color: theme.subtle, fontSize: bodySize }}>
             {slide.bullets.map((b, i) => (
               <motion.li
                 key={i}
@@ -264,7 +257,7 @@ function SlideBody({
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ delay: 0.15 + i * 0.05 }}
                 className="flex items-start gap-3 rounded-lg px-4 py-3"
-                style={{ background: THEME.panel, border: `1px solid ${THEME.border}` }}
+                style={{ background: theme.panel, border: `1px solid ${theme.border}` }}
               >
                 <span style={{ color: accentColor }}>{String.fromCharCode(65 + i)}.</span>
                 <span>{b}</span>
@@ -287,13 +280,13 @@ function SlideBody({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             className="font-bold leading-tight"
-            style={{ fontSize: titleSize, color: THEME.text }}
+            style={{ fontSize: titleSize, color: theme.text }}
           >
             {slide.title}
           </motion.h2>
           <div className="grid grid-cols-2 gap-6">
             {[left, right].map((col, ci) => (
-              <ul key={ci} className="grid gap-2" style={{ color: THEME.subtle, fontSize: bodySize }}>
+              <ul key={ci} className="grid gap-2" style={{ color: theme.subtle, fontSize: bodySize }}>
                 {col.map((b, i) => (
                   <motion.li
                     key={i}
@@ -314,8 +307,6 @@ function SlideBody({
     }
 
     case 'IMAGE_FOCUS':
-      // No image upload yet — render as title + caption styled distinctly so
-      // faculty knows where the image will go once asset upload lands.
       return (
         <div
           className="absolute flex flex-col gap-4"
@@ -325,7 +316,7 @@ function SlideBody({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             className="font-bold leading-tight"
-            style={{ fontSize: titleSize, color: THEME.text }}
+            style={{ fontSize: titleSize, color: theme.text }}
           >
             {slide.title}
           </motion.h2>
@@ -333,7 +324,7 @@ function SlideBody({
             className="flex flex-1 items-center justify-center rounded-lg"
             style={{
               border: `1px dashed ${accentColor}`,
-              color: THEME.faint,
+              color: theme.faint,
               fontSize: 'clamp(9px, 1.1cqw, 14px)',
               minHeight: '40%',
             }}
@@ -341,7 +332,7 @@ function SlideBody({
             Image / OCT / fundus photo placeholder
           </div>
           {slide.bullets[0] && (
-            <p style={{ color: THEME.subtle, fontSize: bodySize }}>{slide.bullets[0]}</p>
+            <p style={{ color: theme.subtle, fontSize: bodySize }}>{slide.bullets[0]}</p>
           )}
         </div>
       );
@@ -357,12 +348,12 @@ function SlideBody({
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             className="font-bold leading-tight"
-            style={{ fontSize: titleSize, color: THEME.text }}
+            style={{ fontSize: titleSize, color: theme.text }}
           >
             {slide.title}
           </motion.h2>
           <div style={{ width: '8%', height: '0.4%', background: accentColor }} />
-          <ul className="grid gap-3" style={{ color: THEME.subtle, fontSize: bodySize }}>
+          <ul className="grid gap-3" style={{ color: theme.subtle, fontSize: bodySize }}>
             {slide.bullets.map((b, i) => (
               <motion.li
                 key={i}

@@ -24,6 +24,10 @@ const FACULTY_LIKE: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
 const PostBody = z.object({
   topic: z.string().min(3).max(280),
   learnerLevel: z.string().min(1).max(80).optional(),
+  sessionLengthMinutes: z.number().int().min(15).max(240).optional(),
+  clinicalSetting: z.string().min(1).max(400).optional(),
+  priorKnowledgeAssumed: z.string().min(1).max(1000).optional(),
+  constraints: z.string().min(1).max(1000).optional(),
 });
 
 export async function GET() {
@@ -64,6 +68,10 @@ export async function POST(req: Request) {
       requestedById: auth.user.id,
       topic: parsed.data.topic,
       learnerLevel: parsed.data.learnerLevel,
+      sessionLengthMinutes: parsed.data.sessionLengthMinutes,
+      clinicalSetting: parsed.data.clinicalSetting,
+      priorKnowledgeAssumed: parsed.data.priorKnowledgeAssumed,
+      constraints: parsed.data.constraints,
     });
     await audit({
       actorId: auth.user.id,
@@ -72,7 +80,14 @@ export async function POST(req: Request) {
       entityType: 'Blueprint',
       entityId: blueprint.id,
       summary: 'Curriculum blueprint generated',
-      details: { topic: blueprint.topic, learnerLevel: blueprint.learnerLevel },
+      details: {
+        topic: blueprint.topic,
+        learnerLevel: blueprint.learnerLevel,
+        sessionLengthMinutes: blueprint.sessionLengthMinutes,
+        clinicalSetting: blueprint.clinicalSetting,
+        priorKnowledgeAssumed: blueprint.priorKnowledgeAssumed,
+        constraints: blueprint.constraints,
+      },
       ...extractRequestMetadata(req),
     });
     return jsonOk({ blueprint });

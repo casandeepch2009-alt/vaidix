@@ -33,6 +33,11 @@ import {
   AiUnparseableError,
 } from '@/server/services/ai/router';
 import { getFacultyHistoryContext } from './faculty-analytics-history';
+import {
+  getFacultyStyleProfile,
+  REBUILD_AFTER_N_NEW_SIGNALS,
+  rebuildFacultyStyleProfile,
+} from './faculty-style-profile';
 import { persistDeckAsDocument } from './deck-pptx-renderer';
 
 // ─── Public types ──────────────────────────────────────────────────────────
@@ -447,10 +452,13 @@ async function draftFromExtraction(args: {
   /** Optional faculty-history prompt block — null when faculty has no prior
    *  sessions in the lookback window. Skipped from the prompt when null. */
   historyContext: string | null;
+  /** Optional faculty STYLE-profile prompt block — null when faculty has
+   *  aiMemoryOptIn=false, no profile yet, or no rules whose scope tags
+   *  overlap the current briefing. */
+  styleContext: string | null;
 }): Promise<DraftResult> {
-  const historyBlock = args.historyContext
-    ? `\n${args.historyContext}\n`
-    : '';
+  const historyBlock = args.historyContext ? `\n${args.historyContext}\n` : '';
+  const styleBlock = args.styleContext ? `\n${args.styleContext}\n` : '';
   const userMessage =
     `Intent: ${args.intent}\n\n` +
     `BRIEFING\n` +
@@ -460,6 +468,7 @@ async function draftFromExtraction(args: {
     `  objectives: ${args.briefing.objectives}\n` +
     (args.briefing.localContext ? `  localContext: ${args.briefing.localContext}\n` : '') +
     historyBlock +
+    styleBlock +
     `\nEXTRACTION (from upstream extractor)\n${JSON.stringify(args.extraction, null, 2)}\n\n` +
     `Author the deck JSON now.`;
   return aiEnhanceContentJson<DraftResult>({
@@ -469,6 +478,19 @@ async function draftFromExtraction(args: {
     temperature: 0.35,
     maxTokens: 8000,
   });
+}
+
+/**
+ * Derive a topic tag from the briefing/inputTitle for scoped style-profile
+ * retrieval. Same heuristic the capture sites use: first content word of
+ * the deck title (or first objective word if title is missing), lowercase,
+ * length > 2. Cheap and deterministic.
+ */
+function deriveTopicTagForForge(inputTitle: string | null | undefined, objectives: string): string | null {
+  const source = inputTitle && inputTitle.trim().length > 0 ? inputTitle : objectives;
+  const cleaned = source.toLowerCase().replace(/[^a-z0-9\s-]/g, '').trim();
+  const first = cleaned.split(/\s+/).find((w) => w.length > 2);
+  return first ?? null;
 }
 
 // ─── Orchestrator ──────────────────────────────────────────────────────────
@@ -512,15 +534,35 @@ export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardFo
     });
 
     // 3. DRAFT — Opus authors + flags initial suggestions.
-    // Faculty-history is consulted in parallel; null when faculty has no
-    // prior sessions (new instructor, no signals yet).
-    const history = await getFacultyHistoryContext(input.requestedById).catch(() => null);
+    // Two parallel context fetches:
+    //   - history: engagement signals from this faculty's past sessions
+    //   - style:   distilled rules from this faculty's past slide edits
+    // Both return null when not enough signal — caller skips the prompt block.
+    //
+    // Style retrieval is SCOPED by the active briefing's topic/audience/
+    // sessionType so a "drop dosage tables for glaucoma" rule never bleeds
+    // into a uveitis deck (Mem0 structured-metadata pattern, 2026).
+    //
+    // Cross-user isolation: getFacultyStyleProfile(input.requestedById) is
+    // called with the authenticated forge requester. There is no parameter
+    // path here for another user's id to enter — the contract is enforced
+    // at the call site by passing `input.requestedById` and only that.
+    const styleScope = {
+      topicTag: deriveTopicTagForForge(input.inputTitle, input.briefing.objectives),
+      audienceTag: input.briefing.audience,
+      sessionType: input.briefing.sessionType,
+    };
+    const [history, style] = await Promise.all([
+      getFacultyHistoryContext(input.requestedById).catch(() => null),
+      getFacultyStyleProfile(input.requestedById, styleScope).catch(() => null),
+    ]);
 
     const draft = await draftFromExtraction({
       intent: input.intent,
       briefing: input.briefing,
       extraction,
       historyContext: history?.promptContext ?? null,
+      styleContext: style?.promptContext ?? null,
     });
     const result = normalize(draft);
 
@@ -563,6 +605,12 @@ export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardFo
     // Surface the forged deck in the faculty's documents library. Best-effort.
     await persistDeckAsDocument({ jobId: created.id });
 
+    // Auto-trigger style-profile rebuild when enough new signals have
+    // accumulated since the last build. Runs in the background — must not
+    // block the forge response. A failure here is a non-event; faculty can
+    // also kick it manually from the settings page.
+    void maybeRebuildStyleProfile(input.requestedById).catch(() => {});
+
     return {
       jobId: created.id,
       deckTitle: result.deckTitle,
@@ -575,16 +623,38 @@ export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardFo
         : err instanceof AiUnavailableError
           ? 'AI_UNAVAILABLE'
           : 'FORGE_FAILED';
+    // `err.message` from AI provider errors is already a user-safe generic
+    // string ("The AI assistant is temporarily unavailable…"). Server logs
+    // get the rich `.detail` via the error object's own enumerable props.
+    if (err instanceof AiUnavailableError || err instanceof AiUnparseableError) {
+      console.error('[wizard-forge] AI provider failure', err);
+    }
     const message =
-      err instanceof AiUnavailableError || err instanceof AiUnparseableError
-        ? `AI provider error: ${err.message}`
-        : err instanceof Error
-          ? err.message
-          : 'Forge failed';
+      err instanceof Error ? err.message : 'We couldn’t complete this just now — please try again.';
     await db.deckForgeJob.update({
       where: { id: created.id },
       data: { status: DeckForgeStatus.FAILED, errorMessage: message.slice(0, 1000) },
     });
     throw err instanceof WizardForgeError ? err : new WizardForgeError(code, message);
   }
+}
+
+/**
+ * Best-effort: if the faculty has accumulated REBUILD_AFTER_N_NEW_SIGNALS
+ * un-processed signals since the last build (or has none AND has crossed
+ * the first-build threshold), kick a Gemini distillation. Called after a
+ * successful forge but its outcome is invisible to that forge — fresh rules
+ * land in time for the NEXT forge, not this one.
+ */
+async function maybeRebuildStyleProfile(facultyId: string): Promise<void> {
+  const [existing, unprocessed] = await Promise.all([
+    db.facultyStyleProfile.findUnique({
+      where: { facultyId },
+      select: { signalCountAtBuild: true },
+    }),
+    db.facultyEditSignal.count({ where: { facultyId, processedAt: null } }),
+  ]);
+  if (unprocessed < REBUILD_AFTER_N_NEW_SIGNALS) return;
+  if (existing && unprocessed < REBUILD_AFTER_N_NEW_SIGNALS) return;
+  await rebuildFacultyStyleProfile(facultyId);
 }

@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 // We never expose `DEEPGRAM_API_KEY` to the browser. The host's browser
 // requests a short-lived scoped access token from our server (see
-// /api/classroom/sessions/[id]/captions/deepgram-token), then opens a
+// /api/classroom/sessions/[id]/captions/captions-token), then opens a
 // WebSocket directly to Deepgram using that token in the `token` subprotocol.
 // Tokens have a 30-second TTL — the browser refreshes if it ever needs to
 // reconnect mid-session.
@@ -17,10 +17,19 @@
 
 import { env } from '@/lib/env';
 
+// User-safe message — every `err.message` here is treated as potentially
+// client-visible. The vendor name + upstream response payload live on
+// `.detail` for server logs only.
+const CAPTIONS_UNAVAILABLE_USER_MESSAGE =
+  'Captions are temporarily unavailable. Please try again in a moment.';
+
 export class DeepgramUnavailableError extends Error {
-  constructor(message: string) {
-    super(message);
+  /** Rich upstream context — server logs only, never sent to clients. */
+  public readonly detail: string;
+  constructor(detail: string) {
+    super(CAPTIONS_UNAVAILABLE_USER_MESSAGE);
     this.name = 'DeepgramUnavailableError';
+    this.detail = detail;
   }
 }
 

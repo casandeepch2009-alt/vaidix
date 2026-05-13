@@ -1,13 +1,13 @@
 'use client'
 
 // ════════════════════════════════════════════════════════════════════════════
-// DeepgramCaptionsProducer — host-side, English-only, Phase 1
+// CaptionsProducer — host-side, English-only, Phase 1
 // ════════════════════════════════════════════════════════════════════════════
 // Mounts only for the session HOST when `session.metadata.captionsProfile`
 // is 'english-only'. Captures the host's LiveKit local microphone track,
-// pipes opus chunks over a WebSocket to Deepgram (using a 30s scoped token
-// minted by /captions/deepgram-token), and POSTs finalized utterances to
-// /captions/publish for fan-out + persistence.
+// pipes opus chunks over a WebSocket to the upstream ASR provider (using a
+// 30s scoped token minted by /captions/captions-token), and POSTs finalized
+// utterances to /captions/publish for fan-out + persistence.
 //
 // Headless component — renders nothing visible. Status is exposed via the
 // optional `onStatusChange` prop so the live-session control bar can show a
@@ -15,7 +15,7 @@
 //
 // Failure modes the component handles internally (no UI):
 //   * Token mint fails → retries every 10s up to 3 times, then gives up.
-//   * WS closes mid-stream → reconnects with a fresh token (Deepgram tokens
+//   * WS closes mid-stream → reconnects with a fresh token (provider tokens
 //     are single-use after open). Up to 5 reconnects, exponential backoff.
 //   * Mic track not yet published → polls the LocalParticipant for one until
 //     mounted; component is a no-op until the host turns their mic on.
@@ -43,12 +43,15 @@ interface Props {
   onStatusChange?: (status: ProducerStatus, detail?: string) => void
 }
 
-interface DeepgramTokenResp {
+interface CaptionsTokenResp {
   ok: true
   data: { accessToken: string; expiresInSec: number; wsUrl: string }
 }
 
-interface DeepgramFinal {
+// Shape of the finalized utterance frame emitted by the upstream ASR provider
+// over the WebSocket. Kept generic — fields outside Vaidix's read path are
+// optional so a provider swap doesn't require touching this file.
+interface AsrFinalFrame {
   channel?: { alternatives?: Array<{ transcript?: string; confidence?: number }> }
   start?: number
   duration?: number
@@ -59,7 +62,7 @@ interface DeepgramFinal {
 const MAX_RECONNECTS = 5
 const RECONNECT_BACKOFF_MS = [500, 1000, 2000, 4000, 8000]
 
-export function DeepgramCaptionsProducer({ sessionId, enabled, onStatusChange }: Props) {
+export function CaptionsProducer({ sessionId, enabled, onStatusChange }: Props) {
   const { localParticipant } = useLocalParticipant()
   const wsRef = useRef<WebSocket | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
@@ -85,9 +88,9 @@ export function DeepgramCaptionsProducer({ sessionId, enabled, onStatusChange }:
       teardownTimers = []
     }
 
-    async function mintToken(): Promise<DeepgramTokenResp['data']> {
+    async function mintToken(): Promise<CaptionsTokenResp['data']> {
       const res = await fetch(
-        `/api/classroom/sessions/${sessionId}/captions/deepgram-token`,
+        `/api/classroom/sessions/${sessionId}/captions/captions-token`,
         { method: 'POST', credentials: 'include', headers: { ...csrfHeaders() } },
       )
       if (!res.ok) {
@@ -97,7 +100,7 @@ export function DeepgramCaptionsProducer({ sessionId, enabled, onStatusChange }:
         const err  = Object.assign(new Error(msg), { code })
         throw err
       }
-      const json = (await res.json()) as DeepgramTokenResp
+      const json = (await res.json()) as CaptionsTokenResp
       return json.data
     }
 
@@ -160,13 +163,13 @@ export function DeepgramCaptionsProducer({ sessionId, enabled, onStatusChange }:
 
       setStatus('connecting')
 
-      let tokenInfo: DeepgramTokenResp['data']
+      let tokenInfo: CaptionsTokenResp['data']
       try {
         tokenInfo = await mintToken()
       } catch (err) {
         const e = err as Error & { code?: string }
-        if (e.code === 'DEEPGRAM_UNAVAILABLE') {
-          console.warn('[captions-producer] Deepgram not configured — captions disabled')
+        if (e.code === 'CAPTIONS_UNAVAILABLE') {
+          console.warn('[captions-producer] captions not configured — disabled')
         } else {
           console.error('[captions-producer] token mint failed', err)
         }
@@ -188,8 +191,8 @@ export function DeepgramCaptionsProducer({ sessionId, enabled, onStatusChange }:
         setStatus('streaming')
 
         const mediaStream = new MediaStream([micTrack])
-        // Opus 48kHz matches Deepgram's expected encoding — we asked for it
-        // in deepgramListenWsUrl(). The browser MIME negotiates to opus.
+        // Opus 48kHz matches the upstream ASR's expected encoding (set in
+        // deepgramListenWsUrl()). The browser MIME negotiates to opus.
         const recorder = new MediaRecorder(mediaStream, {
           mimeType: 'audio/webm;codecs=opus',
           audioBitsPerSecond: 32_000,
@@ -206,9 +209,9 @@ export function DeepgramCaptionsProducer({ sessionId, enabled, onStatusChange }:
 
       ws.addEventListener('message', async (event) => {
         if (typeof event.data !== 'string') return
-        let msg: DeepgramFinal
+        let msg: AsrFinalFrame
         try {
-          msg = JSON.parse(event.data) as DeepgramFinal
+          msg = JSON.parse(event.data) as AsrFinalFrame
         } catch {
           return
         }

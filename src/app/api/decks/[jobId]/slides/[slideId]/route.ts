@@ -12,6 +12,8 @@ import {
 } from '@/server/services/api-helpers';
 import { audit, AUDIT_EVENTS, extractRequestMetadata } from '@/server/services/audit';
 import { db } from '@/lib/db';
+import { recordEditSignal } from '@/server/services/decks/faculty-style-profile';
+import { FacultyEditSignalKind } from '@prisma/client';
 
 const FACULTY_LIKE: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
 
@@ -33,6 +35,23 @@ const PatchBody = z
     { message: 'At least one field must be provided' },
   );
 
+/**
+ * Best-effort topic derivation from the deck's input title. The wizard
+ * captures `inputTitle` from the source document or first-word-of-objective,
+ * which is usually the topic ("Glaucoma management", "Uveitis basics"). We
+ * lowercase + take the first content word as the tag. Imperfect but cheap
+ * and good enough for the scoped-retrieval guard at distillation time.
+ */
+function deriveTopicTag(inputTitle: string | null | undefined): string | null {
+  if (!inputTitle) return null;
+  const cleaned = inputTitle
+    .toLowerCase()
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim();
+  const first = cleaned.split(/\s+/)[0];
+  return first && first.length > 2 ? first : null;
+}
+
 export async function PATCH(
   req: Request,
   ctx: { params: Promise<{ jobId: string; slideId: string }> },
@@ -49,7 +68,21 @@ export async function PATCH(
   try {
     const slide = await db.slide.findUnique({
       where: { id: slideId },
-      select: { id: true, deckForgeJobId: true, job: { select: { requestedById: true } } },
+      select: {
+        id: true,
+        deckForgeJobId: true,
+        title: true,
+        bullets: true,
+        speakerNotes: true,
+        layout: true,
+        job: {
+          select: {
+            requestedById: true,
+            inputTitle: true,
+            briefing: true,
+          },
+        },
+      },
     });
     if (!slide || slide.deckForgeJobId !== jobId) {
       return jsonError('NOT_FOUND', 'Slide not found', 404);
@@ -71,6 +104,43 @@ export async function PATCH(
         ...(parsed.data.accentHex !== undefined ? { accentHex: parsed.data.accentHex } : {}),
       },
     });
+
+    // Capture as a style-memory signal ONLY when the editor is the deck owner.
+    // Admin/PD edits on someone else's deck must not pollute the owner's
+    // profile (cross-user isolation) — and the admin's own profile shouldn't
+    // learn from edits to other people's decks either.
+    if (slide.job.requestedById === auth.user.id) {
+      const briefing = (slide.job.briefing ?? null) as
+        | { audience?: string; sessionType?: string }
+        | null;
+      const topicTag = deriveTopicTag(slide.job.inputTitle);
+      const fieldsChanged = Object.keys(parsed.data);
+      void recordEditSignal({
+        facultyId: auth.user.id,
+        kind: FacultyEditSignalKind.SLIDE_EDIT,
+        topicTag,
+        audienceTag: briefing?.audience ?? null,
+        sessionType: briefing?.sessionType ?? null,
+        jobId,
+        slideId,
+        instructionText: `Manual edit: ${fieldsChanged.join(', ')}`,
+        beforeJson: {
+          title: slide.title,
+          bullets: slide.bullets,
+          speakerNotes: slide.speakerNotes,
+          layout: slide.layout,
+        },
+        afterJson: {
+          title: updated.title,
+          bullets: updated.bullets,
+          speakerNotes: updated.speakerNotes,
+          layout: updated.layout,
+        },
+      }).catch((err) => {
+        console.warn('[style-profile] capture failed (non-fatal):', err);
+      });
+    }
+
     await audit({
       actorId: auth.user.id,
       actorRole: auth.user.role,

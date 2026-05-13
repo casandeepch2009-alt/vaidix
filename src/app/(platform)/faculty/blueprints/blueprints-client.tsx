@@ -18,9 +18,26 @@ interface BlueprintListRow {
 }
 
 interface BlueprintFull extends BlueprintListRow {
+  sessionLengthMinutes: number | null;
+  clinicalSetting: string | null;
+  priorKnowledgeAssumed: string | null;
+  constraints: string | null;
   content: string;
   source: string;
 }
+
+const CLINICAL_SETTING_SUGGESTIONS = [
+  'OPD',
+  'Operating theatre',
+  'Wet-lab',
+  'Emergency',
+  'Retina clinic',
+  'Uveitis service',
+  'Pediatric clinic',
+  'Simulation lab',
+];
+
+const SESSION_LENGTH_PRESETS = [30, 45, 60, 90, 120];
 
 const LEARNER_LEVEL_OPTIONS = [
   '',
@@ -52,8 +69,20 @@ export function BlueprintsClient({ initial }: { initial: BlueprintListRow[] }) {
   const [activeBlueprint, setActiveBlueprint] = useState<BlueprintFull | null>(null);
   const [topic, setTopic] = useState('');
   const [learnerLevel, setLearnerLevel] = useState('');
+  const [sessionLengthMinutes, setSessionLengthMinutes] = useState<number | ''>('');
+  const [clinicalSetting, setClinicalSetting] = useState('');
+  const [priorKnowledgeAssumed, setPriorKnowledgeAssumed] = useState('');
+  const [constraints, setConstraints] = useState('');
+  const [audienceOpen, setAudienceOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const filledAudienceCount = [
+    sessionLengthMinutes !== '',
+    clinicalSetting.trim().length > 0,
+    priorKnowledgeAssumed.trim().length > 0,
+    constraints.trim().length > 0,
+  ].filter(Boolean).length;
 
   const loadDetail = useCallback(async (id: string) => {
     setError(null);
@@ -88,6 +117,11 @@ export function BlueprintsClient({ initial }: { initial: BlueprintListRow[] }) {
         body: JSON.stringify({
           topic: topic.trim(),
           learnerLevel: learnerLevel || undefined,
+          sessionLengthMinutes:
+            typeof sessionLengthMinutes === 'number' ? sessionLengthMinutes : undefined,
+          clinicalSetting: clinicalSetting.trim() || undefined,
+          priorKnowledgeAssumed: priorKnowledgeAssumed.trim() || undefined,
+          constraints: constraints.trim() || undefined,
         }),
       });
       const json = (await res.json()) as {
@@ -104,6 +138,11 @@ export function BlueprintsClient({ initial }: { initial: BlueprintListRow[] }) {
       setActiveId(bp.id);
       setActiveBlueprint(bp);
       setTopic('');
+      setSessionLengthMinutes('');
+      setClinicalSetting('');
+      setPriorKnowledgeAssumed('');
+      setConstraints('');
+      setAudienceOpen(false);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -167,6 +206,119 @@ export function BlueprintsClient({ initial }: { initial: BlueprintListRow[] }) {
               ))}
             </select>
           </label>
+
+          <div className="rounded-md border border-dashed border-border">
+            <button
+              type="button"
+              onClick={() => setAudienceOpen((v) => !v)}
+              aria-expanded={audienceOpen}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-xs"
+            >
+              <span className="flex items-center gap-2">
+                <motion.span
+                  animate={{ rotate: audienceOpen ? 90 : 0 }}
+                  transition={{ duration: 0.15 }}
+                  className="inline-block text-muted-foreground"
+                >
+                  ▸
+                </motion.span>
+                <span className="font-medium">Audience context</span>
+                <span className="text-muted-foreground">
+                  {filledAudienceCount > 0 ? `· ${filledAudienceCount}/4 filled` : '· optional, sharpens the blueprint'}
+                </span>
+              </span>
+            </button>
+            <AnimatePresence initial={false}>
+              {audienceOpen && (
+                <motion.div
+                  key="audience-panel"
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  transition={{ duration: 0.18 }}
+                  className="overflow-hidden"
+                >
+                  <div className="space-y-3 border-t border-border px-3 py-3">
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground">Session length</span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {SESSION_LENGTH_PRESETS.map((m) => {
+                          const active = sessionLengthMinutes === m;
+                          return (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setSessionLengthMinutes(active ? '' : m)}
+                              className={`rounded-full border px-2.5 py-0.5 text-[11px] transition ${
+                                active
+                                  ? 'border-primary bg-primary/10 text-primary'
+                                  : 'border-border text-muted-foreground hover:bg-muted'
+                              }`}
+                            >
+                              {m} min
+                            </button>
+                          );
+                        })}
+                        <input
+                          type="number"
+                          min={15}
+                          max={240}
+                          value={sessionLengthMinutes === '' ? '' : sessionLengthMinutes}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (v === '') return setSessionLengthMinutes('');
+                            const n = Number.parseInt(v, 10);
+                            if (Number.isFinite(n)) setSessionLengthMinutes(n);
+                          }}
+                          placeholder="custom"
+                          className="w-20 rounded-md border border-input bg-background px-2 py-0.5 text-[11px]"
+                        />
+                      </div>
+                    </div>
+
+                    <label className="block space-y-1">
+                      <span className="text-xs text-muted-foreground">Clinical setting</span>
+                      <input
+                        value={clinicalSetting}
+                        onChange={(e) => setClinicalSetting(e.target.value)}
+                        list="bp-clinical-setting"
+                        placeholder="e.g. OPD, wet-lab, retina clinic"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
+                      />
+                      <datalist id="bp-clinical-setting">
+                        {CLINICAL_SETTING_SUGGESTIONS.map((s) => (
+                          <option key={s} value={s} />
+                        ))}
+                      </datalist>
+                    </label>
+
+                    <label className="block space-y-1">
+                      <span className="text-xs text-muted-foreground">Prior knowledge assumed</span>
+                      <textarea
+                        value={priorKnowledgeAssumed}
+                        onChange={(e) => setPriorKnowledgeAssumed(e.target.value)}
+                        rows={2}
+                        placeholder="What can you assume learners already know? Stops the model from re-teaching basics."
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
+                      />
+                    </label>
+
+                    <label className="block space-y-1">
+                      <span className="text-xs text-muted-foreground">Constraints / available resources</span>
+                      <textarea
+                        value={constraints}
+                        onChange={(e) => setConstraints(e.target.value)}
+                        rows={2}
+                        placeholder="e.g. no Heidelberg Spectralis, single shared OCT, 2 wet-lab stations"
+                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs"
+                      />
+                    </label>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           <button
             type="submit"
             disabled={busy || !topic.trim()}
@@ -261,18 +413,41 @@ function BlueprintDetail({ blueprint }: { blueprint: BlueprintFull }) {
     URL.revokeObjectURL(url);
   }
 
+  const audienceChips: Array<{ label: string; value: string }> = [];
+  if (blueprint.learnerLevel) audienceChips.push({ label: 'Learner', value: blueprint.learnerLevel });
+  if (blueprint.sessionLengthMinutes)
+    audienceChips.push({ label: 'Session', value: `${blueprint.sessionLengthMinutes} min` });
+  if (blueprint.clinicalSetting)
+    audienceChips.push({ label: 'Setting', value: blueprint.clinicalSetting });
+  if (blueprint.priorKnowledgeAssumed)
+    audienceChips.push({ label: 'Prior knowledge', value: blueprint.priorKnowledgeAssumed });
+  if (blueprint.constraints)
+    audienceChips.push({ label: 'Constraints', value: blueprint.constraints });
+
   return (
     <article className="rounded-lg border border-border bg-card">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border p-5">
-        <div>
+        <div className="min-w-0 flex-1">
           <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-primary">
             Precision Education Blueprint
           </p>
           <h2 className="mt-1 text-xl font-semibold">{blueprint.topic}</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            {blueprint.learnerLevel ?? 'Level unspecified'} · Generated{' '}
-            {new Date(blueprint.createdAt).toLocaleString()} · Source: {blueprint.source}
+            Generated {new Date(blueprint.createdAt).toLocaleString()}
           </p>
+          {audienceChips.length > 0 && (
+            <ul className="mt-3 flex flex-wrap gap-1.5">
+              {audienceChips.map((c) => (
+                <li
+                  key={c.label}
+                  className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-muted/50 px-2 py-0.5 text-[11px]"
+                >
+                  <span className="text-muted-foreground">{c.label}:</span>
+                  <span className="truncate">{c.value}</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="flex gap-2">
           <button

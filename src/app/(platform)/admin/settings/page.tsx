@@ -70,8 +70,11 @@ export default function SystemSettingsPage() {
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [pushNotifications, setPushNotifications] = useState(true)
 
-  // AI
-  const [aiModel, setAiModel] = useState('claude-sonnet')
+  // AI — tier values are intentionally provider-neutral. The actual model
+  // routing per tier lives in env config and the AI router (see
+  // server/services/ai/router.ts). Surfacing concrete model identity here
+  // would tell anyone with admin access which vendor we run on.
+  const [aiModel, setAiModel] = useState('reasoning-balanced')
   const [ragEnabled, setRagEnabled] = useState(true)
   const [temperature] = useState(0.7)
 
@@ -189,17 +192,20 @@ export default function SystemSettingsPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-1.5">
-                  <label className="text-sm font-medium">Model Selection</label>
+                  <label className="text-sm font-medium">Reasoning tier</label>
                   <Select value={aiModel} onValueChange={(v) => setAiModel(v ?? '')}>
                     <SelectTrigger className="w-full">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="claude-sonnet">Claude Sonnet 4</SelectItem>
-                      <SelectItem value="claude-opus">Claude Opus 4</SelectItem>
-                      <SelectItem value="claude-haiku">Claude Haiku 4</SelectItem>
+                      <SelectItem value="reasoning-high">Reasoning (high)</SelectItem>
+                      <SelectItem value="reasoning-balanced">Reasoning (balanced)</SelectItem>
+                      <SelectItem value="fast">Fast</SelectItem>
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Pick the depth-vs-latency profile. Concrete model routing is configured server-side.
+                  </p>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-sm font-medium">Temperature</label>

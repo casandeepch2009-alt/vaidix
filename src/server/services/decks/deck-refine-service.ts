@@ -50,8 +50,13 @@ export interface RefineProposal {
   after: RefinedSlide;
   /** Short human-readable description of what changed. */
   rationale: string;
-  /** Which model produced the proposal. */
-  source: 'opus' | 'sonnet' | 'gemini';
+  /**
+   * Provider-neutral label that travels over the wire. We deliberately do
+   * NOT expose the internal model identity (Opus / Sonnet / Gemini) here —
+   * the choice is an implementation detail. Ops can find the actual tier
+   * in server logs and the AI router fallback warnings.
+   */
+  source: 'ai';
 }
 
 export class DeckRefineError extends Error {
@@ -169,7 +174,7 @@ async function runOpusRewrite(
   slide: RefinedSlide,
   deckTitle: string,
   instruction: string,
-): Promise<RefinedSlide & { rationale: string; source: 'opus' }> {
+): Promise<RefinedSlide & { rationale: string; source: 'ai' }> {
   const text = await aiEnhanceContent({
     systemPrompt: SLIDE_REWRITE_SYSTEM,
     userMessage: buildRewriteUserMessage(slide, deckTitle, instruction),
@@ -177,14 +182,14 @@ async function runOpusRewrite(
     maxTokens: 2000,
   });
   const parsed = safeParseJson(text) as RawRewrite;
-  return { ...normalizeRewrite(parsed, slide), source: 'opus' };
+  return { ...normalizeRewrite(parsed, slide), source: 'ai' };
 }
 
 async function runSonnetRewrite(
   slide: RefinedSlide,
   deckTitle: string,
   instruction: string,
-): Promise<RefinedSlide & { rationale: string; source: 'sonnet' }> {
+): Promise<RefinedSlide & { rationale: string; source: 'ai' }> {
   // Sonnet via aiDesignJson (typed parser).
   const parsed = await aiDesignJson<RawRewrite>({
     systemPrompt: SLIDE_REWRITE_SYSTEM,
@@ -192,21 +197,21 @@ async function runSonnetRewrite(
     temperature: 0.3,
     maxTokens: 2000,
   });
-  return { ...normalizeRewrite(parsed, slide), source: 'sonnet' };
+  return { ...normalizeRewrite(parsed, slide), source: 'ai' };
 }
 
 async function runGeminiRewrite(
   slide: RefinedSlide,
   deckTitle: string,
   instruction: string,
-): Promise<RefinedSlide & { rationale: string; source: 'gemini' }> {
+): Promise<RefinedSlide & { rationale: string; source: 'ai' }> {
   const text = await aiEnhanceEnglish({
     systemPrompt: SLIDE_REWRITE_SYSTEM,
     userMessage: buildRewriteUserMessage(slide, deckTitle, instruction),
     temperature: 0.25,
   });
   const parsed = safeParseJson(text) as RawRewrite;
-  return { ...normalizeRewrite(parsed, slide), source: 'gemini' };
+  return { ...normalizeRewrite(parsed, slide), source: 'ai' };
 }
 
 function safeParseJson(text: string): unknown {
@@ -283,7 +288,7 @@ export async function applySuggestionToSlide(
     `Address this issue: ${input.suggestion.message}`;
   const model = modelForKind(input.suggestion.kind);
 
-  let rewritten: RefinedSlide & { rationale: string; source: 'opus' | 'sonnet' | 'gemini' };
+  let rewritten: RefinedSlide & { rationale: string; source: 'ai' };
   try {
     if (model === 'opus') {
       rewritten = await runOpusRewrite(before, job.inputTitle ?? 'Deck', instruction);
@@ -341,7 +346,7 @@ export async function refineSlideWithInstruction(
   const before = slideToRefined(slide);
   const deckTitle = job.inputTitle ?? 'Deck';
 
-  let rewritten: RefinedSlide & { rationale: string; source: 'opus' | 'sonnet' | 'gemini' };
+  let rewritten: RefinedSlide & { rationale: string; source: 'ai' };
   try {
     if (input.intent === 'content') {
       rewritten = await runOpusRewrite(before, deckTitle, input.instruction.trim().slice(0, 500));
