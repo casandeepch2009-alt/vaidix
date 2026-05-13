@@ -173,7 +173,18 @@ services:
     deploy:
       resources:
         limits:
-          cpus: "1.5"
+          # CPU limit removed intentionally. The LiveKit egress binary has a
+          # hardcoded internal floor of 2.0 CPUs for room_composite jobs
+          # (livekit/egress validateCPUConfig — checked at startup, NOT yaml-
+          # tunable). With the previous "cpus: 1.5" cap, egress logged
+          # `not enough cpu` and refused every dispatched job, so the app
+          # got "Service Unavailable: twirp error" back from the egress API
+          # and no Recording row ever got created. On a 2 vCPU host (t3.large)
+          # capping egress at anything less than 2 means it'll never accept
+          # a room composite job. Letting it use the full host CPU is the
+          # only path that works without upsizing the instance.
+          # Live-call latency may degrade during recording. Acceptable until
+          # the instance gets bumped to t3.xlarge or larger.
           memory: 4G
 
   # ─── coturn (STUN/TURN) ──────────────────────────────────────────────────
