@@ -299,6 +299,70 @@ Expect all containers `(healthy)` and `{"ok":true,"service":"vaidix",...}`. Brow
 
 Login with `ADMIN_EMAIL` + `ADMIN_PASSWORD` from `.env`. From `/admin/invitations`, invite other users.
 
+### 3.11 First-deploy gotchas — verify these before you hand the URL to users
+
+These are the things that broke a real prod deploy on 2026-05-13. The site
+loaded, the user could log in, but every video call failed with "Connection
+trouble". Each item below is a hidden landmine that doesn't surface until
+someone tries to use the platform end-to-end. Walk this checklist after
+§3.10 passes.
+
+**`.env` placeholders that survived the copy** — `.env` is per-host and
+gitignored, so the example file's defaults won't be flagged by any review.
+Verify EVERY value below is real, not the example placeholder:
+
+| Variable | Common wrong value | Right value | Symptom if wrong |
+|---|---|---|---|
+| `NEXTAUTH_URL` | `http://13.234.37.54:3000` or `http://localhost:3000` | `https://vaidix.arthivaa.com` (your real domain, HTTPS) | Login appears to work, then redirects loop or cookies refuse to set |
+| `LIVEKIT_URL` | `wss://13.234.37.54/livekit` (raw IP) | `wss://livekit.vaidix.arthivaa.com` (subdomain) | Browser console: `ERR_CERT_COMMON_NAME_INVALID` on the rtc validate request |
+| `LIVEKIT_API_KEY` | `CHANGE_ME_LIVEKIT_KEY` (placeholder text) | A real key that matches `livekit.prod.yaml` `keys:` block | Browser console: `invalid API key: CHANGE_ME_LIVEKIT_KEY` → 401 |
+| `LIVEKIT_API_SECRET` | `CHANGE_ME_LIVEKIT_SECRET_MIN_32_CHARS` | A real 32+ char secret matching `livekit.prod.yaml` | Same as above, or token signing fails silently |
+| `EMAIL_PASSWORD` | `YOUR_16_CHAR_GMAIL_APP_PASSWORD` | A real Gmail app password (or switch to SES, see §9) | Invitations land in DB but no email is sent; audit_events shows `invitation.sent success=false` |
+
+The fastest way to verify is to `grep -E "CHANGE_ME|YOUR_|placeholder|example|13\.234" .env` —
+if anything matches, that's a placeholder you forgot. The grep should
+return zero lines on a properly configured host.
+
+**Security group missing UDP rules** — the AWS launch-wizard default opens
+only TCP 22/80/443. Without explicit UDP rules every WebRTC packet from
+clients is dropped at the firewall, ICE negotiation times out, and the
+live classroom shows "Connection trouble" even though the WebSocket
+signal connection works fine. Verify the SG inbound rules table in §2
+matches your actual SG — pay attention to the UDP rows specifically:
+7882, 50000-50100, 3478. This bit twice on the same deploy; check it
+even if you "remember setting it last time."
+
+**Prod compose mounts the right LiveKit yaml** — `docker-compose.prod.yml`
+must mount `./livekit.prod.yaml` (not `./livekit.yaml`). The dev yaml
+hardcodes a developer-laptop LAN IP in `node_ip` that LiveKit then
+advertises to browsers in ICE candidates; the browser tries to send
+media to that private IP and silently fails. Confirm with:
+`grep livekit docker-compose.prod.yml | grep yaml` — should show
+`./livekit.prod.yaml:/etc/livekit.yaml:ro`.
+
+**One-line sanity sweep** — run from the EC2 host once the stack is up
+and you've signed in. Should print all OKs:
+
+```bash
+# .env hygiene
+grep -qE "CHANGE_ME|YOUR_|placeholder" .env && echo "FAIL: .env still has placeholders" || echo "OK: .env clean"
+
+# LiveKit advertises public IP, not private
+docker logs vaidix-livekit --tail 50 2>&1 | grep -q "nodeIP.*192\.168\." && echo "FAIL: livekit nodeIP is private" || echo "OK: livekit nodeIP looks right"
+
+# Right yaml is mounted in prod compose
+grep -q "livekit.prod.yaml" docker-compose.prod.yml && echo "OK: prod yaml mounted" || echo "FAIL: prod compose uses dev livekit.yaml"
+
+# WS upgrade reaches LiveKit (should be 401, not 404)
+code=$(curl -sS -o /dev/null -w "%{http_code}" \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  --max-time 5 https://livekit.$(cat .deployed-domain 2>/dev/null || echo "vaidix.arthivaa.com")/rtc)
+[ "$code" = "401" ] && echo "OK: WS upgrade reaches LiveKit (401)" || echo "FAIL: WS upgrade returns $code (want 401)"
+```
+
+If any line prints FAIL, fix that before announcing the URL.
+
 ---
 
 ## 4. Routine code deploy
@@ -513,16 +577,47 @@ Common offenders:
 
 ### LiveKit video room won't connect
 
-**Cause** usually one of:
-1. UDP 7882 / 50000-50100 blocked at the security group
-2. coturn not running
-3. `LIVEKIT_URL` in `.env` doesn't match the actual WSS endpoint
+The signal connection (WebSocket over 443) works but the call shows
+"Connection trouble" or stays at "Connecting…" forever. There are four
+layers to check in order — fix the first one that doesn't pass.
 
-**Fix**:
+1. **Security group missing UDP rules.** AWS launches with a default SG that
+   only opens 22/80/443. Without the LiveKit + coturn UDP rules, every
+   STUN binding request from the browser is dropped at the firewall, ICE
+   negotiation times out. Verify the table in §2 lines up with your real
+   SG inbound rules — specifically UDP 7882, 50000-50100, 3478, and TCP 7881/5349.
+2. **`LIVEKIT_URL` in `.env` points at the wrong host.** Must be the public
+   domain (e.g. `wss://livekit.vaidix.arthivaa.com`), not the EC2 IP or a
+   dev placeholder. The app returns this URL to the client at token-mint
+   time, so the browser will dial whatever you've put here.
+3. **`livekit.yaml` advertising a private IP in ICE candidates.** If
+   LiveKit logs show `[local][trickle] udp4 host 192.168.x.x:50044`
+   instead of the EC2 public IP, the wrong yaml is mounted. Prod must
+   use `livekit.prod.yaml` (use_external_ip:true). docker-compose.prod.yml
+   should have `./livekit.prod.yaml:/etc/livekit.yaml:ro`, NOT `livekit.yaml`.
+4. **nginx HTTP/2 stripping the WebSocket upgrade.** Browser console shows
+   `wss://livekit.../rtc` returning 404 even though `/` returns 200. nginx
+   advertises h2 per-listener, not per-server, so `http2 on;` on any 443
+   vhost forces h2 on the entire port and breaks the legacy WS upgrade
+   that LiveKit needs. All 443 vhosts must keep `http2 on;` commented out.
+
+Diagnostics in priority order:
+
 ```bash
-sudo ss -tunlp | grep -E ':(7881|7882|3478)'
-docker logs vaidix-livekit --tail 50
-docker logs vaidix-coturn --tail 30
+# (a) Real ICE candidate IPs LiveKit is advertising — should be the public IP
+docker logs vaidix-livekit --tail 200 2>&1 | grep "local\]\[trickle\]" | tail -5
+
+# (b) End-to-end WS upgrade — must return 401, not 404. 401 means LiveKit
+#     received the upgrade and asked for a token. 404 means nginx is breaking
+#     the upgrade (probably http2) or the wrong yaml is mounted.
+curl -sS -o /dev/null -w "HTTP %{http_code}\n" \
+  -H "Connection: Upgrade" -H "Upgrade: websocket" \
+  -H "Sec-WebSocket-Version: 13" -H "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==" \
+  --max-time 5 https://livekit.<your-domain>/rtc
+
+# (c) Browser console — open DevTools while joining. ICE candidates listed
+#     in the NegotiationError log entry must contain the EC2 public IP. If
+#     all local candidates are 192.168.x.x, layer (3) above is the issue.
 ```
 
 ### Out of memory

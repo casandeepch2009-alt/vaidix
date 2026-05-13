@@ -1768,14 +1768,27 @@ model SessionInvite {
   @@map("session_invites")
 }
 
-// SessionAdmission: waiting-room entries for users who don't match the
-// visibility rules but joined via share link or guest flow. Host/co-host
-// admits or denies.
+// SessionAdmission: waiting-room entries for joiners who don't match the
+// visibility rules. Two flavours of joiner share this table:
+//
+//   1. Registered Vaidix user joining a session they're not a member of via
+//      share link → row carries `userId`, `guestKey` is null.
+//   2. Anonymous guest joining an `openToAll = true` session without ever
+//      signing in (Teams-style anyone-with-the-link) → row carries
+//      `guestKey` (random opaque token also stored in an HttpOnly cookie on
+//      the guest's browser) and `userId` is null. `displayName` is the name
+//      they typed at the prejoin screen.
+//
+// Host / co-host admits or denies either flavour through the same /admit
+// and /deny routes. Admitting a guest does NOT create a SessionInvite (no
+// user row to invite); the ADMITTED status + matching cookie is the proof
+// when the guest's token endpoint mints their LiveKit JWT.
 
 model SessionAdmission {
   id          String          @id @default(cuid())
   sessionId   String
-  userId      String
+  userId      String?
+  guestKey    String?
   status      AdmissionStatus @default(PENDING)
   displayName String?
   requestedAt DateTime        @default(now())
@@ -1784,10 +1797,14 @@ model SessionAdmission {
   denyReason  String?
 
   session TeachingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  user    User            @relation("SessionAdmissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  user    User?           @relation("SessionAdmissionUser", fields: [userId], references: [id], onDelete: Cascade)
   decider User?           @relation("SessionAdmissionDecider", fields: [decidedBy], references: [id])
 
+  // Postgres treats NULL as not-equal, so both partial-unique semantics
+  // coexist: at most one row per (sessionId, userId) when userId is set,
+  // and at most one per (sessionId, guestKey) when guestKey is set.
   @@unique([sessionId, userId])
+  @@unique([sessionId, guestKey])
   @@index([sessionId, status])
   @@index([userId])
   @@map("session_admissions")

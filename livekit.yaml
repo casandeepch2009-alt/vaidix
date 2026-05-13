@@ -1,6 +1,11 @@
 # ════════════════════════════════════════════════════════════════════════════
-# Vaidix — LiveKit Server Config (dev)
+# Vaidix — LiveKit Server Config (DEVELOPMENT ONLY)
 # ════════════════════════════════════════════════════════════════════════════
+# This file is used by docker-compose.dev.yml. Production uses
+# livekit.prod.yaml (mounted by docker-compose.prod.yml). DO NOT deploy
+# this file to prod — the hardcoded LAN node_ip and host.docker.internal
+# webhook URL only work in a developer-laptop topology.
+#
 # API key/secret must match .env.local LIVEKIT_API_KEY / LIVEKIT_API_SECRET
 
 port: 7880
