@@ -48,6 +48,7 @@ import {
 import { csrfHeaders } from '@/lib/csrf-client';
 import { SlideCanvas, type SlideViewModel } from '@/components/decks/slide-canvas';
 import { DeckDiffModal, type DiffProposal } from '@/components/decks/deck-diff-modal';
+import { ThemePicker } from '@/components/decks/theme-picker';
 import type {
   DeckAnalysisResult,
   DeckSuggestion,
@@ -63,6 +64,7 @@ interface Props {
   sourceLabel: string;
   initialSlides: SlideViewModel[];
   initialAnalysis: DeckAnalysisResult | null;
+  initialTheme?: string | null;
 }
 
 type RightTab = 'analysis' | 'suggestions' | 'interactions';
@@ -137,10 +139,12 @@ export function StudioClient({
   sourceLabel,
   initialSlides,
   initialAnalysis,
+  initialTheme,
 }: Props) {
   const router = useRouter();
   const [slides, setSlides] = useState<SlideViewModel[]>(initialSlides);
   const [activeId, setActiveId] = useState<string | null>(initialSlides[0]?.id ?? null);
+  const [themeId, setThemeId] = useState<string>(initialTheme ?? 'deep-space');
   const [analysis, setAnalysis] = useState<DeckAnalysisResult | null>(initialAnalysis);
   const [rightTab, setRightTab] = useState<RightTab>('analysis');
   const [currentStatus, setCurrentStatus] = useState<DeckForgeStatus>(status);
@@ -207,6 +211,33 @@ export function StudioClient({
   // ─── Slide PATCH + autosave ──────────────────────────────────────────────
   const [savingId, setSavingId] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Persist theme via PATCH /api/decks/[jobId] with { template }. Same route
+  // the legacy editor uses — keeps the storage column shared so the picker
+  // stays in sync whichever surface the faculty opens next. Errors surface
+  // through the same saveError toast as slide-edit failures.
+  const persistTheme = useCallback(
+    async (id: string) => {
+      setThemeId(id);
+      setSaveError(null);
+      try {
+        const res = await fetch(`/api/decks/${jobId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...csrfHeaders() },
+          body: JSON.stringify({ template: id }),
+        });
+        if (!res.ok) {
+          const j = (await res.json().catch(() => null)) as
+            | { error?: { message?: string } }
+            | null;
+          throw new Error(j?.error?.message ?? `Theme save failed (${res.status})`);
+        }
+      } catch (err) {
+        setSaveError((err as Error).message);
+      }
+    },
+    [jobId],
+  );
 
   const persistSlide = useCallback(
     async (id: string, patch: Partial<SlideViewModel>) => {
@@ -473,6 +504,8 @@ export function StudioClient({
         onFinalize={onFinalize}
         finalizing={finalizing}
         isFinalized={isFinalized}
+        themeId={themeId}
+        onThemeChange={persistTheme}
       />
 
       {/* ─── Toolbar ───────────────────────────────────────────────────── */}
@@ -499,6 +532,7 @@ export function StudioClient({
           index={active ? slides.findIndex((s) => s.id === active.id) : 0}
           total={slides.length}
           deckTitle={deckTitle}
+          themeId={themeId}
           activeSuggestions={activeSuggestions}
           onPrev={goPrev}
           onNext={goNext}
@@ -569,6 +603,8 @@ function Topbar({
   onFinalize,
   finalizing,
   isFinalized,
+  themeId,
+  onThemeChange,
 }: {
   deckTitle: string;
   sourceLabel: string;
@@ -577,6 +613,8 @@ function Topbar({
   onFinalize: () => void;
   finalizing: boolean;
   isFinalized: boolean;
+  themeId: string;
+  onThemeChange: (id: string) => void;
 }) {
   return (
     <header className="flex h-12 items-center justify-between border-b border-border bg-card px-4">
@@ -597,6 +635,8 @@ function Topbar({
         <span className="ml-2 hidden text-[10px] text-muted-foreground md:inline">{sourceLabel}</span>
       </div>
       <div className="flex items-center gap-2">
+        <ThemePicker value={themeId} onChange={onThemeChange} />
+        <span className="h-4 w-px bg-border" />
         <SaveIndicator savingId={savingId} />
         {isFinalized ? (
           <span
@@ -812,6 +852,7 @@ function SlideEditorCanvas({
   index,
   total,
   deckTitle,
+  themeId,
   activeSuggestions,
   onPrev,
   onNext,
@@ -823,6 +864,7 @@ function SlideEditorCanvas({
   index: number;
   total: number;
   deckTitle: string;
+  themeId: string;
   activeSuggestions: DeckSuggestion[];
   onPrev: () => void;
   onNext: () => void;
@@ -848,6 +890,7 @@ function SlideEditorCanvas({
           index={index}
           total={total}
           deckTitle={deckTitle}
+          themeId={themeId}
           mode="preview"
         />
         {/* Annotation pins — fixed corners by suggestion kind */}

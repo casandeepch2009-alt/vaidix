@@ -75,6 +75,7 @@ export default async function PresentationStudioPage({
         accentHex: s.accentHex,
       }))}
       initialAnalysis={isRouterV2(job.analysisResult) ? job.analysisResult : null}
+      initialTheme={job.template}
     />
   );
 }
