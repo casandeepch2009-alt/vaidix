@@ -42,9 +42,16 @@ export function BgPicker({ onClose }: { onClose: () => void }) {
     setApplying(preset.id)
     setError(null)
     try {
+      // Three things have to be true for the background processor to run:
+      //   1. there's a camera publication on this participant
+      //   2. there's an attached MediaStreamTrack (publication may be a stub
+      //      between request + first frame)
+      //   3. the publication isn't muted (LiveKit reports `pub.isMuted` for
+      //      both server-mute and client-mute) — without this we falsely
+      //      reported "camera on" right after the user toggled off (QA #9).
       const pub   = localParticipant.getTrackPublication(Track.Source.Camera)
       const track = pub?.track
-      if (!track) {
+      if (!pub || !track || pub.isMuted) {
         setError('Camera is off — turn it on first')
         return
       }

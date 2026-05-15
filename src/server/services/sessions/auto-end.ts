@@ -28,6 +28,7 @@ import { SessionStatus } from '@prisma/client';
 import { audit } from '../audit';
 import { sessionAudit, SESSION_AUDIT } from '../session-audit';
 import { cancelSessionReminders } from '../reminder-scheduler';
+import { notifySessionEnded } from '../session-notifications';
 
 // A LIVE session whose scheduled end was more than this long ago is a sweep
 // candidate. Generous enough that genuinely-overrunning sessions aren't cut
@@ -174,6 +175,9 @@ async function doSweep(): Promise<number> {
         ended += 1;
 
         // Side effects outside the tx — best-effort, must not fail the sweep.
+        // The stale-LIVE branch DOES notify (session genuinely ran, recording
+        // is likely on the way); the stale-SCHEDULED branch below doesn't,
+        // since the session never actually started.
         await Promise.allSettled([
           audit({
             actorId: null,
@@ -190,6 +194,7 @@ async function doSweep(): Promise<number> {
             details: { reason: 'stale_live_sweep' },
           }),
           cancelSessionReminders(s.id),
+          notifySessionEnded(s.id),
         ]);
       } catch (err) {
         console.error('[stale-live-sweep] failed to end session', s.id, err);

@@ -146,7 +146,10 @@ export function ParticipantStrip({
                 <motion.span
                   initial={{ scale: 0 }}
                   animate={{ scale: 1, rotate: [0, -15, 15, 0] }}
-                  transition={{ type: 'spring', stiffness: 360, damping: 16 }}
+                  transition={{
+                    scale: { type: 'spring', stiffness: 360, damping: 16 },
+                    rotate: { duration: 0.6, ease: 'easeInOut' },
+                  }}
                   className="absolute -top-1.5 -right-1.5 text-[11px] leading-none drop-shadow pointer-events-none"
                 >
                   ✋

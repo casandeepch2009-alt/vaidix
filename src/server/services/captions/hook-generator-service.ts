@@ -15,6 +15,7 @@ import { redis } from '@/lib/redis';
 import { getQueue, QUEUES } from '@/lib/queue';
 import { geminiGenerate, tryParseJson, GeminiUnavailableError } from '@/server/services/ai/gemini';
 import { createHook, fireHook } from '@/server/services/hooks/hooks-service';
+import { loadPrompt } from '@/server/prompts/loader';
 
 const ROUND_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const MIN_NEW_CHARS = 300;                  // skip round if transcript grew < 300 chars
@@ -37,25 +38,9 @@ const VALID_KINDS = new Set<string>([
   'DILEMMA',
 ]);
 
-const SYSTEM_PROMPT = `You are a clinical teaching assistant for ophthalmology education at LVPEI (L V Prasad Eye Institute).
-Analyze the following live lecture transcript excerpt and generate exactly 2 engagement questions for medical residents and trainees.
-Questions must be directly relevant to specific content in the transcript — never generic.
-
-Return a JSON array with exactly 2 elements using these formats:
-
-TRUE_FALSE: {"kind":"TRUE_FALSE","prompt":"<testable claim>","options":["True","False"],"correctOption":"True","explanation":"<brief reason>"}
-POLL: {"kind":"POLL","prompt":"<question>","options":["<a>","<b>","<c>"]}
-ONE_WORD: {"kind":"ONE_WORD","prompt":"<fill-in expecting one medical term>"}
-REPEAT_CONCEPT: {"kind":"REPEAT_CONCEPT","prompt":"Explain in your own words: <concept from transcript>"}
-DILEMMA: {"kind":"DILEMMA","prompt":"<clinical scenario from transcript context>","options":["<option1>","<option2>","<option3>"]}
-
-Rules:
-- Use precise ophthalmology terminology (IOP, latanoprost, fundus, cornea, retina, vitreous, glaucoma, etc.)
-- Pick 2 different kinds per response
-- TRUE_FALSE must have a clear correct answer derivable from the transcript
-- Keep prompts under 200 characters
-- DILEMMA presents a realistic 3-option clinical management decision
-- Do not generate questions about content absent from the transcript`;
+// System prompt is loaded from src/server/prompts/_base/op-hook-generator.md
+// at call time. The loader interpolates {{DOMAIN_*}} placeholders so the same
+// prompt works for ophthalmology today, cardiology tomorrow.
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -139,11 +124,12 @@ export async function generateAndFireHooks(
   const windowStart = Math.max(0, currentLen - MAX_WINDOW_CHARS);
   const window = transcript.contentText.slice(windowStart, currentLen);
 
-  // 5. Call Gemini.
+  // 5. Call Gemini with the loaded + domain-interpolated system prompt.
+  const prompt = await loadPrompt('op-hook-generator');
   let hooks: GeminiHook[];
   try {
     const raw = await geminiGenerate({
-      systemInstruction: SYSTEM_PROMPT,
+      systemInstruction: prompt.text,
       userParts: [{ text: `TRANSCRIPT:\n${window}` }],
       responseMimeType: 'application/json',
       temperature: 0.4,

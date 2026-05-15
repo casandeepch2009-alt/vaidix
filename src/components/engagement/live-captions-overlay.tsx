@@ -84,6 +84,20 @@ export function LiveCaptionsOverlay({
   const [partial, setPartial] = useState<DisplayedSegment | null>(null);
   const esRef = useRef<EventSource | null>(null);
 
+  // When the listener picks a different language, clear out segments that
+  // were rendered in the previous language so the user doesn't briefly see
+  // stale English while pending Telugu translations arrive. Using the
+  // "in-render setState on prop change" pattern (React docs / RFC 6394)
+  // rather than an effect — effects are not the right tool for synchronizing
+  // local state to a prop change, and the lint rule
+  // `react-hooks/set-state-in-effect` enforces this.
+  const [renderedLang, setRenderedLang] = useState<CaptionLangCode>(chosenLang);
+  if (renderedLang !== chosenLang) {
+    setRenderedLang(chosenLang);
+    setFinals([]);
+    setPartial(null);
+  }
+
   // Fan-in from SSE.
   useEffect(() => {
     if (!enabled) {
@@ -169,20 +183,21 @@ export function LiveCaptionsOverlay({
     };
   }, [enabled, sessionId, chosenLang]);
 
-  // When language changes, reset existing rendered segments — the next
-  // incoming caption will arrive in the new language flow.
-  useEffect(() => {
-    setFinals([]);
-    setPartial(null);
-  }, [chosenLang]);
-
   if (!enabled || (finals.length === 0 && !partial)) return null;
 
   return (
-    <div className="pointer-events-none absolute bottom-20 left-0 right-0 z-20 flex justify-center px-6">
+    <div
+      data-testid="live-captions-overlay"
+      className="pointer-events-none absolute bottom-20 left-0 right-0 z-20 flex justify-center px-6"
+    >
       <div className="max-w-3xl space-y-1 rounded-md bg-black/70 px-4 py-2 text-center text-base text-white backdrop-blur">
         {finals.map((c, idx) => (
-          <p key={`${c.startMs}-${idx}`} className="leading-snug">
+          <p
+            key={`${c.startMs}-${idx}`}
+            data-testid="caption-line"
+            data-speaker={c.speaker ?? ''}
+            className="leading-snug"
+          >
             {c.speaker ? <span className="opacity-70">{c.speaker}: </span> : null}
             <span className={c.txStatus === 'pending' ? 'opacity-60' : undefined}>
               {c.displayText}
@@ -193,7 +208,11 @@ export function LiveCaptionsOverlay({
           </p>
         ))}
         {partial && (
-          <p className="leading-snug opacity-80 italic">
+          <p
+            data-testid="caption-line-partial"
+            data-speaker={partial.speaker ?? ''}
+            className="leading-snug opacity-80 italic"
+          >
             {partial.speaker ? <span className="opacity-70">{partial.speaker}: </span> : null}
             {partial.displayText}
           </p>

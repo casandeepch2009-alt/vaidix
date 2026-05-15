@@ -15,6 +15,7 @@ import { useRoomContext } from '@livekit/components-react'
 import { RoomEvent, type Participant } from 'livekit-client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Hand } from 'lucide-react'
+import { playHandRaise } from './notification-sounds'
 
 const TOAST_TTL_MS = 4500
 
@@ -68,6 +69,11 @@ export function HandRaiseNotifications() {
         name: isSelf ? 'You' : displayName(p),
         isSelf,
       }])
+      // Audible cue for everyone EXCEPT the local user — they already see
+      // the toast immediately on click and don't need to be chimed at by
+      // their own action. Remote raises trigger the chime (subject to the
+      // shared notification-sounds mute pref). Mirrors Teams' behaviour.
+      if (!isSelf) playHandRaise()
       window.setTimeout(() => {
         setNotifs((prev) => prev.filter((n) => n.id !== id))
       }, TOAST_TTL_MS)

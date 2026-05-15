@@ -1,11 +1,13 @@
 'use client'
 
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useRoomContext } from '@livekit/components-react'
 import { Settings, Link2, PhoneOff } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 
 export function FacultyControls({ sessionId, isHost }: { sessionId: string; isHost: boolean }) {
+  const router = useRouter()
   const room = useRoomContext()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -34,7 +36,22 @@ export function FacultyControls({ sessionId, isHost }: { sessionId: string; isHo
     if (!confirm('End this session for everyone?')) return
     setBusy(true)
     try {
-      await fetch(`/api/classroom/sessions/${sessionId}/end`, { method: 'POST' })
+      const res = await fetch(`/api/classroom/sessions/${sessionId}/end`, { method: 'POST' })
+      if (!res.ok) {
+        // Surface the failure instead of silently swallowing it; otherwise
+        // the host's screen looks identical to a successful end and they'll
+        // click again.
+        const body = await res.json().catch(() => ({}))
+        alert(body?.error?.message ?? 'Could not end the session — please try again.')
+        return
+      }
+      // Disconnect locally and bail to the calendar. Attendees follow via
+      // ROOM_DELETED in handleDisconnected (live-session.tsx) — without
+      // this navigation the host stayed mounted on the call page and the
+      // page-level effects re-fetched the session/room and re-joined,
+      // which is what QA #10 saw as "ends and reconnects for everyone".
+      try { await room.disconnect(true) } catch { /* room may already be down */ }
+      router.replace('/calendar')
     } finally {
       setBusy(false)
     }

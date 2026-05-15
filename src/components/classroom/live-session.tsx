@@ -6,6 +6,9 @@ import {
   LiveKitRoom,
   RoomAudioRenderer,
   GridLayout,
+  CarouselLayout,
+  FocusLayout,
+  FocusLayoutContainer,
   useTracks,
   useLocalParticipant,
   useRoomContext,
@@ -41,7 +44,6 @@ import {
   saveCaptionPrefs,
   type CaptionLangCode,
 } from '@/components/engagement/live-captions-overlay'
-import { CaptionsProducer } from './captions-producer'
 import { PreflightBanner } from './preflight-banner'
 import { BreakoutsPanel } from './breakouts-panel'
 import { BreakoutRoomView } from './breakout-room-view'
@@ -269,6 +271,15 @@ function LiveRoom({
   // banner copy without violating the no-refs-during-render rule.
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
 
+  // Sidebar state lives at the LiveRoom level (above LiveKitRoom) on purpose:
+  // a reconnect attempt bumps the LiveKitRoom key, which remounts everything
+  // beneath it. If activeTab / sidebarOpen lived inside InnerRoom they'd be
+  // wiped, which is why the whiteboard panel "collapsed ~2s after open"
+  // when a transient blip happened (QA #13). Lifting them up makes the
+  // panel state survive reconnects.
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [activeTab, setActiveTab] = useState('chat')
+
   const SLOW_CONNECT_MS = 5000
   const VERY_SLOW_MS = 15000
   const FAIL_GRACE_MS = 60000     // 60s before declaring initial connect failed
@@ -317,10 +328,23 @@ function LiveRoom({
   }
 
   function handleDisconnected(reason?: DisconnectReason) {
-    // CLIENT_INITIATED only fires when the user clicks Leave (we call
-    // room.disconnect() under the hood). USER_REJECTED means admission
-    // was denied. Both are explicit exits — bail to the calendar.
-    if (reason === DisconnectReason.CLIENT_INITIATED || reason === DisconnectReason.USER_REJECTED) {
+    // Explicit, non-recoverable terminations — bail to the calendar instead
+    // of cycling through reconnect attempts:
+    //   CLIENT_INITIATED — local user clicked Leave
+    //   USER_REJECTED    — admission denied
+    //   ROOM_DELETED     — host ended the session for everyone (QA #10).
+    //                      Without this branch the room would auto-recreate
+    //                      on reconnect (LiveKit creates rooms on join) and
+    //                      everyone would land in a fresh empty room.
+    //   PARTICIPANT_REMOVED — host kicked this user.
+    //   SERVER_SHUTDOWN  — LiveKit server going down; nothing to reconnect to.
+    if (
+      reason === DisconnectReason.CLIENT_INITIATED ||
+      reason === DisconnectReason.USER_REJECTED ||
+      reason === DisconnectReason.ROOM_DELETED ||
+      reason === DisconnectReason.PARTICIPANT_REMOVED ||
+      reason === DisconnectReason.SERVER_SHUTDOWN
+    ) {
       onLeave()
       return
     }
@@ -381,6 +405,10 @@ function LiveRoom({
           isHostish={isHostish}
           onLeave={onLeave}
           onJoinBreakout={onJoinBreakout}
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
         />
         <RoomAudioRenderer />
       </LiveKitRoom>
@@ -500,6 +528,10 @@ function InnerRoom({
   isHostish,
   onLeave,
   onJoinBreakout,
+  sidebarOpen,
+  setSidebarOpen,
+  activeTab,
+  setActiveTab,
 }: {
   session: SessionInfo
   currentUser: {
@@ -518,9 +550,14 @@ function InnerRoom({
   isHostish: boolean
   onLeave: () => void
   onJoinBreakout: (b: { id: string; name: string }) => void
+  /// Sidebar state is owned by the LiveRoom parent so a LiveKitRoom remount
+  /// (transient disconnect) does not wipe the user's open panel / active tab.
+  /// See QA #13 for the original symptom this prop-drilling resolves.
+  sidebarOpen: boolean
+  setSidebarOpen: (open: boolean) => void
+  activeTab: string
+  setActiveTab: (tab: string) => void
 }) {
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-  const [activeTab, setActiveTab] = useState('chat')
 
   const captionsActive = session.captionsProfile !== 'off'
   const [captionsEnabled, setCaptionsEnabled] = useState(() =>
@@ -559,7 +596,7 @@ function InnerRoom({
     <div className="relative h-full bg-zinc-950 overflow-hidden">
       {/* Full-screen video layer */}
       <div className="absolute inset-0">
-        <VideoGrid sessionId={session.id} isHostish={isHostish} />
+        <VideoGrid sessionId={session.id} isHostish={isHostish} localUserName={currentUser.name} />
       </div>
 
       {/* Screen-share annotation overlay — only renders when screen-share is
@@ -605,20 +642,11 @@ function InnerRoom({
               onLangChange={changeCaptionsLang}
             />
           )}
-          {/* Download transcript PDF — visible to anyone who can see the session.
-              The route returns 404 if no transcript exists yet; we show the button
-              regardless so users have one consistent entry point. */}
-          <a
-            href={`/api/classroom/sessions/${session.id}/captions/transcript/export-pdf`}
-            target="_blank"
-            rel="noopener"
-            aria-label="Download transcript as PDF"
-            title="Download transcript as PDF"
-            className="flex items-center gap-1 rounded-md border border-white/10 bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur transition-colors hover:bg-black/70"
-          >
-            <FileDown className="size-3.5" />
-            <span>PDF</span>
-          </a>
+          {/* Download transcript PDF — only enabled once the post-session
+              transcript has been finalized. Pre-finalization the button used
+              to open a 404 page reading "No transcript found" (QA #7). */}
+          <TranscriptPdfButton sessionId={session.id} />
+
           {isHostish && (
             <HostControlsMenu sessionId={session.id} isHost={role === 'HOST'} />
           )}
@@ -775,20 +803,12 @@ function InnerRoom({
           chosenLang={captionsLang}
         />
       )}
-      {/* Live captions producer — host-only, English Phase 1. The component
-          is headless: it captures the local LiveKit mic track, opens a WS
-          to Deepgram with a server-minted scoped token, and POSTs finalized
-          utterances to /captions/publish for fan-out + persistence.
-          Gated on `session.status === 'LIVE'` so pre-flight test runs don't
-          burn ASR quota and don't leak chatter into the transcript. */}
-      <CaptionsProducer
-        sessionId={session.id}
-        enabled={
-          role === 'HOST' &&
-          session.captionsProfile === 'english-only' &&
-          session.status === 'LIVE'
-        }
-      />
+      {/* Live captions are produced by the out-of-process LiveKit Agent
+          (vaidix-agent/main.py) which joins every LIVE room as a hidden
+          participant. The agent runs Deepgram STT per subscribed audio
+          track and POSTs finalized utterances to /live-captions/ingest —
+          fan-out + persistence happen there, the overlay above just reads
+          the existing SSE stream. No browser-side producer required. */}
       <HandRaiseNotifications />
       {/* Headless join/leave chime — plays a soft 2-note tone when remote
           participants connect or disconnect. Default on; the toolbar
@@ -1328,7 +1348,7 @@ function HostMenuItem({
 // their slides is an implicit spotlight on the slides). Other camera tiles
 // remain available in the participant sidebar but are removed from the grid.
 // ----------------------------------------------------------------------------
-function VideoGrid({ sessionId, isHostish }: { sessionId: string; isHostish: boolean }) {
+function VideoGrid({ sessionId, isHostish, localUserName }: { sessionId: string; isHostish: boolean; localUserName?: string | null }) {
   const allTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -1338,16 +1358,41 @@ function VideoGrid({ sessionId, isHostish }: { sessionId: string; isHostish: boo
   )
   const { targetIdentity, setSpotlight } = useSpotlight(sessionId)
 
-  // Screen share short-circuits the spotlight — slides are always king.
-  const hasScreenShare = allTracks.some((t) => t.source === Track.Source.ScreenShare)
+  // Screen share is the dominant focus when present — slides are always king.
+  // Promote the most-recent share to the focus layout and push every camera
+  // tile into a thumbnail carousel beside it. Without this, the share rendered
+  // as just one more equal tile in GridLayout (QA #6: "small at top-right").
+  const screenShareTracks = allTracks.filter((t) => t.source === Track.Source.ScreenShare)
+  const cameraTracks      = allTracks.filter((t) => t.source !== Track.Source.ScreenShare)
+  const hasScreenShare    = screenShareTracks.length > 0
+
+  if (hasScreenShare) {
+    // Most-recently-published share wins — usually only one at a time, but
+    // be defensive in case two participants share simultaneously.
+    const focused = screenShareTracks[screenShareTracks.length - 1]
+    return (
+      <FocusLayoutContainer style={{ height: '100%', background: 'transparent' }}>
+        <CarouselLayout tracks={cameraTracks}>
+          {/* Carousel thumbs reuse SpotlightTile so they get the avatar
+              fallback too — but suppress the spotlight star in this layout
+              (a learner can't be "spotlit" while a screen share is focused). */}
+          <SpotlightTile
+            isHostish={isHostish}
+            spotlightedIdentity={targetIdentity}
+            onToggleSpotlight={setSpotlight}
+            avatarSize="thumb"
+            hideSpotlight
+            localUserName={localUserName}
+          />
+        </CarouselLayout>
+        <FocusLayout trackRef={focused} />
+      </FocusLayoutContainer>
+    )
+  }
 
   const tracks =
-    targetIdentity && !hasScreenShare
-      ? allTracks.filter(
-          (t) =>
-            t.source === Track.Source.ScreenShare ||
-            t.participant.identity === targetIdentity
-        )
+    targetIdentity
+      ? allTracks.filter((t) => t.participant.identity === targetIdentity)
       : allTracks
 
   return (
@@ -1356,7 +1401,91 @@ function VideoGrid({ sessionId, isHostish }: { sessionId: string; isHostish: boo
         isHostish={isHostish}
         spotlightedIdentity={targetIdentity}
         onToggleSpotlight={setSpotlight}
+        localUserName={localUserName}
       />
     </GridLayout>
+  )
+}
+
+// ----------------------------------------------------------------------------
+// Transcript PDF download — gated on the post-session transcript existing
+// AND being finalized. Pre-finalization the API returns 404 with the literal
+// "No transcript found for this session" body, which the previous link target
+// surfaced as a raw JSON error page (QA #7).
+//
+// State machine:
+//   probing      — checking GET /captions/transcript on mount
+//   ready        — finalized=true; render as enabled link
+//   processing   — row exists but finalized=false (post-call worker still
+//                  stitching) → disabled with informative tooltip
+//   unavailable  — 404 → disabled with "available after the session ends"
+// ----------------------------------------------------------------------------
+function TranscriptPdfButton({ sessionId }: { sessionId: string }) {
+  type State = 'probing' | 'ready' | 'processing' | 'unavailable'
+  const [state, setState] = useState<State>('probing')
+
+  useEffect(() => {
+    let cancelled = false
+    const probe = async () => {
+      try {
+        const res = await fetch(
+          `/api/classroom/sessions/${sessionId}/captions/transcript`,
+          { credentials: 'same-origin', cache: 'no-store' },
+        )
+        if (cancelled) return
+        if (res.status === 404) { setState('unavailable'); return }
+        if (!res.ok) { setState('unavailable'); return }
+        const body = await res.json()
+        if (cancelled) return
+        const finalized = body?.data?.transcript?.finalized === true
+        setState(finalized ? 'ready' : 'processing')
+      } catch {
+        if (!cancelled) setState('unavailable')
+      }
+    }
+    void probe()
+    // Re-probe periodically while the session is live so the button switches
+    // to "ready" without a manual reload after post-call processing finishes.
+    const t = setInterval(probe, 30_000)
+    return () => { cancelled = true; clearInterval(t) }
+  }, [sessionId])
+
+  const baseClass =
+    'flex items-center gap-1 rounded-md border border-white/10 bg-black/50 px-2 py-1 text-xs font-medium text-white backdrop-blur transition-colors'
+
+  if (state === 'ready') {
+    return (
+      <a
+        href={`/api/classroom/sessions/${sessionId}/captions/transcript/export-pdf`}
+        target="_blank"
+        rel="noopener"
+        aria-label="Download transcript as PDF"
+        title="Download transcript as PDF"
+        className={cn(baseClass, 'hover:bg-black/70')}
+      >
+        <FileDown className="size-3.5" />
+        <span>PDF</span>
+      </a>
+    )
+  }
+
+  const tip =
+    state === 'processing'
+      ? 'Transcript is still being processed — this usually takes a few minutes after the session ends.'
+      : state === 'probing'
+        ? 'Checking transcript availability…'
+        : 'Transcript will be available after the session ends and processing completes.'
+
+  return (
+    <button
+      type="button"
+      disabled
+      aria-label={tip}
+      title={tip}
+      className={cn(baseClass, 'cursor-not-allowed opacity-50')}
+    >
+      <FileDown className="size-3.5" />
+      <span>PDF</span>
+    </button>
   )
 }

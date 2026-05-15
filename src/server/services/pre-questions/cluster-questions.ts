@@ -5,10 +5,15 @@
 // Returns label + summary + assignments (questionId → themeIndex). Caller
 // persists the result through pre-questions-service.applyClustering().
 //
+// System prompt lives in src/server/prompts/_base/op-cluster-questions.md and
+// is loaded fresh per call (cached in-memory by the loader). Update the .md
+// to change the prompt — no TypeScript edit required.
+//
 // Phase B will swap to Vaidix Core via the same shape — keep this module
 // provider-agnostic at the seam.
 
 import { geminiGenerate, tryParseJson, GeminiUnavailableError } from '@/server/services/ai/gemini';
+import { loadPrompt } from '@/server/prompts/loader';
 
 export interface ClusterInputQuestion {
   id: string;
@@ -29,17 +34,6 @@ export interface ClusterOutput {
   assignments: Array<{ questionId: string; themeIndex: number | null }>;
 }
 
-const SYSTEM_INSTRUCTION = [
-  'You are an academic medical educator preparing a faculty member for a teaching session.',
-  'You will receive a list of questions submitted by residents/fellows ahead of the session.',
-  'Cluster the questions into the smallest set of themes that captures their concerns.',
-  'A theme is a short clinical concept (≤6 words for label, ≤30 words for summary).',
-  'Output STRICT JSON of shape: { "themes": [{label, summary}], "assignments": [{questionId, themeIndex}] }.',
-  'themeIndex is the 0-based index into the themes array. Use null if a question does not fit any theme.',
-  'Maximum 10 themes. Avoid overlap; merge near-duplicates. Prefer fewer, broader themes over many narrow ones.',
-  'Do NOT include any prose, explanation, or markdown outside the JSON object.',
-].join('\n');
-
 interface RawCluster {
   themes?: Array<{ label?: string; summary?: string }>;
   assignments?: Array<{ questionId?: string; themeIndex?: number | null }>;
@@ -57,10 +51,14 @@ export async function clusterPreQuestions(
     2
   );
 
+  // System prompt is loaded from _base/op-cluster-questions.md; the loader
+  // interpolates {{DOMAIN_*}} placeholders against the active domain config.
+  const prompt = await loadPrompt('op-cluster-questions');
+
   let raw: string;
   try {
     raw = await geminiGenerate({
-      systemInstruction: SYSTEM_INSTRUCTION,
+      systemInstruction: prompt.text,
       userParts: [{ text: userText }],
       responseMimeType: 'application/json',
       temperature: 0.2,

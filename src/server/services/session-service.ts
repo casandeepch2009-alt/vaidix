@@ -15,6 +15,8 @@ import {
   notifySessionRejected,
   notifySessionRescheduled,
   notifySessionCancelled,
+  notifySessionStarted,
+  notifySessionEnded,
 } from './session-notifications';
 import {
   scheduleSessionReminders,
@@ -626,6 +628,8 @@ export async function maybeFlipToLive(
     eventType: SESSION_AUDIT.SESSION_STARTED,
     actorId,
   });
+  // Fire-and-forget in-app notification to host + attendees.
+  runSideEffects(notifySessionStarted(sessionId), 'notify started');
   return { flipped: true, reason: 'FLIPPED' };
 }
 
@@ -717,6 +721,9 @@ export async function endSession(sessionId: string, actorId: string, actorRole: 
     eventType: SESSION_AUDIT.SESSION_ENDED,
     actorId,
   });
+  // Fire-and-forget in-app notification to host + attendees so the inbox
+  // surfaces a "recording available shortly" row.
+  runSideEffects(notifySessionEnded(sessionId), 'notify ended');
 }
 
 export async function promoteToCoHost(

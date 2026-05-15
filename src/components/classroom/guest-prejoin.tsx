@@ -40,13 +40,16 @@ import {
   LiveKitRoom,
   RoomAudioRenderer,
   GridLayout,
+  CarouselLayout,
+  FocusLayout,
+  FocusLayoutContainer,
   ParticipantTile,
   useLocalParticipant,
   useParticipants,
   useTracks,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
-import { Track } from 'livekit-client'
+import { DisconnectReason, Track } from 'livekit-client'
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, MonitorOff,
   PhoneOff, Loader2, Clock, Shield, LogIn,
@@ -54,10 +57,12 @@ import {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 
+type JoinedPhase = 'live' | 'reconnecting' | 'lost'
+
 type LobbyState =
   | { kind: 'NAME' }
   | { kind: 'WAITING'; admissionId: string }
-  | { kind: 'JOINED'; token: string; url: string; role: 'PARTICIPANT' | 'VIEWER' }
+  | { kind: 'JOINED'; token: string; url: string; role: 'PARTICIPANT' | 'VIEWER'; phase: JoinedPhase }
   | { kind: 'DENIED'; reason: string | null }
   | { kind: 'NOT_PERMITTED' }
 
@@ -66,6 +71,25 @@ type PollResult =
   | { state: 'JOINED'; token: string; url: string; role: 'PARTICIPANT' | 'VIEWER' }
   | { state: 'DENIED'; reason: string | null }
   | { state: 'UNKNOWN' }
+
+// DisconnectReason codes that mean "the room kicked us out for good" — no
+// point trying to re-mint a token, the operator/host decided we're done.
+// Everything else (signal-close, state-mismatch, join-failure, unknown) is
+// treated as a transient network event and we attempt a fresh join with a
+// new short-lived JWT from /guest. Reference: livekit-protocol DisconnectReason.
+const TERMINAL_DISCONNECT_REASONS = new Set<DisconnectReason>([
+  DisconnectReason.CLIENT_INITIATED,    // user clicked Leave
+  DisconnectReason.PARTICIPANT_REMOVED, // host removed them
+  DisconnectReason.ROOM_DELETED,        // host ended the session
+  DisconnectReason.USER_REJECTED,       // moderation reject
+  DisconnectReason.DUPLICATE_IDENTITY,  // another tab took over — don't fight it
+])
+
+// How long the silent re-join is allowed to try before we surface a "Connection
+// lost" panel. 30s matches the LiveKit SDK's own reconnect timeout and lines
+// up with what users perceive as "should have come back by now."
+const RECONNECT_BUDGET_MS = 30_000
+const RECONNECT_POLL_MS = 1500
 
 export interface GuestPrejoinProps {
   sessionId: string
@@ -99,7 +123,7 @@ export function GuestPrejoin(props: GuestPrejoinProps) {
         const data = json.data as PollResult
         if (cancelled) return
         if (data.state === 'JOINED') {
-          setState({ kind: 'JOINED', token: data.token, url: data.url, role: data.role })
+          setState({ kind: 'JOINED', token: data.token, url: data.url, role: data.role, phase: 'live' })
         } else if (data.state === 'DENIED') {
           setState({ kind: 'DENIED', reason: data.reason })
         }
@@ -152,20 +176,98 @@ export function GuestPrejoin(props: GuestPrejoinProps) {
     setError(null)
   }, [])
 
+  // ── Reconnect path ─────────────────────────────────────────────────────
+  // When LiveKit's onDisconnected fires for a non-terminal reason we drop the
+  // state to `phase: 'reconnecting'` instead of recycling to the NAME prompt.
+  // This effect then polls GET /guest, which re-mints a fresh LiveKit JWT
+  // each call, and swaps it into state. Changing `token` keys the LiveKitRoom
+  // so it remounts cleanly. From the host's perspective the guest's name
+  // briefly shows a "Reconnecting…" badge instead of disappearing-and-
+  // reappearing-as-a-new-guest, which is what the older recycle-to-lobby
+  // path produced and what users described as "logged out and back in."
+  useEffect(() => {
+    if (state.kind !== 'JOINED' || state.phase !== 'reconnecting') return
+    let cancelled = false
+    const startedAt = Date.now()
+    const tick = async () => {
+      if (cancelled) return
+      try {
+        const res = await fetch(`/api/classroom/sessions/${props.sessionId}/guest`, {
+          method: 'GET',
+          cache: 'no-store',
+        })
+        const json = await res.json().catch(() => null)
+        if (cancelled) return
+        if (res.ok && json?.ok && json.data?.state === 'JOINED') {
+          const data = json.data as Extract<PollResult, { state: 'JOINED' }>
+          setState({
+            kind: 'JOINED',
+            token: data.token,
+            url: data.url,
+            role: data.role,
+            phase: 'live',
+          })
+          return
+        }
+        if (res.ok && json?.ok && json.data?.state === 'DENIED') {
+          // Host ended/denied while we were trying to recover — surface that
+          // rather than spinning forever.
+          setState({ kind: 'DENIED', reason: json.data?.reason ?? null })
+          return
+        }
+      } catch {
+        // Network blip — keep polling until the budget runs out.
+      }
+      if (!cancelled && Date.now() - startedAt > RECONNECT_BUDGET_MS) {
+        setState((prev) =>
+          prev.kind === 'JOINED' && prev.phase === 'reconnecting'
+            ? { ...prev, phase: 'lost' }
+            : prev,
+        )
+      }
+    }
+    void tick()
+    const handle = window.setInterval(tick, RECONNECT_POLL_MS)
+    return () => {
+      cancelled = true
+      window.clearInterval(handle)
+    }
+  }, [state, props.sessionId])
+
   // ── JOINED → render LiveKit room ────────────────────────────────────────
   if (state.kind === 'JOINED') {
     return (
       <GuestLiveRoom
+        // Key on token so a fresh mint after reconnect re-mounts the room
+        // exactly once instead of trying to mutate the existing peer
+        // connection (which is the bug source we're patching).
+        key={state.token}
         token={state.token}
         url={state.url}
         title={props.title}
         canPublish={state.role === 'PARTICIPANT'}
-        onLeave={() => {
-          // Recycle to lobby — cookie keeps admission so they could re-enter,
-          // but a fresh prompt feels cleaner after hanging up.
+        phase={state.phase}
+        onDisconnected={(reason) => {
+          if (reason !== undefined && TERMINAL_DISCONNECT_REASONS.has(reason)) {
+            // User-initiated leave or host kick — bail back to the lobby.
+            setState({ kind: 'NAME' })
+            router.refresh()
+            return
+          }
+          // Anything else: network blip, signal close, state mismatch, etc.
+          // Stay in JOINED, surface the overlay, let the reconnect effect
+          // refresh the token. The cookie + admission persist server-side.
+          setState((prev) =>
+            prev.kind === 'JOINED' && prev.phase === 'live'
+              ? { ...prev, phase: 'reconnecting' }
+              : prev,
+          )
+        }}
+        onManualLeave={() => {
           setState({ kind: 'NAME' })
           router.refresh()
         }}
+        onRetryAfterLost={tryAgain}
       />
     )
   }
@@ -349,14 +451,49 @@ function GuestLiveRoom({
   url,
   title,
   canPublish,
-  onLeave,
+  phase,
+  onDisconnected,
+  onManualLeave,
+  onRetryAfterLost,
 }: {
   token: string
   url: string
   title: string
   canPublish: boolean
-  onLeave: () => void
+  phase: JoinedPhase
+  /// Forwarded straight to LiveKit; parent decides terminal vs transient.
+  onDisconnected: (reason?: DisconnectReason) => void
+  /// User explicitly clicked the in-call leave button; always terminal.
+  onManualLeave: () => void
+  /// Shown only in the "lost" panel — recycles to the NAME prompt.
+  onRetryAfterLost: () => void
 }) {
+  // "Lost" is the terminal state for our internal reconnect attempt — the
+  // LiveKitRoom is unmounted while we render the recovery panel so a still-
+  // alive peer connection doesn't keep churning behind it.
+  if (phase === 'lost') {
+    return (
+      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 px-4 text-white">
+        <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 text-center shadow-xl backdrop-blur">
+          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-500/15">
+            <Loader2 className="size-6 text-amber-300" />
+          </div>
+          <h2 className="mt-4 text-base font-semibold">Connection lost</h2>
+          <p className="mt-1 text-sm text-white/70">
+            We couldn&apos;t reconnect you to {title}. Check your network and try again.
+          </p>
+          <Button
+            variant="secondary"
+            className="mt-5 w-full bg-white/10 text-white hover:bg-white/20"
+            onClick={onRetryAfterLost}
+          >
+            Rejoin
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <LiveKitRoom
       token={token}
@@ -364,19 +501,39 @@ function GuestLiveRoom({
       connect
       audio={canPublish}
       video={canPublish}
-      onDisconnected={onLeave}
+      onDisconnected={onDisconnected}
       data-lk-theme="default"
       className="h-screen w-screen"
     >
-      <div className="flex h-full flex-col bg-slate-950 text-white">
+      <div className="relative flex h-full flex-col bg-slate-950 text-white">
         <GuestHeader title={title} />
         <main className="flex-1 overflow-hidden p-3">
           <GuestStage />
         </main>
         <RoomAudioRenderer />
-        <GuestControls canPublish={canPublish} onLeave={onLeave} />
+        <GuestControls canPublish={canPublish} onLeave={onManualLeave} />
+        {phase === 'reconnecting' && <ReconnectingOverlay />}
       </div>
     </LiveKitRoom>
+  )
+}
+
+/// Translucent overlay shown while we silently re-mint the token after a
+/// transient LiveKit disconnect. Carries no buttons — the reconnect attempt
+/// times out into the "lost" panel which is where the user can decide what
+/// to do. role="status" + aria-live="polite" so screen readers announce it.
+function ReconnectingOverlay() {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/70 backdrop-blur-sm"
+    >
+      <div className="pointer-events-auto flex items-center gap-3 rounded-full bg-white/10 px-4 py-2 text-sm shadow-lg ring-1 ring-white/20">
+        <Loader2 className="size-4 animate-spin text-emerald-300" />
+        <span>Reconnecting&hellip;</span>
+      </div>
+    </div>
   )
 }
 
@@ -438,6 +595,24 @@ function GuestStage() {
     seen.add(key)
     return true
   })
+
+  // Promote screen-share to the focus area when present (QA #6); cameras drop
+  // into a thumbnail carousel beside it. Mirrors the host/attendee layout in
+  // live-session.tsx so the guest experience matches Teams/Zoom expectations.
+  const screenShareTracks = deduped.filter((t) => t.source === Track.Source.ScreenShare)
+  const cameraTracks      = deduped.filter((t) => t.source !== Track.Source.ScreenShare)
+  if (screenShareTracks.length > 0) {
+    const focused = screenShareTracks[screenShareTracks.length - 1]
+    return (
+      <FocusLayoutContainer className="h-full rounded-2xl bg-black/30 ring-1 ring-white/5">
+        <CarouselLayout tracks={cameraTracks}>
+          <ParticipantTile />
+        </CarouselLayout>
+        <FocusLayout trackRef={focused} />
+      </FocusLayoutContainer>
+    )
+  }
+
   return (
     <GridLayout tracks={deduped} className="h-full rounded-2xl bg-black/30 ring-1 ring-white/5">
       <ParticipantTile />

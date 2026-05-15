@@ -11,7 +11,7 @@ import {
   sweepStaleScheduledSessions,
 } from '@/server/services/sessions/auto-end'
 import { nextOccurrenceStart } from '@/server/services/sessions/recurrence'
-import { bucketSessions } from '@/lib/sessions/buckets'
+import { bucketSessions, sessionBucket } from '@/lib/sessions/buckets'
 import pearlsData from '@/mock-data/pearls.json'
 
 interface MockPearl { tags: string[] }
@@ -153,6 +153,15 @@ export default async function ClassroomListPage() {
   // sweeps above have had a chance to correct the DB.
   //   - stuck LIVE  → never got room_finished
   //   - stuck SCHEDULED → host never started, end time has passed
+  //
+  // Two layers, intentionally:
+  //   1. `isStaleLive`/`isStaleScheduled` use the larger grace windows because
+  //      they describe "the DB write-side sweep should also touch this row".
+  //   2. The bucket check is the read-side truth: if `sessionBucket` puts the
+  //      row in `past`, the card component must render the past variant, even
+  //      a row that JUST ended (within the 60-min grace) — otherwise the
+  //      Replays tab shows an UpcomingCard with "starting now" + Join (the
+  //      QA-reported bug).
   const projected: ListedSession[] = rows.map((r) => {
     const candidate = {
       status: r.status as SessionStatus,
@@ -160,6 +169,17 @@ export default async function ClassroomListPage() {
       actualStart: null,
     }
     if (isStaleLive(candidate, now) || isStaleScheduled(candidate, now)) {
+      return { ...r, status: SessionStatus.ENDED }
+    }
+    const bucket = sessionBucket(
+      { status: r.status, scheduledStart: r.scheduledStart, scheduledEnd: r.scheduledEnd },
+      nowMs,
+    )
+    if (
+      bucket === 'past' &&
+      r.status !== SessionStatus.ENDED &&
+      r.status !== SessionStatus.CANCELLED
+    ) {
       return { ...r, status: SessionStatus.ENDED }
     }
     return r

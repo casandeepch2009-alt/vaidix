@@ -187,6 +187,44 @@ services:
           # the instance gets bumped to t3.xlarge or larger.
           memory: 4G
 
+  # ─── Vaidix Captions Agent (LiveKit Agent → Deepgram → /ingest) ─────────
+  # Joins every LIVE room as a hidden participant, runs Deepgram STT per
+  # subscribed audio track, POSTs transcripts to the Next.js app's
+  # /api/classroom/sessions/<id>/live-captions/ingest endpoint.
+  # Required env (in .env, sealed via sops):
+  #   DEEPGRAM_API_KEY            — Deepgram master API key
+  #   LIVE_CAPTIONS_INGEST_SECRET — 32+ char random hex, shared with the app
+  #   LIVEKIT_API_KEY / SECRET    — already used by the app
+  # The agent registers with LiveKit as a worker on startup and is auto-
+  # dispatched to every new room. One Deepgram WebSocket per UNMUTED
+  # participant, regardless of total seat count.
+  vaidix-captions-agent:
+    build:
+      context: ./vaidix-agent
+      dockerfile: Dockerfile
+    image: vaidix-captions-agent:latest
+    container_name: vaidix-captions-agent
+    <<: *default-restart
+    environment:
+      LIVEKIT_URL: ws://livekit:7880
+      LIVEKIT_API_KEY: ${LIVEKIT_API_KEY}
+      LIVEKIT_API_SECRET: ${LIVEKIT_API_SECRET}
+      DEEPGRAM_API_KEY: ${DEEPGRAM_API_KEY}
+      DEEPGRAM_MODEL: ${DEEPGRAM_MODEL:-nova-3}
+      VAIDIX_INGEST_URL: ${VAIDIX_INGEST_URL:-http://app:3000}
+      LIVE_CAPTIONS_INGEST_SECRET: ${LIVE_CAPTIONS_INGEST_SECRET}
+      LOG_LEVEL: ${CAPTIONS_AGENT_LOG_LEVEL:-INFO}
+    depends_on:
+      - livekit
+      - app
+    networks:
+      - vaidix-net
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+
   # ─── coturn (STUN/TURN) ──────────────────────────────────────────────────
   coturn:
     image: coturn/coturn:latest

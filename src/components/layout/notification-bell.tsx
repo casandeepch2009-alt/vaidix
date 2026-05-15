@@ -9,7 +9,7 @@
 // posted, etc.) — the UI here will pick them up automatically.
 
 import Link from 'next/link'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Bell, Check, ChevronRight, Loader2 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { cn } from '@/lib/utils'
@@ -26,6 +26,8 @@ const KIND_LABELS: Record<string, string> = {
   'session.rescheduled': 'Session rescheduled',
   'session.cancelled':   'Session cancelled',
   'session.reminder':    'Session reminder',
+  'session.started':     'Session started',
+  'session.ended':       'Session ended',
   'prequestion.posted':  'New pre-class question',
   'invitation.accepted': 'Invitation accepted',
   'objective.achieved':  'Objective marked',
@@ -247,6 +249,7 @@ export function NotificationBell() {
                               {n.body}
                             </p>
                           )}
+                          <PayloadScheduledTime payload={n.payload} />
                         </div>
                       </Wrapper>
                     </li>
@@ -269,4 +272,56 @@ export function NotificationBell() {
       )}
     </div>
   )
+}
+
+/**
+ * Renders `payload.scheduledStart` (ISO) in the user's local timezone.
+ * Server-side `.toLocaleString()` would use the container's UTC clock and
+ * mis-render times for everyone outside UTC (QA #14). We always format on
+ * the client so the rendered time matches the wall clock the user reads.
+ *
+ * Hidden for notifications without a scheduled timestamp (auth events,
+ * recording-ready, etc.).
+ */
+function PayloadScheduledTime({ payload }: { payload: unknown }) {
+  // Render the raw ISO on the server (and on the first client render to
+  // match the server output), then swap to the locale-formatted string
+  // after hydration. This avoids the server vs. client locale mismatch
+  // warning while still keeping Intl rendering on the client where the
+  // user's actual timezone lives. `useMounted` reads `false` on SSR + the
+  // initial client render, then flips to `true` once we're past hydration.
+  const mounted = useMounted()
+
+  const iso =
+    payload && typeof payload === 'object' && 'scheduledStart' in payload
+      ? (payload as { scheduledStart?: unknown }).scheduledStart
+      : null
+  if (typeof iso !== 'string') return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+
+  const text = mounted
+    ? d.toLocaleString(undefined, {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+      })
+    : iso
+  return (
+    <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground/80">
+      {text}
+    </p>
+  )
+}
+
+// `useSyncExternalStore` is the React-blessed way to derive a value that
+// differs between SSR and the client without tripping the hydration mismatch
+// warning. `getServerSnapshot` returns false (SSR + first paint), `getSnapshot`
+// returns true (post-hydration). We never re-subscribe because the value is
+// monotonic — once mounted, always mounted.
+const NO_OP = (): (() => void) => () => {}
+function useMounted(): boolean {
+  return useSyncExternalStore(NO_OP, () => true, () => false)
 }

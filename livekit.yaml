@@ -34,6 +34,13 @@ rtc:
 
 redis:
   address: redis:6379
+  # Redis is started with --requirepass devpassword in docker-compose.dev.yml.
+  # Without this password field LiveKit hits NOAUTH and the container restart-
+  # loops every ~15s — the browser then shows "Connection trouble — local
+  # LiveKit server isn't responding on ws://localhost:7880" which is really a
+  # Redis-auth failure, not LiveKit being down. Override via the
+  # LIVEKIT_REDIS_PASSWORD env var if REDIS_PASSWORD differs from the default.
+  password: devpassword
 
 keys:
   # Keep in sync with .env.local — change both before going to production

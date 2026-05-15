@@ -329,12 +329,21 @@ export async function mintBreakoutToken(
     throw new BreakoutError('NOT_ASSIGNED', 'You are not assigned to this breakout');
   }
 
+  // Forward avatarUrl into LiveKit metadata so the breakout-room participant
+  // tile can render the user's photo when their camera is off (parity with
+  // the main session). Falls back to initials when null.
+  const userRow = await db.user.findUnique({
+    where: { id: actor.userId },
+    select: { avatarUrl: true },
+  });
+
   const token = await mintLiveKitToken({
     identity: actor.userId,
     name: actor.userName,
     roomName: breakout.livekitRoomName,
     role: isPrivileged ? 'host' : 'participant',
     canShareScreen: true, // breakouts are collaborative — everyone can share
+    metadata: { avatarUrl: userRow?.avatarUrl ?? null },
   });
 
   // Mark joined-at if first time.

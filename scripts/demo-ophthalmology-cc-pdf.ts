@@ -9,8 +9,8 @@
 //   3) Logs in as faculty, downloads the transcript PDF, saves it to disk,
 //      and asserts %PDF magic-bytes + size > 1 KB so you know it's valid.
 //   4) Simulates the CC live-stream by POSTing the same segments through
-//      /captions/publish so anyone who has the session open in a browser
-//      sees the captions appear in the overlay.
+//      /live-captions/ingest (bearer-authed, agent path) so anyone who has
+//      the session open in a browser sees the captions appear in the overlay.
 //
 // The session ID + browser URL is printed at the start so you can open it
 // in a browser and watch the captions flow as the script runs.
@@ -252,13 +252,15 @@ async function run() {
   process.stdout.write(`     ✓ JSON saved: ${JSON_OUT}\n`);
   process.stdout.write(`     ✓ README:    ${README_OUT}\n`);
 
-  step('Live captions broadcast (skipped — requires DEEPGRAM_API_KEY + host login)');
-  process.stdout.write(`     The /captions/publish endpoint requires the host to be the caller,\n`);
-  process.stdout.write(`     and real-time transcription needs DEEPGRAM_API_KEY in .env.local.\n`);
+  step('Live captions broadcast (skipped — requires LiveKit Agent + Deepgram key)');
+  process.stdout.write(`     Live captions are produced out-of-process by vaidix-captions-agent\n`);
+  process.stdout.write(`     (Python LiveKit Agent — joins each LIVE room hidden, streams audio to\n`);
+  process.stdout.write(`     Deepgram, POSTs finalized utterances to /live-captions/ingest).\n`);
   process.stdout.write(`     To see CC live in your browser:\n`);
-  process.stdout.write(`       1. Add DEEPGRAM_API_KEY=<your key> to .env.local\n`);
-  process.stdout.write(`       2. Open the session URL above as ${host.email}\n`);
-  process.stdout.write(`       3. Click Unmute — the host's mic streams to Deepgram, captions appear\n\n`);
+  process.stdout.write(`       1. Set DEEPGRAM_API_KEY + LIVE_CAPTIONS_INGEST_SECRET in .env.local\n`);
+  process.stdout.write(`       2. docker compose -f docker-compose.dev.yml up -d vaidix-captions-agent\n`);
+  process.stdout.write(`       3. Open the session URL above and join from any role — captions appear\n`);
+  process.stdout.write(`          for ANY speaker (not just the host) as soon as they unmute.\n\n`);
 
   process.stdout.write(`     Session ID for manual exploration: ${sessionId}\n`);
   process.stdout.write(`     Browser URL: ${BASE}/classroom/${sessionId}\n`);

@@ -38,6 +38,29 @@ set -a
 . .env
 set +a
 
+# Required env vars per template — checked up-front so a typo or fresh
+# deployment fails loudly here instead of producing a half-rendered yaml that
+# silently breaks the egress bot (the original "ws://" trailing-empty-value
+# bug, which only surfaced as repeating "Start signal not received" aborts).
+require_env() {
+  local name="$1"
+  if [ -z "${!name:-}" ]; then
+    echo "[render-configs] required env var $name is empty or unset in .env" >&2
+    exit 1
+  fi
+}
+
+require_env LIVEKIT_INTERNAL_WS_URL
+# Sanity: must look like ws://… or wss://…, not a placeholder. Catches the
+# common copy-paste of leaving the var blank or pointing at a dev LAN IP.
+case "$LIVEKIT_INTERNAL_WS_URL" in
+  ws://*|wss://*) ;;
+  *)
+    echo "[render-configs] LIVEKIT_INTERNAL_WS_URL must start with ws:// or wss:// (got: $LIVEKIT_INTERNAL_WS_URL)" >&2
+    exit 1
+    ;;
+esac
+
 # List of (template, output) pairs. Add more here as needed.
 RENDERED=()
 render() {

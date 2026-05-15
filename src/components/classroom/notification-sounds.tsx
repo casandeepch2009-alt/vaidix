@@ -89,6 +89,39 @@ function playLeave() {
   tone(ctx, 523.25, t + 0.1, 0.22, 0.09)
 }
 
+/// Bright two-note "ping" — "someone raised their hand."
+/// Pitches sit higher than join/leave (A5 → C6) so the chime cuts through
+/// any ongoing chatter and reads as an attention call rather than a
+/// presence event. Same localStorage mute gate so users only need one
+/// toggle to silence ALL room chimes.
+export function playHandRaise() {
+  if (!readPref()) return
+  const ctx = audio()
+  if (!ctx) return
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
+  const t = ctx.currentTime
+  tone(ctx, 880.0, t, 0.12, 0.11)        // A5 — short attention tone
+  tone(ctx, 1046.5, t + 0.07, 0.18, 0.11) // C6 — bright resolution
+}
+
+/// Three-note arpeggio — "knock-knock, someone is in the waiting room."
+/// Distinct from playJoin so a moderator can tell the difference between
+/// "a participant entered the room" and "a guest is waiting to be admitted."
+/// Pattern E5 → A5 → E5 (octave bookends + a perfect-fourth in the middle)
+/// is short enough to not be intrusive when several admissions queue up.
+/// Respects the same localStorage mute that gates join/leave chimes — one
+/// toggle silences everything, which is the behaviour users expect.
+export function playWaitingRoomKnock() {
+  if (!readPref()) return
+  const ctx = audio()
+  if (!ctx) return
+  if (ctx.state === 'suspended') void ctx.resume().catch(() => {})
+  const t = ctx.currentTime
+  tone(ctx, 659.25, t, 0.14, 0.1)        // E5
+  tone(ctx, 880.0, t + 0.08, 0.16, 0.1)  // A5
+  tone(ctx, 659.25, t + 0.2, 0.2, 0.1)   // E5
+}
+
 /// Subscribes the live room to ParticipantConnected/Disconnected events
 /// and plays the corresponding chime. Mount-grace silences the initial
 /// burst when a user enters a room with existing participants.

@@ -63,8 +63,20 @@ interface DateTimePickerProps {
    * picker resolves to before min's time.
    */
   min?: string
+  /**
+   * Block calendar days before today (local time). When `min` is also
+   * supplied, the effective floor is `max(today-midnight, min)`. Use on the
+   * Start picker so users can't schedule a session in the past. The End
+   * picker should not need this — its floor is min={start}.
+   */
+  disablePast?: boolean
   /** Compact trigger button — smaller padding for dense forms. */
   compact?: boolean
+}
+
+function todayMidnightLocal(): string {
+  const d = new Date()
+  return formatValue(d.getFullYear(), d.getMonth() + 1, d.getDate(), 0, 0)
 }
 
 // Panel-height estimate for direction detection. Calendar view
@@ -73,10 +85,18 @@ const PANEL_H = 360
 
 type View = 'calendar' | 'year' | 'month'
 
-export function DateTimePicker({ label, required, value, onChange, min, compact }: DateTimePickerProps) {
+export function DateTimePicker({ label, required, value, onChange, min, disablePast }: DateTimePickerProps) {
   const now = new Date()
   const parsed = parseValue(value)
-  const minParsed = min ? parseValue(min) : null
+  // Effective floor = max(today-midnight, explicit min). `disablePast` is the
+  // common case for the Start picker; an explicit `min` (End picker's
+  // start-of-session floor) still wins when it's tighter.
+  const pastFloor = disablePast ? todayMidnightLocal() : null
+  const effectiveMin =
+    min && pastFloor
+      ? min > pastFloor ? min : pastFloor
+      : (min ?? pastFloor)
+  const minParsed = effectiveMin ? parseValue(effectiveMin) : null
   const minDayKey = minParsed ? minParsed.year * 10000 + minParsed.month * 100 + minParsed.day : null
   const minTime = minParsed ? minParsed.hour * 60 + minParsed.minute : 0
 
@@ -258,6 +278,9 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
         ref={buttonRef}
         type="button"
         onClick={openPicker}
+        aria-label={display ? `${label} — ${display.date} ${display.time}` : `${label} — pick date and time`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
         className={cn(
           'group relative flex w-full items-center gap-3 overflow-hidden rounded-2xl border-2 p-3.5 text-left transition-all duration-200',
           open
@@ -461,7 +484,7 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                                   className={cn(
                                     'size-7 rounded-lg text-xs font-medium transition-all',
                                     disabled
-                                      ? 'cursor-not-allowed text-muted-foreground/35 line-through decoration-1'
+                                      ? 'cursor-not-allowed text-muted-foreground/30'
                                       : isSelected(day)
                                         ? 'bg-linear-to-br from-teal-500 to-blue-600 text-white shadow-md shadow-teal-500/30 scale-105'
                                         : 'hover:bg-accent text-foreground',
@@ -491,27 +514,18 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
                   </p>
                   <div className="flex items-stretch gap-2">
                     <div className="flex h-10 flex-1 items-center justify-center rounded-lg border border-input bg-card focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/15 transition-colors">
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={12}
-                        value={String(hour).padStart(2, '0')}
-                        onChange={(e) => changeHour(Number(e.target.value))}
-                        aria-label="Hour"
-                        className="w-10 bg-transparent text-center text-base font-bold tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+                      <TimeDigitInput
+                        ariaLabel="Hour"
+                        value={hour}
+                        kind="hour"
+                        onCommit={changeHour}
                       />
                       <span className="text-base font-bold text-muted-foreground/60 select-none">:</span>
-                      <input
-                        type="number"
-                        inputMode="numeric"
-                        min={0}
-                        max={59}
-                        step={5}
-                        value={String(minute).padStart(2, '0')}
-                        onChange={(e) => changeMinute(Number(e.target.value))}
-                        aria-label="Minute"
-                        className="w-10 bg-transparent text-center text-base font-bold tabular-nums text-foreground outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:m-0 [&::-webkit-outer-spin-button]:appearance-none"
+                      <TimeDigitInput
+                        ariaLabel="Minute"
+                        value={minute}
+                        kind="minute"
+                        onCommit={changeMinute}
                       />
                     </div>
                     <div className="flex h-10 shrink-0 items-center rounded-lg border border-input bg-card p-0.5">
@@ -552,5 +566,129 @@ export function DateTimePicker({ label, required, value, onChange, min, compact 
           document.body
         )}
     </div>
+  )
+}
+
+// ----------------------------------------------------------------------------
+// TimeDigitInput — buffered numeric input for the hour / minute fields.
+//
+// Why a custom component instead of <input type="number">: the native number
+// input forced us to call `Number(e.target.value)` on every keystroke and
+// clamp into the committed state. With `value={padStart(committed)}`,
+// keystrokes appended to a pre-filled "09" and produced nonsense like "091"
+// (which clamped to 12 — the QA-reported bug). The native spinner UI was
+// also visually clipped and unwanted.
+//
+// Behaviour:
+//   • While focused, the input holds its own string buffer; the committed
+//     state only updates on blur (or when 2 digits unambiguously complete a
+//     valid value, which auto-advances focus to the next time field).
+//   • Focus selects the existing content so a fresh number replaces it.
+//   • Non-digit input is silently filtered.
+//   • Empty buffer on blur reverts to the last committed value (no zero-out).
+// ----------------------------------------------------------------------------
+function TimeDigitInput({
+  ariaLabel,
+  value,
+  kind,
+  onCommit,
+}: {
+  ariaLabel: string
+  value: number
+  kind: 'hour' | 'minute'
+  onCommit: (n: number) => void
+}) {
+  const [buffer, setBuffer] = useState<string>(String(value).padStart(2, '0'))
+  const [editing, setEditing] = useState(false)
+  const ref = useRef<HTMLInputElement>(null)
+
+  // Reflect external commits (e.g. AM/PM toggle, day selection snap) back
+  // into the buffer when we're not actively editing. This is a legitimate
+  // "external source pushed a new value, sync our display" effect — the
+  // alternative (deriving buffer entirely from props) breaks mid-typing
+  // because every keystroke would round-trip through the parent.
+  useEffect(() => {
+    if (editing) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setBuffer(String(value).padStart(2, '0'))
+  }, [value, editing])
+
+  const max = kind === 'hour' ? 12 : 59
+  const min = kind === 'hour' ? 1 : 0
+
+  const clamp = (n: number) => Math.min(max, Math.max(min, n))
+
+  function commitBuffer(next: string) {
+    if (next === '') {
+      // Empty on blur — revert to the last committed value.
+      setBuffer(String(value).padStart(2, '0'))
+      return
+    }
+    const parsed = Number(next)
+    if (Number.isNaN(parsed)) {
+      setBuffer(String(value).padStart(2, '0'))
+      return
+    }
+    const clamped = clamp(parsed)
+    setBuffer(String(clamped).padStart(2, '0'))
+    if (clamped !== value) onCommit(clamped)
+  }
+
+  function onInputChange(e: React.ChangeEvent<HTMLInputElement>) {
+    // Strip anything non-digit so paste of "11:00" or "09 AM" doesn't corrupt
+    // the buffer. Cap at 2 chars so typing past 2 digits is impossible.
+    const cleaned = e.target.value.replace(/\D+/g, '').slice(0, 2)
+    setBuffer(cleaned)
+    // Auto-advance once we have 2 unambiguous digits. For hours that means
+    // any 2-digit value <= max; for minutes likewise. The auto-commit lets
+    // the user keep typing into the next field without manually tabbing.
+    if (cleaned.length === 2) {
+      const parsed = Number(cleaned)
+      if (!Number.isNaN(parsed)) {
+        const clamped = clamp(parsed)
+        // Don't auto-commit if the user typed a leading 0 they'll want to
+        // build on (e.g. "0" then "5" for 5min). Only auto-advance when the
+        // value is at-or-above the clamping floor.
+        if (parsed === clamped) {
+          onCommit(clamped)
+          setBuffer(String(clamped).padStart(2, '0'))
+          // Move focus to the next time-input sibling in the parent row.
+          const parent = ref.current?.parentElement
+          if (parent && kind === 'hour') {
+            const nextInput = parent.querySelectorAll('input')[1] as HTMLInputElement | undefined
+            nextInput?.focus()
+            nextInput?.select()
+          }
+        }
+      }
+    }
+  }
+
+  return (
+    <input
+      ref={ref}
+      type="text"
+      inputMode="numeric"
+      autoComplete="off"
+      pattern="[0-9]*"
+      maxLength={2}
+      value={buffer}
+      aria-label={ariaLabel}
+      onFocus={(e) => { setEditing(true); e.currentTarget.select() }}
+      onChange={onInputChange}
+      onBlur={() => { setEditing(false); commitBuffer(buffer) }}
+      onKeyDown={(e) => {
+        // Enter commits the buffer immediately (matches blur behavior); Esc
+        // reverts. Arrows step the value to match the previous spinner UX.
+        if (e.key === 'Enter') { e.currentTarget.blur() }
+        else if (e.key === 'Escape') {
+          setBuffer(String(value).padStart(2, '0'))
+          e.currentTarget.blur()
+        }
+        else if (e.key === 'ArrowUp')   { e.preventDefault(); onCommit(clamp(value + 1)) }
+        else if (e.key === 'ArrowDown') { e.preventDefault(); onCommit(clamp(value - 1)) }
+      }}
+      className="w-10 bg-transparent text-center text-base font-bold tabular-nums text-foreground outline-none"
+    />
   )
 }

@@ -34,9 +34,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
     // `name` (column is NOT NULL in the schema). Fall back to email-prefix
     // as a last defence; the LiveKit JWT then carries this as the `name`
     // claim so peers see the registered Vaidix name.
+    // avatarUrl is read here so the LiveKit metadata carries it through to
+    // every other participant — that's what `participant-avatar-circle.tsx`
+    // reads to render a real photo when the user's camera is off. If
+    // `User.avatarUrl` is null (no upload yet) the component falls back to
+    // deterministic initials.
     const dbUser = await db.user.findUnique({
       where: { id: user.id },
-      select: { name: true, email: true },
+      select: { name: true, email: true, avatarUrl: true },
     });
     const displayName =
       (dbUser?.name ?? '').trim() ||
@@ -70,12 +75,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
       // Not visible to this user under W3 visibility rules.
       // Two ways in: (a) valid share token → queue in waiting room; (b) nothing → 403
       if (effectiveRole === 'VIEWER') {
-        // Admin/Proposer auditing — skip admission, mint viewer token
+        // Admin/Proposer auditing — skip admission, mint viewer token.
+        // Carry avatarUrl too so the auditor's tile shows their photo.
         const token = await mintLiveKitToken({
           identity: user.id,
           name: displayName,
           roomName: sessionRoomName(sessionId),
           role: 'viewer',
+          metadata: { avatarUrl: dbUser?.avatarUrl ?? null },
         });
         return jsonOk({ state: 'JOINED', token, url: env.LIVEKIT_URL, role: 'VIEWER' });
       }
@@ -119,6 +126,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
         effectiveRole: tokenRole,
         userRole: user.role,
         isWebinarAttendee: session.isWebinar && !isPresenter,
+        // Forwarded through the JWT → ParticipantTile metadata so the
+        // avatar overlay can render the user's real photo. Null (no upload)
+        // is fine — component degrades to initials.
+        avatarUrl: dbUser?.avatarUrl ?? null,
       },
     });
 

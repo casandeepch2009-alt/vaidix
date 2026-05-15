@@ -18,6 +18,7 @@ import { s3, BUCKET } from '@/lib/storage';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { env } from '@/lib/env';
 import { geminiGenerate, GeminiUnavailableError, GeminiUnparseableError, tryParseJson } from '@/server/services/ai/gemini';
+import { loadPrompt } from '@/server/prompts/loader';
 
 export type PromoTemplate = 'flyer' | 'whatsapp_banner' | 'instagram_card';
 
@@ -58,25 +59,9 @@ interface PromoCopy {
   source?: 'ai' | 'heuristic';
 }
 
-const PROMO_SYSTEM_PROMPT = `You are a marketing writer for LV Prasad Eye Institute's clinical education program.
-Output strict JSON only — no prose, no fences:
-{
-  "subtitle":   string,            // 1 line, <= 90 chars, evocative but factual
-  "hook":       string,            // 1 line, <= 70 chars, calls residents to attend; avoid hype words
-  "highlights": string[]           // 3-4 short bullets, each <= 55 chars, what the session covers
-}
-
-Rules:
-- Indian clinical context. No US-specific references. No US drug brand names.
-- "subtitle" describes WHAT learners will gain (skill, framework, decision rule).
-  Ground it in the actual session content provided (objectives, study material,
-  pre-questions). Don't invent topics that aren't in the source data.
-- "hook" is short, in active voice, professional gravitas — not "Don't miss out!" cheese.
-  If pre-questions are present, the hook MAY echo the most-asked theme directly.
-- "highlights" are NOT objectives — they are scannable bullets a resident would see
-  on a flyer ("KP morphology & classification", "Live case from LVPEI Uvea Records").
-  Active phrases, concrete, max 55 chars each. Prefer 4, accept 3 if material is thin.
-- Don't put quotes inside the strings.`;
+// System prompt lives in src/server/prompts/_base/op-promo-copy.md; loaded
+// fresh per call (cached in-memory). Edit the .md to update the prompt — no
+// TypeScript change needed.
 
 async function geminiPromoCopy(input: {
   title: string;
@@ -123,8 +108,9 @@ When: ${input.scheduledStart.toISOString()}${tagsLine}
 Description: ${input.description ?? '(none provided)'}${objectivesBlock}${prereqsBlock}${studyBlock}${questionsBlock}
 
 Return JSON only.`;
+  const prompt = await loadPrompt('op-promo-copy');
   const text = await geminiGenerate({
-    systemInstruction: PROMO_SYSTEM_PROMPT,
+    systemInstruction: prompt.text,
     userParts: [{ text: userPrompt }],
     responseMimeType: 'application/json',
     temperature: 0.6,
@@ -172,14 +158,21 @@ function heuristicCopy(input: {
   tags?: string[];
   programLabel?: string | null;
 }): PromoCopy {
+  // Promo copy is generated server-side and rendered as plain text on the
+  // share card / Slack post. Pin the timezone explicitly so the displayed
+  // hours match the residency's local clock regardless of where this code
+  // happens to run (Docker UTC in dev, ap-south-1 in prod). Same root cause
+  // as the QA #14 notification bug.
   const dateLine = input.scheduledStart.toLocaleDateString('en-IN', {
     weekday: 'short',
     day: 'numeric',
     month: 'short',
+    timeZone: 'Asia/Kolkata',
   });
   const timeLine = input.scheduledStart.toLocaleTimeString('en-IN', {
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'Asia/Kolkata',
   });
 
   const firstObj = input.objectives?.[0]?.text;

@@ -118,12 +118,23 @@ export const createSessionSchema = z
   .refine((v) => new Date(v.scheduledEnd) > new Date(v.scheduledStart), {
     message: 'scheduledEnd must be after scheduledStart',
     path: ['scheduledEnd'],
+  })
+  .refine((v) => new Date(v.scheduledStart).getTime() >= Date.now() - PAST_GRACE_MS, {
+    message: 'scheduledStart cannot be in the past',
+    path: ['scheduledStart'],
   });
 // Note: "no audience at all" (openToAll=false, no cohort, no invitees) is a
 // valid state — it's the "Private" mode where only host + proposer can see /
 // join the session. The UI exposes this as the Private option.
 
 export type CreateSessionInput = z.infer<typeof createSessionSchema>;
+
+// 5-minute slack absorbs client/server clock skew and the round-trip between
+// the user picking a time and the request landing on the server. The UI
+// (date-time-picker.tsx, disablePast=true) already blocks calendar days in
+// the past — this is the second-line defence so a direct API caller can't
+// post-date a session into history (QA #16 follow-up).
+const PAST_GRACE_MS = 5 * 60 * 1000;
 
 export const rescheduleSchema = z
   .object({
@@ -134,6 +145,10 @@ export const rescheduleSchema = z
   .refine((v) => new Date(v.scheduledEnd) > new Date(v.scheduledStart), {
     message: 'scheduledEnd must be after scheduledStart',
     path: ['scheduledEnd'],
+  })
+  .refine((v) => new Date(v.scheduledStart).getTime() >= Date.now() - PAST_GRACE_MS, {
+    message: 'scheduledStart cannot be in the past',
+    path: ['scheduledStart'],
   });
 
 export type RescheduleInput = z.infer<typeof rescheduleSchema>;

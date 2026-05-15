@@ -48,8 +48,7 @@ export function buildProgramScope(actor: SessionVisibilityActor): Prisma.Teachin
  * composes it into a wider query (time window, approval status, search, etc.).
  *
  *   - ADMIN / PROGRAM_DIRECTOR — program-scope only (full access within tenant)
- *   - FACULTY — cohort-member OR invited OR host OR proposer (within tenant)
- *   - RESIDENT / EXTERNAL_LEARNER — cohort-member OR invited (within tenant)
+ *   - Everyone else — cohort-member OR invited OR host OR proposer (within tenant)
  *
  * `openToAll` is intentionally NOT a list-surface match: those sessions are
  * link-shareable (anyone with the URL can join via `userCanSeeSession` below)
@@ -67,16 +66,17 @@ export async function buildSessionVisibilityWhere(
 
   const cohortIds = await getUserCohortIds(actor.userId);
 
-  const visibilityOptions: Prisma.TeachingSessionWhereInput[] = [
-    { cohortId: { in: cohortIds } },
-    { invites: { some: { userId: actor.userId } } },
-  ];
-
-  if (actor.role === Role.FACULTY) {
-    visibilityOptions.push({ hostId: actor.userId }, { proposedBy: actor.userId });
-  }
-
-  return { OR: visibilityOptions };
+  // Hosts and proposers always see their own sessions, irrespective of role.
+  // Previously this was FACULTY-only, which hid resident/fellow-scheduled
+  // sessions from their own calendar + Replays (QA #1, #15).
+  return {
+    OR: [
+      { hostId: actor.userId },
+      { proposedBy: actor.userId },
+      { cohortId: { in: cohortIds } },
+      { invites: { some: { userId: actor.userId } } },
+    ],
+  };
 }
 
 /**

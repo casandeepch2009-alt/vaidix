@@ -32,6 +32,35 @@ rtc:
   # to the Elastic IP, NOT the private/docker IP.
   # node_ip: "13.234.37.54"
 
+  # External TURN relay — advertised to clients alongside LiveKit's own
+  # host candidates so participants behind symmetric NATs (mobile hotspots,
+  # corporate firewalls) can punch through.
+  #
+  # Symptom this fixes: ICE candidate stats showed only `host` candidates
+  # with state=failed, requestsSent=8 responsesReceived=0. Without a relay
+  # candidate in the SDP, clients on restrictive networks had nowhere to
+  # fall back to and the LiveKit signal channel reconnected every 15-30s.
+  # That reconnect storm is what users saw as "guest's name keeps refreshing".
+  #
+  # `credential` MUST match the password set in turnserver.conf under
+  # `user=livekit:<password>`. Rotate both files together. AWS security
+  # group on the EC2 host must open inbound UDP 3478 + TCP 3478 + the
+  # UDP relay range 49152-65535 declared in turnserver.conf.
+  #
+  # Host is the same public address clients reach the app at; an IP also
+  # works if you don't have a DNS record specifically for coturn.
+  turn_servers:
+    - host: turn.vaidix.arthivaa.com
+      port: 3478
+      protocol: udp
+      username: livekit
+      credential: CHANGE_ME_STRONG_TURN_PASSWORD
+    - host: turn.vaidix.arthivaa.com
+      port: 3478
+      protocol: tcp
+      username: livekit
+      credential: CHANGE_ME_STRONG_TURN_PASSWORD
+
 redis:
   address: redis:6379
 

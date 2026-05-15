@@ -139,13 +139,16 @@ export async function notifySessionProposed(sessionId: string) {
 
   // In-app notification — drives the bell/badge in the header. Email may be
   // delayed or filtered; this row is the source of truth for the inbox UI.
+  // Time is carried in `payload.scheduledStart` (ISO) and rendered client-side
+  // in the user's locale; never embed `.toLocaleString()` here, since the
+  // server runs UTC and would display an off-by-timezone clock (QA #14).
   await db.notification.create({
     data: {
       userId: session.host.id,
       channel: NotificationChannel.IN_APP,
       kind: 'session.proposed',
       title: `${session.proposer.name} proposed a session for your approval`,
-      body: `${session.title} — ${session.scheduledStart.toLocaleString()}`,
+      body: session.title,
       payload: {
         sessionId: session.id,
         scheduledStart: session.scheduledStart.toISOString(),
@@ -165,21 +168,21 @@ export async function notifySessionApproved(sessionId: string) {
   const attachment = icsAttachmentForSession(session);
   const shared = sharedVarsFor(session);
 
-  // Proposer confirmation (skip if proposer == host; the host just accepted)
+  const notifPayload = {
+    sessionId: session.id,
+    scheduledStart: session.scheduledStart.toISOString(),
+    scheduledEnd: session.scheduledEnd.toISOString(),
+  };
+
   if (session.proposer.id !== session.host.id && session.proposer.status === UserStatus.ACTIVE) {
-    await db.notification.create({
-      data: {
-        userId: session.proposer.id,
-        channel: NotificationChannel.IN_APP,
-        kind: 'session.approved',
-        title: `${session.host.name} approved your session`,
-        body: `${session.title} — ${session.scheduledStart.toLocaleString()}`,
-        payload: {
-          sessionId: session.id,
-          scheduledStart: session.scheduledStart.toISOString(),
-          scheduledEnd: session.scheduledEnd.toISOString(),
-        },
-      },
+    // Proposer != host → a faculty approved a resident's proposal. Confirm
+    // back to the proposer.
+    await emit({
+      userId: session.proposer.id,
+      kind: 'session.approved',
+      title: `${session.host.name} approved your session`,
+      body: session.title,
+      payload: notifPayload,
     });
 
     const { subject, html } = renderSessionApprovedEmail({
@@ -188,20 +191,44 @@ export async function notifySessionApproved(sessionId: string) {
       recipientRole: 'PROPOSER',
     });
     await safeSend(session.proposer.email, subject, html, [attachment]);
+  } else if (session.host.status === UserStatus.ACTIVE) {
+    // Self-host (auto-approved) — proposer == host. Confirm to the host
+    // directly so they get an inbox row for the session they just scheduled,
+    // matching the audit trail attendees see.
+    await emit({
+      userId: session.host.id,
+      kind: 'session.approved',
+      title: `Session scheduled: ${session.title}`,
+      body: null,
+      payload: notifPayload,
+    });
   }
 
-  // Attendees
+  // Attendees — emit IN_APP rows (the bell/inbox is the source of truth) AND
+  // send the email with the .ics attachment. Without the emit the only signal
+  // a cohort member gets is the email, which is filterable / muteable.
   const attendees = await resolveAttendees(session);
-  await Promise.all(
-    attendees.map((u) => {
-      const { subject, html } = renderSessionApprovedEmail({
-        ...shared,
-        recipientName: u.name,
-        recipientRole: 'ATTENDEE',
-      });
-      return safeSend(u.email, subject, html, [attachment]);
-    })
-  );
+  if (attendees.length > 0) {
+    await emitToMany(
+      attendees.map((u) => ({
+        userId: u.id,
+        kind: 'session.approved',
+        title: `${session.host.name} scheduled: ${session.title}`,
+        body: null,
+        payload: notifPayload,
+      }))
+    );
+    await Promise.all(
+      attendees.map((u) => {
+        const { subject, html } = renderSessionApprovedEmail({
+          ...shared,
+          recipientName: u.name,
+          recipientRole: 'ATTENDEE',
+        });
+        return safeSend(u.email, subject, html, [attachment]);
+      })
+    );
+  }
 }
 
 export async function notifySessionRejected(sessionId: string, reason: string) {
@@ -221,8 +248,12 @@ export async function notifySessionRejected(sessionId: string, reason: string) {
     userId: session.proposer.id,
     kind: 'session.rejected',
     title: `${session.host.name} declined your session`,
-    body: `${session.title} — ${session.scheduledStart.toLocaleString()}${reason ? `: ${reason}` : ''}`,
-    payload: { sessionId: session.id, reason },
+    body: reason ? `${session.title} — ${reason}` : session.title,
+    payload: {
+      sessionId: session.id,
+      scheduledStart: session.scheduledStart.toISOString(),
+      reason,
+    },
   });
 }
 
@@ -261,7 +292,7 @@ export async function notifySessionRescheduled(
       userId: session.host.id,
       kind: 'session.rescheduled',
       title: `Session rescheduled: ${session.title}`,
-      body: `New time: ${session.scheduledStart.toLocaleString()}`,
+      body: 'The schedule has changed — new time below.',
       payload: notifPayload,
     });
   }
@@ -288,7 +319,7 @@ export async function notifySessionRescheduled(
         userId: u.id,
         kind: 'session.rescheduled',
         title: `Session rescheduled: ${session.title}`,
-        body: `New time: ${session.scheduledStart.toLocaleString()}`,
+        body: 'The schedule has changed — new time below.',
         payload: notifPayload,
       }))
     );
@@ -336,12 +367,90 @@ export async function notifySessionCancelled(sessionId: string, reason?: string 
       userId: u.id,
       kind: 'session.cancelled',
       title: `Session cancelled: ${session.title}`,
-      body: reason ?? `Scheduled for ${session.scheduledStart.toLocaleString()}`,
+      body: reason ?? 'Originally scheduled for the time below.',
       payload: {
         sessionId: session.id,
         scheduledStart: session.scheduledStart.toISOString(),
         reason: reason ?? null,
       },
+    }))
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Lifecycle: SCHEDULED → LIVE. In-app only (no email — the session is
+// literally happening right now, an email arriving 5–30 min late is noise).
+// Recipients: host + attendees (cohort members + named invitees). We don't
+// try to suppress notifying people who happen to already be in the room —
+// the bell de-dupes visually, and the structural cost of querying
+// LiveKit-side presence here isn't worth the marginal UX win.
+// ----------------------------------------------------------------------------
+export async function notifySessionStarted(sessionId: string) {
+  const session = await loadSession(sessionId);
+  if (!session) return;
+
+  const notifPayload = {
+    sessionId: session.id,
+    scheduledStart: session.scheduledStart.toISOString(),
+    scheduledEnd: session.scheduledEnd.toISOString(),
+  };
+
+  const recipients: { id: string; name: string; email: string }[] = [];
+  if (session.host.status === UserStatus.ACTIVE) {
+    recipients.push({ id: session.host.id, name: session.host.name, email: session.host.email });
+  }
+  const attendees = await resolveAttendees(session);
+  for (const a of attendees) {
+    if (!recipients.some((u) => u.id === a.id)) recipients.push(a);
+  }
+
+  if (recipients.length === 0) return;
+
+  await emitToMany(
+    recipients.map((u) => ({
+      userId: u.id,
+      kind: 'session.started',
+      title: `Live now: ${session.title}`,
+      body: `Hosted by ${session.host.name}`,
+      payload: notifPayload,
+    }))
+  );
+}
+
+// ----------------------------------------------------------------------------
+// Lifecycle: → ENDED (host clicked End, or auto-end sweep timed out). In-app
+// only — same rationale as `notifySessionStarted`. The notification kind
+// resolves to the recording page so attendees can jump straight to it once
+// the transcribe-worker has populated `recording` rows.
+// ----------------------------------------------------------------------------
+export async function notifySessionEnded(sessionId: string) {
+  const session = await loadSession(sessionId);
+  if (!session) return;
+
+  const notifPayload = {
+    sessionId: session.id,
+    scheduledStart: session.scheduledStart.toISOString(),
+    scheduledEnd: session.scheduledEnd.toISOString(),
+  };
+
+  const recipients: { id: string; name: string; email: string }[] = [];
+  if (session.host.status === UserStatus.ACTIVE) {
+    recipients.push({ id: session.host.id, name: session.host.name, email: session.host.email });
+  }
+  const attendees = await resolveAttendees(session);
+  for (const a of attendees) {
+    if (!recipients.some((u) => u.id === a.id)) recipients.push(a);
+  }
+
+  if (recipients.length === 0) return;
+
+  await emitToMany(
+    recipients.map((u) => ({
+      userId: u.id,
+      kind: 'session.ended',
+      title: `Session ended: ${session.title}`,
+      body: 'Recording will be available shortly.',
+      payload: notifPayload,
     }))
   );
 }
@@ -377,7 +486,7 @@ export async function notifySessionReminder(sessionId: string, leadTime: '24H' |
       userId: u.id,
       kind: 'session.reminder',
       title: `${session.title} starts in ${leadLabel}`,
-      body: `Hosted by ${session.host.name} — ${session.scheduledStart.toLocaleString()}`,
+      body: `Hosted by ${session.host.name}`,
       payload: {
         sessionId: session.id,
         scheduledStart: session.scheduledStart.toISOString(),

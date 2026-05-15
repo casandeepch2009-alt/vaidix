@@ -6,7 +6,8 @@
 // Shared by /admin/cohorts (member add) and /calendar/new (INVITE_ONLY).
 // Hits GET /api/users/searchable with role + search + excludeIds.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, X, Check, Loader2 } from 'lucide-react';
 import type { Role } from '@prisma/client';
 
@@ -48,14 +49,30 @@ interface Props {
    * caps at 1.
    */
   single?: boolean;
+  /**
+   * Search context — drives the API auth gate.
+   *   'invite' — any authenticated user with an active program (results
+   *              scoped to that program). Use for session-invite pickers.
+   *   'cohort' — ADMIN / PROGRAM_DIRECTOR only, returns global directory.
+   *              Use for cohort-membership and admin pickers.
+   * Defaults to 'cohort' to fail closed if a caller forgets to declare intent.
+   */
+  purpose?: 'invite' | 'cohort';
 }
 
-export function UserPicker({ selected, onChange, role, excludeIds = [], placeholder, single = false }: Props) {
+export function UserPicker({ selected, onChange, role, excludeIds = [], placeholder, single = false, purpose = 'cohort' }: Props) {
   const [search, setSearch]       = useState('');
   const [results, setResults]     = useState<PickableUser[]>([]);
   const [loading, setLoading]     = useState(false);
   const [showResults, setShowResults] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const inputWrapRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Pixel-position the portalled dropdown. Recomputed on open + on scroll /
+  // resize so it tracks the input even inside scrollable containers.
+  const [panelPos, setPanelPos] = useState({ top: 0, left: 0, width: 0, openUp: false });
+  const PANEL_MAX_H = 288; // matches max-h-72 below
+  const mounted = useMounted();
 
   const allExcluded = useMemo(
     () => [...excludeIds, ...selected.map((u) => u.id)],
@@ -68,6 +85,7 @@ export function UserPicker({ selected, onChange, role, excludeIds = [], placehol
     const t = setTimeout(async () => {
       try {
         const params = new URLSearchParams();
+        params.set('purpose', purpose);
         if (role)                  params.set('role', role);
         if (search.trim())         params.set('search', search.trim());
         if (allExcluded.length > 0) params.set('excludeIds', allExcluded.join(','));
@@ -81,23 +99,53 @@ export function UserPicker({ selected, onChange, role, excludeIds = [], placehol
       }
     }, 250);
     return () => { cancelled = true; clearTimeout(t); };
-  }, [search, role, allExcluded]);
+  }, [search, role, allExcluded, purpose]);
 
-  // Click-outside collapses the results dropdown
+  // Click-outside collapses the results dropdown. The dropdown lives in a
+  // portal (so it can escape parent overflow / clipping cards), so we have
+  // to check both the trigger container AND the floating panel.
   useEffect(() => {
     function onDocClick(e: MouseEvent) {
-      if (!containerRef.current) return;
-      if (!containerRef.current.contains(e.target as Node)) setShowResults(false);
+      const t = e.target as Node;
+      if (containerRef.current?.contains(t)) return;
+      if (panelRef.current?.contains(t)) return;
+      setShowResults(false);
     }
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
   }, []);
 
+  // Position the floating panel under the input. Re-runs on scroll / resize
+  // so the dropdown stays anchored even inside scrollable cards. Skips the
+  // work entirely while the panel is closed.
+  useEffect(() => {
+    if (!showResults) return;
+    function reposition() {
+      const el = inputWrapRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - r.bottom - 8;
+      const spaceAbove = r.top - 8;
+      // Only open upward if there's genuinely very little space below (< 120px)
+      // AND more room above — avoids flipping mid-form where the page can scroll.
+      const openUp = spaceBelow < 120 && spaceAbove > spaceBelow + 80;
+      const top = openUp ? Math.max(8, r.top - PANEL_MAX_H - 6) : r.bottom + 6;
+      setPanelPos({ top, left: r.left, width: r.width, openUp });
+    }
+    reposition();
+    window.addEventListener('scroll', reposition, true);
+    window.addEventListener('resize', reposition);
+    return () => {
+      window.removeEventListener('scroll', reposition, true);
+      window.removeEventListener('resize', reposition);
+    };
+  }, [showResults]);
+
   function add(u: PickableUser) {
     if (selected.some((s) => s.id === u.id)) return;
     onChange(single ? [u] : [...selected, u]);
     setSearch('');
-    if (single) setShowResults(false);
+    setShowResults(false);
   }
 
   function remove(id: string) {
@@ -132,7 +180,7 @@ export function UserPicker({ selected, onChange, role, excludeIds = [], placehol
       )}
 
       {/* Search input */}
-      <div className="relative">
+      <div ref={inputWrapRef} className="relative">
         <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <input
           type="text"
@@ -147,42 +195,66 @@ export function UserPicker({ selected, onChange, role, excludeIds = [], placehol
         )}
       </div>
 
-      {/* Results dropdown */}
-      {showResults && (
-        <div className="absolute left-0 right-0 z-30 mt-1.5 max-h-72 overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-          {results.length === 0 ? (
-            <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-              {loading ? 'Searching…' : search ? 'No matching users' : 'Start typing to search'}
-            </div>
-          ) : (
-            <ul className="py-1">
-              {results.map((u) => (
-                <li key={u.id}>
-                  <button
-                    type="button"
-                    onClick={() => add(u)}
-                    className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-accent"
-                  >
-                    <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
-                      {initials(u.name)}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-1.5">
-                        <span className="truncate font-medium text-foreground">{u.name}</span>
-                        <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${ROLE_BADGE_BG[u.role]}`}>
-                          {humanRole(u.role)}
-                        </span>
+      {/* Results dropdown — portalled to <body> with fixed positioning so it
+          escapes the audience-card's overflow clipping (was getting cut off
+          and its background bled with the parent card colour, making the
+          TOPIC label below look like it sat inside the dropdown). */}
+      {mounted && showResults &&
+        createPortal(
+          <div
+            ref={panelRef}
+            role="listbox"
+            style={{
+              position: 'fixed',
+              top: panelPos.top,
+              left: panelPos.left,
+              width: panelPos.width,
+              zIndex: 9999,
+            }}
+            className="max-h-72 overflow-y-auto rounded-xl border border-border bg-popover shadow-2xl shadow-black/15"
+          >
+            {results.length === 0 ? (
+              <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                {loading ? 'Searching…' : search ? 'No matching users' : 'Start typing to search'}
+              </div>
+            ) : (
+              <ul className="py-1">
+                {results.map((u) => (
+                  <li key={u.id}>
+                    <button
+                      type="button"
+                      onClick={() => add(u)}
+                      className="flex w-full items-center gap-3 px-3 py-2 text-left text-sm transition hover:bg-accent"
+                    >
+                      <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                        {initials(u.name)}
                       </div>
-                      <div className="truncate text-xs text-muted-foreground">{u.email}</div>
-                    </div>
-                    <Check className="size-4 shrink-0 text-primary opacity-0 transition group-hover:opacity-100" />
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="truncate font-medium text-foreground">{u.name}</span>
+                          <span className={`shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${ROLE_BADGE_BG[u.role]}`}>
+                            {humanRole(u.role)}
+                          </span>
+                        </div>
+                        <div className="truncate text-xs text-muted-foreground">{u.email}</div>
+                      </div>
+                      <Check className="size-4 shrink-0 text-primary opacity-0 transition group-hover:opacity-100" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>,
+          document.body
+        )}
     </div>
   );
+}
+
+// `useSyncExternalStore` is the React-blessed way to flip a value between
+// SSR and client without tripping the hydration mismatch warning. Here we
+// only render the portal post-hydration so document.body exists.
+const NO_OP = (): (() => void) => () => {};
+function useMounted(): boolean {
+  return useSyncExternalStore(NO_OP, () => true, () => false);
 }

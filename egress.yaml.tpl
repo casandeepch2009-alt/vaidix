@@ -4,14 +4,30 @@
 # Records rooms to MP4 files in /output (mapped to E:/vaidix-data/recordings/raw)
 # Post-processing pipeline (BullMQ) picks up finished files for transcoding
 
+# api_key/api_secret here must match `keys:` in livekit.prod.yaml. Both files
+# are operator-rotated together; secrets management is a separate concern from
+# the ws_url fix in this template revision.
 api_key: devkey
 api_secret: secret_change_me_in_week_0_day_5_32chars_min
-# Local-dev: use the host LAN IP so the egress Chrome bot connects to the
-# same address LiveKit advertises in ICE candidates (node_ip in livekit.yaml).
-# Mismatched URLs (service-name here vs LAN IP in node_ip) caused the bot's
-# WebSocket to time out with "page load error: websocket url timeout reached".
-# On production: replace with your public TLS-fronted URL (wss://lms.example.com).
-ws_url: ws://192.168.1.7:7880
+# WebSocket URL the egress Chrome bot uses to join the LiveKit room.
+#
+# This is the SDK-internal URL, not what the browser sees:
+#   - On a single-host Docker deployment (prod, dev with `docker compose up`):
+#     `ws://livekit:7880` — Docker resolves the `livekit` service hostname on
+#     vaidix-net. Faster + bypasses TLS termination.
+#   - On a developer laptop running LiveKit natively + the rest in Docker:
+#     `ws://<host LAN IP>:7880` so the egress container reaches the host's
+#     bound port via the Docker NAT-loopback.
+#   - Cloud setups with split LiveKit: the public `wss://livekit.example.com`
+#     URL is also fine; egress will TLS-handshake just like a normal client.
+#
+# History: this used to be hardcoded to `ws://192.168.1.7:7880` (a developer's
+# LAN IP) which silently shipped to prod. The egress bot then tried to reach a
+# non-existent address, timed out after ~15 s with "Start signal not received",
+# and aborted. Every track_published webhook re-triggered the same loop, so
+# the egress-aborted log filled with one failure every ~20 s. Sourcing from
+# .env via render-configs.sh makes the value explicit per environment.
+ws_url: ${LIVEKIT_INTERNAL_WS_URL}
 
 redis:
   address: redis:6379

@@ -49,6 +49,8 @@ const KIND_LABELS: Record<string, string> = {
   'session.rescheduled': 'Session rescheduled',
   'session.cancelled':   'Session cancelled',
   'session.reminder':    'Session reminder',
+  'session.started':     'Session started',
+  'session.ended':       'Session ended',
   'prequestion.posted':  'New pre-class question',
   'invitation.accepted': 'Invitation accepted',
   'objective.achieved':  'Objective marked',
@@ -62,6 +64,8 @@ const PREF_LABELS: Record<string, string> = {
   'session.rescheduled': 'Session rescheduled',
   'session.cancelled':   'Session cancelled',
   'session.reminder':    'Session reminders',
+  'session.started':     'Session went live',
+  'session.ended':       'Session ended',
   'prequestion.posted':  'New pre-class questions',
   'invitation.accepted': 'Invitation accepted',
   'objective.achieved':  'Learning objective achieved',
@@ -71,6 +75,7 @@ const PREF_LABELS: Record<string, string> = {
 const SESSION_KINDS = new Set([
   'session.proposed', 'session.approved', 'session.rejected',
   'session.rescheduled', 'session.cancelled', 'session.reminder',
+  'session.started', 'session.ended',
 ])
 const QUESTION_KINDS = new Set(['prequestion.posted'])
 const ACHIEVEMENT_KINDS = new Set(['objective.achieved'])

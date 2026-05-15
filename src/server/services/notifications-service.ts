@@ -78,7 +78,13 @@ function resolveLinkUrl(kind: string, payload: Prisma.JsonValue): string | null 
     case 'session.rescheduled':
     case 'session.cancelled':
     case 'session.reminder':
+    case 'session.started':
       return sessionId ? `/classroom/${sessionId}` : '/calendar';
+    case 'session.ended':
+      // Deep-link to the recording page — by the time the user clicks the
+      // bell, the transcribe-worker has usually run and the playback view is
+      // the most useful destination.
+      return sessionId ? `/classroom/${sessionId}/recording` : '/calendar';
     case 'prequestion.posted':
       return sessionId ? `/classroom/${sessionId}/pre-questions/dashboard` : null;
     case 'invitation.accepted':
@@ -169,6 +175,8 @@ export const KNOWN_NOTIFICATION_KINDS = [
   'session.rescheduled',
   'session.cancelled',
   'session.reminder',
+  'session.started',
+  'session.ended',
   'prequestion.posted',
   'invitation.accepted',
   'objective.achieved',

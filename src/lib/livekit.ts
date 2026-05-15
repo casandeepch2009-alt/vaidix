@@ -76,7 +76,13 @@ export async function mintLiveKitToken(opts: TokenOptions): Promise<string> {
     room: opts.roomName,
     canPublish: !isViewer,
     canSubscribe: true,
-    canPublishData: !isViewer,
+    // Chat + presence + reaction signals all ride the LiveKit data channel.
+    // Webinar attendees and other "viewer" roles still need to broadcast
+    // those (their messages must reach the host and other attendees in
+    // realtime, QA #11). The persistence + abuse guard lives at the API
+    // layer (see /api/classroom/sessions/[id]/chat/route.ts), not in the
+    // LiveKit grant — so opening canPublishData is safe for every role.
+    canPublishData: true,
     canPublishSources,
     roomAdmin: isAdminish,
     canUpdateOwnMetadata: true,

@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParticipants, useLocalParticipant } from '@livekit/components-react'
 import { Hand, MicOff, UserMinus, UserPlus, Check, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useVideoRoomClient, type PendingAdmission } from './video-room-client'
+import { playWaitingRoomKnock } from './notification-sounds'
 
 export function ParticipantSidebar({
   sessionId,
@@ -37,6 +38,15 @@ export function ParticipantSidebar({
   const { localParticipant } = useLocalParticipant()
   const client = useVideoRoomClient()
   const [pending, setPending] = useState<PendingAdmission[]>([])
+  // Track admission ids the host has already been notified about so a chime
+  // only fires for *new* arrivals. Plain `pending.length` increases would
+  // mis-fire when the list shrinks (admit/deny) then a different guest
+  // arrives at the same size. Using ids handles concurrent arrival + admit
+  // within the same 5 s poll window correctly.
+  const seenPendingIdsRef = useRef<Set<string>>(new Set())
+  // Skip the first fetch so a moderator opening the page mid-call does not
+  // hear a knock for guests who were already in the queue.
+  const primedRef = useRef(false)
 
   // Poll pending admissions if we can moderate
   useEffect(() => {
@@ -45,7 +55,25 @@ export function ParticipantSidebar({
     const fetchPending = async () => {
       try {
         const list = await client.loadPendingAdmissions(sessionId)
-        if (mounted) setPending(list)
+        if (!mounted) return
+        // Detect new arrivals before committing state — gives us one
+        // boolean to decide whether to chime, regardless of how the
+        // list mutated (1 added + 0 removed = chime, 1 added + 1 removed
+        // = chime, all-removed-then-different-arrives = chime).
+        const currentIds = new Set(list.map((p) => p.id))
+        let hasNewArrival = false
+        for (const id of currentIds) {
+          if (!seenPendingIdsRef.current.has(id)) {
+            hasNewArrival = true
+            break
+          }
+        }
+        seenPendingIdsRef.current = currentIds
+        setPending(list)
+        if (hasNewArrival && primedRef.current && list.length > 0) {
+          playWaitingRoomKnock()
+        }
+        primedRef.current = true
       } catch {
         /* ignore */
       }

@@ -158,16 +158,22 @@ export function AnnotationOverlay({ sessionId, isHostish }: AnnotationOverlayPro
     setDrawingActive(true)
   }
   function onPointerMove(e: React.PointerEvent) {
-    if (!drawingStrokeRef.current) return
+    const draft = drawingStrokeRef.current
+    if (!draft) return
     const next = clientToNormalised(e.clientX, e.clientY)
-    drawingStrokeRef.current.points.push(next)
-    // Force a re-render by mutating-then-cloning the in-progress stroke.
+    draft.points.push(next)
+    // Capture `draft` outside the updater. Under React 19's concurrent
+    // rendering the updater can be re-invoked after the event handler returns;
+    // if pointerup has nulled the ref by then, reading `.id` inside the
+    // updater crashes (`Cannot read properties of null (reading 'id')`).
+    const draftId = draft.id
+    const pointsSnapshot = [...draft.points]
     setStrokes((prev) => {
-      const draft = drawingStrokeRef.current!
-      const existingIdx = prev.findIndex((s) => s.id === draft.id)
-      if (existingIdx === -1) return [...prev, { ...draft, points: [...draft.points] }]
+      const existingIdx = prev.findIndex((s) => s.id === draftId)
+      const next = { ...draft, points: pointsSnapshot }
+      if (existingIdx === -1) return [...prev, next]
       const copy = [...prev]
-      copy[existingIdx] = { ...draft, points: [...draft.points] }
+      copy[existingIdx] = next
       return copy
     })
   }
