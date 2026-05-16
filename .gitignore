@@ -54,6 +54,8 @@ appendonly.aof
 
 # Rendered runtime configs (templates committed as .tpl, output gitignored)
 egress.yaml
+turnserver.conf
+livekit.prod.yaml
 
 # Per-deployment state written by scripts/deploy-https.sh
 .deployed-domain

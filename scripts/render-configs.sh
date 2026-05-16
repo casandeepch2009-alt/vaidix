@@ -2,16 +2,29 @@
 # ════════════════════════════════════════════════════════════════════════════
 # Vaidix — render runtime config files from .tpl templates
 # ════════════════════════════════════════════════════════════════════════════
-# Some service config files (egress.yaml) need secrets that the upstream
-# binaries don't read from env vars (verified). For those we keep a `.tpl`
-# version in git with `${VAR}` placeholders, gitignore the rendered file,
-# and run this script to substitute env values at deploy time.
+# Several service config files (egress.yaml, turnserver.conf, livekit.prod.yaml)
+# need secrets that the upstream binaries don't read from env vars directly.
+# For each we keep a `.tpl` version in git with `${VAR}` placeholders,
+# gitignore the rendered output, and run this script to substitute env
+# values at deploy time.
 #
 # Usage (run from repo root):
 #   ./scripts/render-configs.sh
 #
-# Run before `docker compose up` (the egress service mounts ./egress.yaml).
-# Re-running overwrites the rendered file — safe and idempotent.
+# Run before `docker compose up` (the services bind-mount the rendered files).
+# Re-running overwrites the rendered outputs — safe and idempotent.
+#
+# REFUSES TO RENDER when:
+#   - required env var is empty / unset
+#   - required env var contains the substring "CHANGE_ME"
+#   - LIVEKIT_INTERNAL_WS_URL doesn't start with ws:// or wss://
+#
+# These guards exist because every "weird" outage in this stack has been a
+# placeholder shipping to prod (the v2.4 egress storm = LAN IP in egress.yaml
+# never replaced; the v2.7 TURN regression = CHANGE_ME_STRONG_TURN_PASSWORD
+# literal staying in turnserver.conf because the operator forgot the sed).
+# Validating up-front means a missing/placeholder secret aborts the deploy
+# loudly here, not silently at runtime.
 # ════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -38,21 +51,26 @@ set -a
 . .env
 set +a
 
-# Required env vars per template — checked up-front so a typo or fresh
-# deployment fails loudly here instead of producing a half-rendered yaml that
-# silently breaks the egress bot (the original "ws://" trailing-empty-value
-# bug, which only surfaced as repeating "Start signal not received" aborts).
+# ─── Validation guards ─────────────────────────────────────────────────────
+
 require_env() {
   local name="$1"
-  if [ -z "${!name:-}" ]; then
+  local value="${!name:-}"
+  if [ -z "$value" ]; then
     echo "[render-configs] required env var $name is empty or unset in .env" >&2
     exit 1
   fi
+  case "$value" in
+    *CHANGE_ME*)
+      echo "[render-configs] env var $name still contains placeholder 'CHANGE_ME' — rotate it in .env first" >&2
+      echo "[render-configs]   current value: $value" >&2
+      exit 1
+      ;;
+  esac
 }
 
+# egress.yaml — internal LiveKit URL for the egress Chrome bot
 require_env LIVEKIT_INTERNAL_WS_URL
-# Sanity: must look like ws://… or wss://…, not a placeholder. Catches the
-# common copy-paste of leaving the var blank or pointing at a dev LAN IP.
 case "$LIVEKIT_INTERNAL_WS_URL" in
   ws://*|wss://*) ;;
   *)
@@ -61,23 +79,47 @@ case "$LIVEKIT_INTERNAL_WS_URL" in
     ;;
 esac
 
-# List of (template, output) pairs. Add more here as needed.
+# turnserver.conf + livekit.prod.yaml — shared TURN credentials and addressing
+require_env TURN_SHARED_SECRET
+require_env COTURN_EXTERNAL_IP
+require_env COTURN_REALM
+# Sanity: COTURN_EXTERNAL_IP should look like an IPv4. Catches the common
+# error of putting the DNS name there ("turn.vaidix..." in COTURN_EXTERNAL_IP
+# breaks coturn's allocation responses).
+case "$COTURN_EXTERNAL_IP" in
+  *[!0-9.]*)
+    echo "[render-configs] COTURN_EXTERNAL_IP should be a bare IPv4, got: $COTURN_EXTERNAL_IP" >&2
+    echo "[render-configs]   (the DNS name goes in COTURN_REALM)" >&2
+    exit 1
+    ;;
+esac
+
+# livekit.prod.yaml — token-mint keys (same as app .env)
+require_env LIVEKIT_API_KEY
+require_env LIVEKIT_API_SECRET
+
+# ─── Render templates ──────────────────────────────────────────────────────
+
 RENDERED=()
 render() {
-  local src="$1" out="$2"
+  local src="$1" out="$2" mode="${3:-644}"
   if [ ! -f "$src" ]; then
     echo "[render-configs] template missing: $src" >&2
     exit 1
   fi
   envsubst < "$src" > "$out"
-  # 644 not 600: bind-mounted into containers running as non-root uids
+  # mode 644 by default — bind-mounted into containers running as non-root uids
   # (e.g. egress runs as its own user). 600 owned by host user blocks reads
   # from inside the container. The host directory should be access-controlled.
-  chmod 644 "$out"
+  # turnserver.conf carries the TURN password so we tighten to 640 (coturn
+  # runs as root in network_mode: host, so it can still read).
+  chmod "$mode" "$out"
   RENDERED+=("$out")
 }
 
-render egress.yaml.tpl egress.yaml
+render egress.yaml.tpl        egress.yaml
+render turnserver.conf.tpl    turnserver.conf       640
+render livekit.prod.yaml.tpl  livekit.prod.yaml     640
 
 echo "[render-configs] rendered:"
 printf '  %s\n' "${RENDERED[@]}"
