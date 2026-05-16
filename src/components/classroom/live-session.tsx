@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   LiveKitRoom,
@@ -12,6 +12,7 @@ import {
   useTracks,
   useLocalParticipant,
   useRoomContext,
+  useDataChannel,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { ConnectionState, DisconnectReason, Track } from 'livekit-client'
@@ -20,7 +21,7 @@ import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
   PhoneOff, Hand, MessageSquare, Users, Trophy,
   LayoutGrid, Zap, Brain, X, Settings, Link2, ChevronDown,
-  NotebookPen, Pencil, Loader2, FileDown,
+  NotebookPen, Pencil, Loader2, FileDown, Timer, AlarmClock,
 } from 'lucide-react'
 import { WaitingRoom } from './waiting-room'
 import { PreJoin } from './pre-join'
@@ -518,6 +519,14 @@ function ConnectionBanner({
 // hooks, coach) appear in the header icon strip.
 const TOOLBAR_TAB_IDS = new Set(['chat', 'participants', 'notes', 'whiteboard', 'leaderboard'])
 
+function fmtElapsed(sec: number): string {
+  const h = Math.floor(sec / 3600)
+  const m = Math.floor((sec % 3600) / 60)
+  const s = sec % 60
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+  return `${m}:${String(s).padStart(2, '0')}`
+}
+
 // ----------------------------------------------------------------------------
 // InnerRoom — lives inside LiveKitRoom context so hooks work
 // ----------------------------------------------------------------------------
@@ -576,6 +585,34 @@ function InnerRoom({
     saveCaptionPrefs(captionsEnabled, l)
   }
 
+  // ─── Issue 23: Call duration timer ────────────────────────────────────────
+  const joinedAtMsRef = useRef(Date.now())
+  const [elapsedSec, setElapsedSec] = useState(0)
+  useEffect(() => {
+    const iv = setInterval(() => {
+      setElapsedSec(Math.floor((Date.now() - joinedAtMsRef.current) / 1000))
+    }, 1000)
+    return () => clearInterval(iv)
+  }, [])
+
+  // ─── Issue 24: 5-minute end warning ────────────────────────────────────────
+  // Recomputed every second because elapsedSec ticks every second.
+  const scheduledEndMs = new Date(session.scheduledEnd).getTime()
+  const remainingSec = Math.max(0, Math.floor((scheduledEndMs - Date.now()) / 1000))
+  const showEndWarning = remainingSec > 0 && remainingSec <= 300
+
+  // ─── Issue 22: Chat notification badge ────────────────────────────────────
+  const [unreadChatCount, setUnreadChatCount] = useState(0)
+  const { message: lastChatDc } = useDataChannel('chat')
+  const lastChatDcRef = useRef<typeof lastChatDc>(undefined)
+  useEffect(() => {
+    if (!lastChatDc || lastChatDc === lastChatDcRef.current) return
+    lastChatDcRef.current = lastChatDc
+    // Chat is visible — no badge needed
+    if (sidebarOpen && activeTab === 'chat') return
+    setUnreadChatCount((n) => n + 1)
+  }, [lastChatDc, sidebarOpen, activeTab])
+
   const tabs = [
     { id: 'participants', label: 'People', icon: Users },
     { id: 'chat', label: 'Chat', icon: MessageSquare },
@@ -588,8 +625,13 @@ function InnerRoom({
   ]
 
   const openTab = (tab: string) => {
-    setActiveTab(tab)
-    setSidebarOpen(true)
+    if (tab === 'chat') setUnreadChatCount(0)
+    if (sidebarOpen && activeTab === tab) {
+      setSidebarOpen(false)
+    } else {
+      setActiveTab(tab)
+      setSidebarOpen(true)
+    }
   }
 
   return (
@@ -611,6 +653,26 @@ function InnerRoom({
       {/* Top gradient vignette */}
       <div className="absolute inset-x-0 top-0 h-28 bg-linear-to-b from-black/75 via-black/30 to-transparent z-10 pointer-events-none" />
 
+      {/* Issue 24: 5-minute end warning banner */}
+      <AnimatePresence>
+        {showEndWarning && (
+          <motion.div
+            initial={{ y: -32, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -32, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+            className="absolute top-14 inset-x-0 z-30 flex justify-center pointer-events-none"
+          >
+            <div className="flex items-center gap-2 bg-amber-400/90 backdrop-blur-md rounded-full px-5 py-2 text-sm font-semibold text-zinc-900 shadow-lg shadow-amber-500/30">
+              <AlarmClock className="w-4 h-4 animate-pulse" />
+              {remainingSec < 60
+                ? `Less than 1 min remaining`
+                : `${Math.ceil(remainingSec / 60)} min${Math.ceil(remainingSec / 60) === 1 ? '' : 's'} remaining`}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Top bar */}
       <div className="absolute top-0 inset-x-0 z-20 flex items-start justify-between px-4 pt-3">
         <div className="flex items-center gap-2">
@@ -618,6 +680,11 @@ function InnerRoom({
           <div className="flex items-center gap-1.5 bg-black/50 backdrop-blur-md border border-white/10 rounded-lg px-2.5 py-1.5">
             <span className="inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
             <span className="text-[10px] font-bold text-white tracking-widest">LIVE</span>
+          </div>
+          {/* Issue 23: Call duration timer */}
+          <div className="flex items-center gap-1.5 bg-black/50 backdrop-blur-md border border-white/10 rounded-lg px-2.5 py-1.5">
+            <Timer className="w-3 h-3 text-white/50" />
+            <span className="text-[10px] font-medium text-white/75 tabular-nums">{fmtElapsed(elapsedSec)}</span>
           </div>
           {/* Session title */}
           <div className="bg-black/30 backdrop-blur-md border border-white/7 rounded-lg px-3 py-1.5 max-w-65">
@@ -667,6 +734,7 @@ function InnerRoom({
         activeTab={activeTab}
         onOpenTab={openTab}
         onLeave={onLeave}
+        unreadChatCount={unreadChatCount}
       />
 
       {/* Sidebar backdrop (mobile) */}
@@ -712,7 +780,7 @@ function InnerRoom({
                       <button
                         key={tab.id}
                         title={tab.label}
-                        onClick={() => setActiveTab(tab.id)}
+                        onClick={() => openTab(tab.id)}
                         className={cn(
                           'w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-150',
                           isActive
@@ -831,6 +899,7 @@ function ControlBar({
   activeTab,
   onOpenTab,
   onLeave,
+  unreadChatCount = 0,
 }: {
   sessionId: string
   /// Friendly session title for the PiP mini-window. Threaded down from
@@ -845,22 +914,35 @@ function ControlBar({
   activeTab: string
   onOpenTab: (tab: string) => void
   onLeave: () => void
+  unreadChatCount?: number
 }) {
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant()
   const room = useRoomContext()
   const client = useVideoRoomClient()
   const [isSharing, setIsSharing] = useState(false)
+  const [sharingLoading, setSharingLoading] = useState(false)
   const [handRaised, setHandRaised] = useState(false)
   const [bgPickerOpen, setBgPickerOpen] = useState(false)
-  // Surfaces "no microphone / no camera / permission denied" errors as a
-  // small toast instead of letting LiveKit's getUserMedia() rejection bubble
-  // up to Next.js's error overlay. Cleared after 4s.
+  // Surfaces getUserMedia errors as a toast. Hard-blocked = device permanently
+  // unavailable (not found / permission denied) → button stays visually blocked.
   const [deviceError, setDeviceError] = useState<string | null>(null)
+  const [micBlocked, setMicBlocked] = useState(false)
+  const [camBlocked, setCamBlocked] = useState(false)
+  // Track auto-clear timers in refs so we can clear on unmount or before
+  // arming a fresh timer — otherwise rapid re-blocks leak stacked timers
+  // and a "set state on unmounted component" warning fires if the user
+  // leaves the room within 8s of being blocked.
+  const micUnblockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const camUnblockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!deviceError) return
-    const t = setTimeout(() => setDeviceError(null), 4000)
+    const t = setTimeout(() => setDeviceError(null), 6000)
     return () => clearTimeout(t)
   }, [deviceError])
+  useEffect(() => () => {
+    if (micUnblockTimerRef.current) clearTimeout(micUnblockTimerRef.current)
+    if (camUnblockTimerRef.current) clearTimeout(camUnblockTimerRef.current)
+  }, [])
 
   function describeMediaError(err: unknown, kind: 'microphone' | 'camera'): string {
     const e = err as { name?: string; message?: string }
@@ -878,20 +960,38 @@ function ControlBar({
   }
 
   const toggleMic = useCallback(async () => {
+    if (micBlocked) return
     try {
       await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled)
     } catch (err) {
-      setDeviceError(describeMediaError(err, 'microphone'))
+      const msg = describeMediaError(err, 'microphone')
+      setDeviceError(msg)
+      const e = err as { name?: string }
+      if (e?.name === 'NotFoundError' || e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
+        setMicBlocked(true)
+        // Auto-clear after 8s — user may reset browser permissions or plug in a
+        // device and retry, so we don't leave the button permanently disabled.
+        if (micUnblockTimerRef.current) clearTimeout(micUnblockTimerRef.current)
+        micUnblockTimerRef.current = setTimeout(() => setMicBlocked(false), 8_000)
+      }
     }
-  }, [isMicrophoneEnabled, localParticipant])
+  }, [isMicrophoneEnabled, localParticipant, micBlocked])
 
   const toggleCamera = useCallback(async () => {
+    if (camBlocked) return
     try {
       await localParticipant.setCameraEnabled(!isCameraEnabled)
     } catch (err) {
-      setDeviceError(describeMediaError(err, 'camera'))
+      const msg = describeMediaError(err, 'camera')
+      setDeviceError(msg)
+      const e = err as { name?: string }
+      if (e?.name === 'NotFoundError' || e?.name === 'NotAllowedError' || e?.name === 'SecurityError') {
+        setCamBlocked(true)
+        if (camUnblockTimerRef.current) clearTimeout(camUnblockTimerRef.current)
+        camUnblockTimerRef.current = setTimeout(() => setCamBlocked(false), 8_000)
+      }
     }
-  }, [isCameraEnabled, localParticipant])
+  }, [isCameraEnabled, localParticipant, camBlocked])
 
   // Sync hand-raise state with LiveKit participant metadata. metadata is an
   // externally-mutated property on the LiveKit Participant — this effect is
@@ -933,10 +1033,16 @@ function ControlBar({
   }, [handRaised, localParticipant, sessionId, room, client])
 
   const toggleScreen = useCallback(async () => {
+    setSharingLoading(true)
     try {
       const next = !isSharing
       await localParticipant.setScreenShareEnabled(next)
-      setIsSharing(next)
+      // LiveKit resolves successfully even when the user cancels the OS
+      // source picker (no track gets published). Re-check the publication
+      // before flipping isSharing so the button doesn't display "Stop
+      // share" with no actual track behind it.
+      const pub = localParticipant.getTrackPublication(Track.Source.ScreenShare)
+      setIsSharing(next ? !!pub && !pub.isMuted : false)
     } catch (err) {
       // User-cancel via the OS picker is the common case → silent.
       // Real errors (no permission, no display capture support) show as toast.
@@ -944,6 +1050,8 @@ function ControlBar({
       if (e?.name && e.name !== 'NotAllowedError') {
         setDeviceError(describeMediaError(err, 'camera'))
       }
+    } finally {
+      setSharingLoading(false)
     }
   }, [isSharing, localParticipant])
 
@@ -978,10 +1086,11 @@ function ControlBar({
             icon={isMicrophoneEnabled
               ? <Mic className="w-5 h-5" />
               : <MicOff className="w-5 h-5" />}
-            label={isMicrophoneEnabled ? 'Mute' : 'Unmute'}
-            variant={isMicrophoneEnabled ? 'active' : 'danger'}
+            label={micBlocked ? 'No mic' : isMicrophoneEnabled ? 'Mute' : 'Unmute'}
+            variant={micBlocked ? 'danger' : isMicrophoneEnabled ? 'active' : 'danger'}
             color="green"
             pulse={isMicrophoneEnabled}
+            blocked={micBlocked}
           />
         )}
 
@@ -1002,10 +1111,10 @@ function ControlBar({
               {/* Main camera toggle */}
               <button
                 onClick={toggleCamera}
-                title={isCameraEnabled ? 'Stop video' : 'Start video'}
+                title={camBlocked ? 'No camera found — check browser permissions' : isCameraEnabled ? 'Stop video' : 'Start video'}
                 className={cn(
                   'w-10 h-12 flex items-center justify-center transition-colors duration-200 pl-2',
-                  isCameraEnabled ? 'text-sky-200' : 'text-red-300'
+                  camBlocked ? 'text-red-400 opacity-60 cursor-not-allowed' : isCameraEnabled ? 'text-sky-200' : 'text-red-300'
                 )}
               >
                 {isCameraEnabled
@@ -1045,12 +1154,15 @@ function ControlBar({
             <Divider />
             <CtrlBtn
               onClick={toggleScreen}
-              icon={isSharing
-                ? <MonitorOff className="w-5 h-5" />
-                : <Monitor className="w-5 h-5" />}
-              label={isSharing ? 'Stop share' : 'Share screen'}
+              icon={sharingLoading
+                ? <Loader2 className="w-5 h-5 animate-spin" />
+                : isSharing
+                  ? <MonitorOff className="w-5 h-5" />
+                  : <Monitor className="w-5 h-5" />}
+              label={sharingLoading ? 'Starting…' : isSharing ? 'Stop share' : 'Share screen'}
               variant={isSharing ? 'active' : 'default'}
               color="violet"
+              blocked={sharingLoading}
             />
           </>
         )}
@@ -1071,12 +1183,13 @@ function ControlBar({
 
         <Divider />
 
-        {/* Chat */}
+        {/* Chat — badge shows unread message count when panel is closed */}
         <CtrlBtn
           onClick={() => onOpenTab('chat')}
           icon={<MessageSquare className="w-5 h-5" />}
           label="Chat"
           variant={sidebarOpen && activeTab === 'chat' ? 'active' : 'default'}
+          badge={unreadChatCount > 0 && !(sidebarOpen && activeTab === 'chat') ? unreadChatCount : 0}
         />
 
         {/* People */}
@@ -1159,6 +1272,8 @@ function CtrlBtn({
   variant = 'default',
   color = 'default',
   pulse = false,
+  blocked = false,
+  badge = 0,
 }: {
   onClick: () => void
   icon: React.ReactNode
@@ -1166,6 +1281,8 @@ function CtrlBtn({
   variant?: CtrlVariant
   color?: CtrlColor
   pulse?: boolean
+  blocked?: boolean
+  badge?: number
 }) {
   const circleCls = cn(
     'relative w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200',
@@ -1187,12 +1304,13 @@ function CtrlBtn({
 
   return (
     <motion.button
-      onClick={onClick}
+      onClick={blocked ? undefined : onClick}
       title={label}
-      whileHover={{ scale: 1.08 }}
-      whileTap={{ scale: 0.91 }}
+      aria-disabled={blocked}
+      whileHover={blocked ? undefined : { scale: 1.08 }}
+      whileTap={blocked ? undefined : { scale: 0.91 }}
       transition={{ type: 'spring', stiffness: 420, damping: 22 }}
-      className="flex flex-col items-center gap-1.5 group outline-none"
+      className={cn('flex flex-col items-center gap-1.5 group outline-none', blocked && 'cursor-not-allowed opacity-50')}
     >
       <div className={circleCls}>
         {icon}
@@ -1202,6 +1320,12 @@ function CtrlBtn({
             transition={{ repeat: Infinity, duration: 1.8, ease: 'easeInOut' }}
             className="absolute inset-0 rounded-full border border-emerald-400/40 pointer-events-none"
           />
+        )}
+        {/* Issue 22: unread badge */}
+        {badge > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-4.5 h-4.5 rounded-full bg-teal-400 text-zinc-900 text-[10px] font-bold flex items-center justify-center px-1 shadow-md shadow-black/40 pointer-events-none">
+            {badge > 99 ? '99+' : badge}
+          </span>
         )}
       </div>
       <span className="text-[11px] text-white/40 group-hover:text-white/70 transition-colors leading-none">

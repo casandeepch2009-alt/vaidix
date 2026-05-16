@@ -52,27 +52,37 @@ function runFfmpeg(args: string[]): Promise<void> {
   });
 }
 
+interface ProbeResult {
+  hasVideo: boolean;
+  durationSec: number | null;
+}
+
 /**
- * Probe an MP4 with `ffprobe` to figure out which streams it has. Audio-only
- * recordings (LiveKit Egress with audioOnly:true) have no video stream — we
- * need a different HLS ladder for those.
+ * Probe an MP4 with ffmpeg to determine:
+ *   - Whether it contains a video stream (decides audio-only vs full HLS ladder)
+ *   - The actual duration in seconds (authoritative source of truth — not the
+ *     egress webhook duration field which is sometimes absent or nanosecond-encoded)
  *
- * ffprobe ships in the same ffmpeg-static binary directory; if a separate
- * ffprobe binary isn't available we fall back to ffmpeg with -i and parse.
- * For simplicity we just use the ffmpeg binary in "info" mode.
+ * Uses `ffmpeg -i` (stderr info mode) instead of ffprobe so no extra binary
+ * is needed. ffmpeg always exits non-zero in this mode; we parse stderr regardless.
  */
-async function probeHasVideo(inputPath: string): Promise<boolean> {
+async function probeInput(inputPath: string): Promise<ProbeResult> {
   return new Promise((resolve) => {
     let stderr = '';
-    const child = spawn(FFMPEG_BIN, ['-hide_banner', '-i', inputPath, '-f', 'null', '-'], {
+    const child = spawn(FFMPEG_BIN, ['-hide_banner', '-i', inputPath], {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
-    child.stderr?.on('data', (d) => { stderr += d.toString(); });
+    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString(); });
     child.on('exit', () => {
-      // ffmpeg always exits non-zero with `-f null -`; parse stderr regardless.
-      resolve(/Stream #\d+:\d+(?:\([^)]*\))?: Video/i.test(stderr));
+      const hasVideo = /Stream #\d+:\d+(?:\([^)]*\))?: Video/i.test(stderr);
+      // "Duration: HH:MM:SS.ss," — ffmpeg always prints this for valid media
+      const m = stderr.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+      const durationSec = m
+        ? Math.round(Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]))
+        : null;
+      resolve({ hasVideo, durationSec });
     });
-    child.on('error', () => resolve(false));
+    child.on('error', () => resolve({ hasVideo: false, durationSec: null }));
   });
 }
 
@@ -119,7 +129,9 @@ async function transcodeJob(data: TranscodeJobData): Promise<{ recordingId: stri
 
     // 2. Probe the input — audio-only egress recordings (recordingEnabled
     //    sessions where no one starts video) have no video stream.
-    const hasVideo = await probeHasVideo(inputPath);
+    // Also captures the authoritative duration — the egress webhook duration
+    // field is often absent or nanosecond-encoded incorrectly.
+    const { hasVideo, durationSec: probedDurationSec } = await probeInput(inputPath);
 
     // Ensure the HLS output dir exists; FFmpeg won't create deep paths on its own.
     await rm(hlsDir, { recursive: true, force: true });
@@ -200,11 +212,15 @@ async function transcodeJob(data: TranscodeJobData): Promise<{ recordingId: stri
     }
     const hlsPath = `${hlsKeyPrefix}/master.m3u8`;
 
-    // 4. Mark recording transcribing + enqueue transcribe
+    // 4. Mark recording transcribing + enqueue transcribe.
+    // Always persist probedDurationSec — it's authoritative (from the actual MP4
+    // file). The egress webhook may have set durationSec already, but it can be
+    // wrong (LiveKit sometimes reports duration in nanoseconds or omits it).
     await db.recording.update({
       where: { id: recording.id },
       data: {
         hlsPath,
+        ...(probedDurationSec != null ? { durationSec: probedDurationSec } : {}),
         status: RecordingStatus.TRANSCRIBING,
         pipelineStage: RecordingStatus.TRANSCRIBING,
         transcodeFinishedAt: new Date(),

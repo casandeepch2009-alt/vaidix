@@ -4,11 +4,13 @@
 # Records rooms to MP4 files in /output (mapped to E:/vaidix-data/recordings/raw)
 # Post-processing pipeline (BullMQ) picks up finished files for transcoding
 
-# api_key/api_secret here must match `keys:` in livekit.prod.yaml. Both files
-# are operator-rotated together; secrets management is a separate concern from
-# the ws_url fix in this template revision.
-api_key: devkey
-api_secret: secret_change_me_in_week_0_day_5_32chars_min
+# api_key/api_secret here MUST match `keys:` in livekit.prod.yaml.
+# Both are rendered from the SAME .env values — they cannot drift.
+# A mismatch causes every egress job to fail with "Start signal not received":
+# the egress Chrome bot connects but LiveKit refuses the token it mints,
+# so the bot is never admitted to the room and the egress times out.
+api_key: ${LIVEKIT_API_KEY}
+api_secret: ${LIVEKIT_API_SECRET}
 # WebSocket URL the egress Chrome bot uses to join the LiveKit room.
 #
 # This is the SDK-internal URL, not what the browser sees:

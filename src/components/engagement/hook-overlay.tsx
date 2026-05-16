@@ -111,15 +111,18 @@ export function HookOverlay({ sessionId }: { sessionId: string }) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-xl">
+    // Explicit dark colours — LiveKit's data-lk-theme overrides CSS variables
+    // inside the live-session shell, making bg-card / text-foreground resolve
+    // to near-identical values and rendering the modal content invisible.
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm">
+      <div className="w-full max-w-md rounded-2xl border border-white/10 bg-zinc-900 p-6 shadow-2xl shadow-black/60 text-white">
         <div className="mb-3 flex items-center justify-between">
-          <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+          <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-xs font-semibold text-amber-300">
             {activeHook.kind.replace(/_/g, ' ')}
           </span>
-          <span className="text-xs text-muted-foreground">Quick check</span>
+          <span className="text-xs text-white/50">Quick check</span>
         </div>
-        <p className="text-base font-medium leading-relaxed">{activeHook.prompt}</p>
+        <p className="text-base font-semibold leading-relaxed text-white">{activeHook.prompt}</p>
 
         {isFreeForm ? (
           <div className="mt-4 space-y-2">
@@ -129,7 +132,7 @@ export function HookOverlay({ sessionId }: { sessionId: string }) {
               value={freeText}
               onChange={(e) => setFreeText(e.target.value)}
               placeholder="Your answer…"
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              className="w-full rounded-lg border border-white/15 bg-white/8 px-3 py-2 text-sm text-white placeholder:text-white/35 outline-none focus:border-teal-400/60 focus:ring-2 focus:ring-teal-400/20"
               maxLength={200}
               disabled={submitting}
             />
@@ -137,7 +140,7 @@ export function HookOverlay({ sessionId }: { sessionId: string }) {
               type="button"
               disabled={submitting || !freeText.trim()}
               onClick={() => submit(freeText.trim())}
-              className="w-full rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background hover:opacity-90 disabled:opacity-50"
+              className="w-full rounded-lg bg-teal-500 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-400 disabled:opacity-40"
             >
               {submitting ? 'Submitting…' : 'Submit'}
             </button>
@@ -150,7 +153,7 @@ export function HookOverlay({ sessionId }: { sessionId: string }) {
                 type="button"
                 disabled={submitting}
                 onClick={() => submit(opt)}
-                className="rounded-md border border-input bg-background px-4 py-2 text-left text-sm hover:bg-muted disabled:opacity-50"
+                className="rounded-lg border border-white/15 bg-white/8 px-4 py-2.5 text-left text-sm font-medium text-white hover:border-teal-400/50 hover:bg-teal-500/15 transition-colors disabled:opacity-40"
               >
                 {opt}
               </button>
@@ -158,7 +161,7 @@ export function HookOverlay({ sessionId }: { sessionId: string }) {
           </div>
         )}
 
-        {feedback && <p className="mt-3 text-sm text-muted-foreground">{feedback}</p>}
+        {feedback && <p className="mt-3 text-sm text-teal-300">{feedback}</p>}
       </div>
     </div>
   );

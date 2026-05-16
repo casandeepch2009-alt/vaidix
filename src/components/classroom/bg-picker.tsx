@@ -33,7 +33,7 @@ const PRESETS: Preset[] = [
 ]
 
 export function BgPicker({ onClose }: { onClose: () => void }) {
-  const { localParticipant } = useLocalParticipant()
+  const { localParticipant, isCameraEnabled } = useLocalParticipant()
   const [active, setActive]   = useState<string>('none')
   const [applying, setApplying] = useState<string | null>(null)
   const [error, setError]     = useState<string | null>(null)
@@ -42,17 +42,19 @@ export function BgPicker({ onClose }: { onClose: () => void }) {
     setApplying(preset.id)
     setError(null)
     try {
-      // Three things have to be true for the background processor to run:
-      //   1. there's a camera publication on this participant
-      //   2. there's an attached MediaStreamTrack (publication may be a stub
-      //      between request + first frame)
-      //   3. the publication isn't muted (LiveKit reports `pub.isMuted` for
-      //      both server-mute and client-mute) — without this we falsely
-      //      reported "camera on" right after the user toggled off (QA #9).
+      // isCameraEnabled is the authoritative LiveKit reactive state. Checking
+      // pub/track separately caused false "Camera is off" errors because the
+      // track publication is populated asynchronously after enablement and
+      // isn't reliably available the instant the picker opens.
+      if (!isCameraEnabled) {
+        setError('Camera is off — turn it on first')
+        return
+      }
       const pub   = localParticipant.getTrackPublication(Track.Source.Camera)
       const track = pub?.track
-      if (!pub || !track || pub.isMuted) {
-        setError('Camera is off — turn it on first')
+      if (!track) {
+        // Track not yet published — camera is enabling, wait a beat and retry.
+        setError('Camera is starting up — try again in a moment')
         return
       }
 
@@ -89,7 +91,10 @@ export function BgPicker({ onClose }: { onClose: () => void }) {
     } finally {
       setApplying(null)
     }
-  }, [localParticipant])
+    // isCameraEnabled must be in deps — without it, the memoized callback
+    // closes over a stale boolean and reports "Camera is off" even after
+    // the user just enabled it.
+  }, [localParticipant, isCameraEnabled])
 
   return (
     <motion.div

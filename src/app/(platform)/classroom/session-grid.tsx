@@ -303,10 +303,11 @@ export function ClassroomFeed({ live, upcoming, past, nowMs, canSchedule, userId
               canSchedule={canSchedule && activeTab === 'upcoming'}
             />
           ) : (
-            <div className="grid items-start gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            <div className="grid auto-rows-fr gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
               {filtered.map((s, idx) => (
                 <motion.div
                   key={s.id}
+                  className="flex flex-col"
                   initial={{ opacity: 0, y: 14 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(idx * 0.04, 0.3), duration: 0.36, ease: [0.22, 1, 0.36, 1] }}

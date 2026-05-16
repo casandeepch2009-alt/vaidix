@@ -118,6 +118,8 @@ export interface VideoRoomClient {
   muteParticipant(sessionId: string, identity: string, muted: boolean): Promise<void>
   removeParticipant(sessionId: string, identity: string): Promise<void>
   promoteParticipant(sessionId: string, identity: string): Promise<void>
+  /** Returns the user IDs (= LiveKit identities) of current co-hosts. */
+  loadCoHosts(sessionId: string): Promise<string[]>
 
   // Host controls
   createShareLink(sessionId: string, ttlHours: number): Promise<ShareLink>
@@ -273,6 +275,17 @@ export const defaultLmsVideoRoomClient: VideoRoomClient = {
       `/api/classroom/sessions/${sessionId}/participants/${identity}/promote`,
       { method: 'POST' },
     )
+  },
+
+  async loadCoHosts(sessionId) {
+    try {
+      const data = await jsonFetch<{ coHostIds: string[] }>(
+        `/api/classroom/sessions/${sessionId}/participants`,
+      )
+      return data.coHostIds
+    } catch {
+      return []
+    }
   },
 
   async createShareLink(sessionId, ttlHours) {

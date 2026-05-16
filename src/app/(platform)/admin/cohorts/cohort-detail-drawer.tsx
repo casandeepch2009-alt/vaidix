@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { X, UsersRound, UserMinus, Loader2, Pencil, Trash2, Save, GraduationCap } from 'lucide-react';
 import { Role } from '@prisma/client';
@@ -45,12 +45,15 @@ function humanRole(r: string): string {
 
 export function CohortDetailDrawer({
   cohortId,
+  initialSection = 'members',
   onClose,
   onChanged,
   onDeleted,
   onRenamed,
 }: {
   cohortId: string | null;
+  /** Which section to open immediately when the drawer loads. */
+  initialSection?: 'edit' | 'members';
   onClose: () => void;
   onChanged: (newMemberCount: number) => void;
   onDeleted: (cohortId: string) => void;
@@ -99,13 +102,27 @@ export function CohortDetailDrawer({
     }
   }
 
+  // Tracks whether to open edit mode once the data finishes loading.
+  const pendingOpenEdit = useRef(false);
+
   useEffect(() => {
     if (!cohortId) {
       setData(null); setPicker([]); setFacultyPick([]); setEditing(false); setConfirmDelete(false);
+      pendingOpenEdit.current = false;
       return;
     }
+    pendingOpenEdit.current = initialSection === 'edit';
     void load(cohortId);
-  }, [cohortId]);
+  }, [cohortId, initialSection]);
+
+  // Fire openEdit() once data is available if the caller requested 'edit' section.
+  useEffect(() => {
+    if (data && pendingOpenEdit.current) {
+      pendingOpenEdit.current = false;
+      openEdit();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   function openEdit() {
     if (!data) return;

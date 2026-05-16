@@ -69,7 +69,10 @@ require_env() {
   esac
 }
 
-# egress.yaml — internal LiveKit URL for the egress Chrome bot
+# egress.yaml — LiveKit connection + API credentials (all three rendered).
+# All three must match the values in livekit.prod.yaml (same .env source).
+# A mismatch causes every egress job to fail with "Start signal not received":
+# the egress Chrome bot is refused by LiveKit, the room never starts recording.
 require_env LIVEKIT_INTERNAL_WS_URL
 case "$LIVEKIT_INTERNAL_WS_URL" in
   ws://*|wss://*) ;;
