@@ -22,6 +22,10 @@ import {
   AiUnavailableError,
   AiUnparseableError,
 } from '@/server/services/ai/router';
+import {
+  extractPptxContent,
+  PPTX_MIME_TYPES,
+} from '@/server/services/decks/wizard-forge-service';
 
 export class SuggestObjectivesError extends Error {
   constructor(
@@ -42,8 +46,11 @@ const FACULTY_LIKE: Role[] = [Role.FACULTY, Role.PROGRAM_DIRECTOR, Role.ADMIN];
 const TOTAL_INLINE_CAP_BYTES = 20 * 1024 * 1024;
 const PER_FILE_CAP_BYTES = 8 * 1024 * 1024;
 
-// Document mime types Gemini can ingest natively as inline data. Anything
-// else gets dropped (PPTX, ZIP, etc. — would need pre-conversion).
+// Document mime types Gemini can ingest natively as inline data. PPTX is
+// handled separately via the deck-forge PptxDocument extractor (titles +
+// body + speaker notes round-trip across PowerPoint/Keynote exports). .doc,
+// .docx, .key, audio, video still fall through to the truncated/skipped
+// path until a per-format extractor lands.
 const INGESTIBLE_MIMES = new Set([
   'application/pdf',
   'text/plain',
@@ -170,10 +177,6 @@ export async function suggestObjectivesForSession(
 
   for (const link of links) {
     const doc = link.document;
-    if (!INGESTIBLE_MIMES.has(doc.mimeType)) {
-      truncated = true;
-      continue;
-    }
     const size = Number(doc.sizeBytes);
     if (size > PER_FILE_CAP_BYTES) {
       truncated = true;
@@ -183,6 +186,33 @@ export async function suggestObjectivesForSession(
       truncated = true;
       break;
     }
+
+    // PPTX path — deterministic text + speaker notes via the shared
+    // wizard-forge extractor. Pushed as a plain text part (Gemini doesn't
+    // ingest .pptx blobs natively). On parse failure, fall through to the
+    // truncated-skip path so a corrupt deck doesn't kill the whole request.
+    if (PPTX_MIME_TYPES.has(doc.mimeType)) {
+      try {
+        const buf = await fetchInline(doc.s3Key);
+        const extracted = extractPptxContent(buf, doc.title);
+        if (extracted) {
+          parts.push({ text: extracted.text });
+          totalBytes += size;
+          usedCount++;
+        } else {
+          truncated = true;
+        }
+      } catch {
+        truncated = true;
+      }
+      continue;
+    }
+
+    if (!INGESTIBLE_MIMES.has(doc.mimeType)) {
+      truncated = true;
+      continue;
+    }
+
     try {
       const buf = await fetchInline(doc.s3Key);
       parts.push({ text: `[Begin study material: ${doc.title}]` });
@@ -200,7 +230,7 @@ export async function suggestObjectivesForSession(
   if (usedCount === 0) {
     throw new SuggestObjectivesError(
       'NO_MATERIAL',
-      'Study pack contains no AI-readable files yet (need PDF, text, markdown, PNG or JPEG)'
+      'Study pack contains no AI-readable files yet (need PDF, PPTX, text, markdown, PNG or JPEG)'
     );
   }
 

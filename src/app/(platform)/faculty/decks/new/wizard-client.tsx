@@ -556,7 +556,7 @@ function SourcesStep({
             <PickedRow doc={primaryPicked} onRemove={onRemove} onChangeRole={onChangeRole} />
           ) : (
             <UploadDropArea
-              accept=".ppt,.pptx,.pdf"
+              accept=".ppt,.pptx,.key,.pdf"
               role="PRIMARY_PPTX"
               onUpload={onUpload}
               uploading={uploading}

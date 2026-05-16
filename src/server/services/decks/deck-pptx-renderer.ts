@@ -7,7 +7,7 @@
 // read the same.
 
 import PptxGenJS from 'pptxgenjs';
-import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   DocumentKind,
   DocumentRoute,
@@ -30,6 +30,14 @@ interface SlideRow {
   bullets: string[];
   speakerNotes: string | null;
   accentHex: string | null;
+  /**
+   * Pre-resolved image data URL (e.g. `data:image/png;base64,...`). Populated
+   * by renderDeckPptxBuffer before per-slide render; null when generation was
+   * skipped (non-IMAGE_FOCUS) or the S3 fetch failed. renderImageFocus uses
+   * it directly with pptxgenjs's addImage; falls back to the dashed
+   * placeholder when null.
+   */
+  imageDataUrl: string | null;
 }
 
 function accentOf(s: SlideRow, c: PptxColors): string {
@@ -224,14 +232,26 @@ function renderImageFocus(s: PptxGenJS.Slide, slide: SlideRow, accent: string, c
     x: 0.7, y: 0.95, w: 11.9, h: 0.9,
     fontSize: 26, bold: true, color: c.text, fontFace: 'Georgia',
   });
-  s.addShape('rect', {
-    x: 0.9, y: 2.1, w: 11.5, h: 4.0,
-    fill: { color: c.panelDark }, line: { color: accent, width: 1.2, dashType: 'dash' },
-  });
-  s.addText('[ Image / OCT / fundus photo placeholder ]', {
-    x: 0.9, y: 3.8, w: 11.5, h: 0.5,
-    fontSize: 12, color: c.text40, align: 'center',
-  });
+  if (slide.imageDataUrl) {
+    // Wizard-forge generated image (Gemini 2.5 Flash Image). The slot is
+    // 16:9-ish (11.5 x 4.0 in EMU) which matches the aspectRatio hint the
+    // image router defaults to. sizing: 'contain' preserves anatomy
+    // proportions even if the model returned a non-conforming aspect.
+    s.addImage({
+      data: slide.imageDataUrl,
+      x: 0.9, y: 2.1, w: 11.5, h: 4.0,
+      sizing: { type: 'contain', w: 11.5, h: 4.0 },
+    });
+  } else {
+    s.addShape('rect', {
+      x: 0.9, y: 2.1, w: 11.5, h: 4.0,
+      fill: { color: c.panelDark }, line: { color: accent, width: 1.2, dashType: 'dash' },
+    });
+    s.addText('[ Image / OCT / fundus photo placeholder ]', {
+      x: 0.9, y: 3.8, w: 11.5, h: 0.5,
+      fontSize: 12, color: c.text40, align: 'center',
+    });
+  }
   if (slide.bullets[0]) {
     s.addText(slide.bullets[0], {
       x: 0.9, y: 6.3, w: 11.5, h: 0.5,
@@ -279,6 +299,27 @@ export interface RenderedDeck {
  * Load a forge job's slides and render to a .pptx buffer. Returns null if the
  * job has no slides yet (e.g. forge failed mid-flight).
  */
+async function fetchSlideImageDataUrl(s3Key: string): Promise<string | null> {
+  try {
+    const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: s3Key }));
+    const stream = out.Body as AsyncIterable<Uint8Array> | undefined;
+    if (!stream) return null;
+    const chunks: Buffer[] = [];
+    for await (const c of stream) chunks.push(Buffer.from(c));
+    const buf = Buffer.concat(chunks);
+    const mime = out.ContentType ?? 'image/png';
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch (e) {
+    // Treat missing/unreachable images the same as a non-existent key —
+    // renderer falls back to the placeholder. Logged for triage.
+    console.warn('[deck-pptx-renderer] image fetch failed', {
+      s3Key,
+      error: e instanceof Error ? e.message : String(e),
+    });
+    return null;
+  }
+}
+
 export async function renderDeckPptxBuffer(opts: {
   jobId: string;
   authorName: string;
@@ -298,6 +339,15 @@ export async function renderDeckPptxBuffer(opts: {
   const theme = getDeckTheme(job.template);
   const c = theme.pptx;
 
+  // Pre-resolve image data URLs in parallel before rendering. pptxgenjs is
+  // synchronous from this point on, and re-fetching per slide would serialise
+  // S3 calls inside the forEach loop.
+  const imageDataUrls = await Promise.all(
+    job.slides.map((s) =>
+      s.imageS3Key ? fetchSlideImageDataUrl(s.imageS3Key) : Promise.resolve(null),
+    ),
+  );
+
   const pptx = new PptxGenJS();
   pptx.layout = 'LAYOUT_WIDE';
   pptx.title = job.inputTitle ?? 'Vaidix Deck';
@@ -315,6 +365,7 @@ export async function renderDeckPptxBuffer(opts: {
         bullets: s.bullets,
         speakerNotes: s.speakerNotes,
         accentHex: s.accentHex,
+        imageDataUrl: imageDataUrls[i],
       },
       i, total, deckTitle, c,
     );

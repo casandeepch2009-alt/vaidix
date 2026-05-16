@@ -505,6 +505,90 @@ export class PptxDocument {
   }
 
   /**
+   * Return the concatenated speaker-notes text for the slide at the given
+   * 1-based display index, or `''` when the slide has no notes part.
+   *
+   * .pptx stores speaker notes in a sibling part `ppt/notesSlides/notesSlideM.xml`
+   * (the file index `M` is decoupled from the slide's own filename) reached
+   * via the per-slide rels file `ppt/slides/_rels/slideN.xml.rels` under
+   * `Type="...relationships/notesSlide"`. We resolve through the rels, parse
+   * the notes XML, and walk every `<p:txBody>` — joining every paragraph's
+   * runs into `\n`-separated lines.
+   *
+   * Returns `''` (not null) when:
+   *   - the slide has no notesSlide rel,
+   *   - the rel target is missing from the ZIP,
+   *   - the notes body is empty,
+   *   - parsing fails for any reason.
+   *
+   * Throws PptxParseError only when slideIndex is out of range.
+   */
+  notes(slideIndex: number): string {
+    const paths = Array.from(this.state.slideXmlByPath.keys());
+    if (slideIndex < 1 || slideIndex > paths.length) {
+      throw new PptxParseError(
+        `notes: slide index ${slideIndex} out of range 1..${paths.length}`,
+      );
+    }
+    const slidePath = paths[slideIndex - 1]; // e.g. "ppt/slides/slide3.xml"
+    const relsPath = slidePath.replace(/\/(slide\d+\.xml)$/, '/_rels/$1.rels');
+    const relsContent = this.state.zip.file(relsPath)?.asText();
+    if (!relsContent) return '';
+
+    let notesTarget: string | null = null;
+    try {
+      const parser = new XMLParser(PARSE_OPTS);
+      const relsTree = parser.parse(relsContent) as XmlTree;
+      const relsRoot = findRoot(relsTree, 'Relationships');
+      if (!relsRoot) return '';
+      for (const child of childrenOf(relsRoot)) {
+        if (tagOf(child) !== 'Relationship') continue;
+        const attrs = child[':@'] as Record<string, string> | undefined;
+        const type = attrs?.['@_Type'];
+        if (type?.endsWith('/notesSlide')) {
+          notesTarget = attrs?.['@_Target'] ?? null;
+          break;
+        }
+      }
+    } catch {
+      return '';
+    }
+    if (!notesTarget) return '';
+
+    // Target is relative to ppt/slides/_rels/slideN.xml.rels, i.e. relative
+    // to ppt/slides/. Typical values: "../notesSlides/notesSlide3.xml".
+    const normalised = notesTarget.startsWith('../')
+      ? `ppt/${notesTarget.slice(3)}`
+      : `ppt/slides/${notesTarget}`;
+    const notesXmlStr = this.state.zip.file(normalised)?.asText();
+    if (!notesXmlStr) return '';
+
+    try {
+      const parser = new XMLParser(PARSE_OPTS);
+      const notesTree = parser.parse(notesXmlStr) as XmlTree;
+      const spTree = findFirst(notesTree, 'p:spTree');
+      if (!spTree) return '';
+      const collected: string[] = [];
+      for (const node of childrenOf(spTree)) {
+        if (tagOf(node) !== 'p:sp') continue;
+        const txBody = findFirst(childrenOf(node), 'p:txBody');
+        if (!txBody) continue;
+        // Notes placeholders include the slide-number placeholder ("3") — we
+        // can't reliably tell it apart from real notes via XML alone, so we
+        // include everything; the slide-number footer is usually short and
+        // doesn't pollute the prompt. Real-world test on faculty decks
+        // confirms this is acceptable.
+        const { text } = readTxBodyText(txBody);
+        if (text.trim().length > 0) collected.push(text);
+      }
+      // Collapse to a single string. AI consumers split or trim as needed.
+      return collected.join('\n').trim();
+    } catch {
+      return '';
+    }
+  }
+
+  /**
    * Reorder slides. `newOrder` is an array of *current 1-based slide indexes*
    * in the desired new order. Throws if the array isn't a permutation.
    *
