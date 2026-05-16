@@ -34,6 +34,7 @@ import {
   AiUnparseableError,
 } from '@/server/services/ai/router';
 import { PptxDocument, PptxParseError } from '@/server/services/pptx/pptx-document';
+import { loadPrompt } from '@/server/prompts/loader';
 import { getFacultyHistoryContext } from './faculty-analytics-history';
 import {
   getFacultyStyleProfile,
@@ -327,37 +328,12 @@ export function extractPptxContent(buf: Buffer, label: string): PptxExtraction |
 export { PPTX_MIME_TYPES };
 
 // ─── Extract step ──────────────────────────────────────────────────────────
-
-const EXTRACT_SYSTEM_PROMPT = `You are a medical-education content extractor. You read source material that a faculty member uploaded for an ophthalmology teaching session and produce a clean, structured extraction the deck author (Claude Opus) will use.
-
-OUTPUT — strict JSON, no prose, no markdown fences:
-{
-  "topics": [                              // 5–15 distinct teaching topics
-    { "topic": string, "summary": string, "sourceRefs": string[] }
-  ],
-  "keyFacts": [                            // 8–25 concrete clinical facts with citations
-    { "fact": string, "sourceRef": string }
-  ],
-  "definitions": [                         // 0–15 terms worth defining
-    { "term": string, "definition": string }
-  ],
-  "imagesAvailable": [                     // 0–10 image/figure descriptions found in source
-    { "description": string, "sourceRef": string }
-  ],
-  "openQuestions": [                       // 0–8 things the source explicitly raises but doesn't answer — good poll/discussion fodder
-    string
-  ],
-  "primaryDeckOutline": [                  // ONLY if a PRIMARY_PPTX was provided — current slide order so the enhancer keeps the shape
-    { "slideIndex": number, "title": string, "summary": string }
-  ]
-}
-
-EXTRACTION RULES
-- Stay faithful. Do not invent dosages, classification thresholds, or guideline references not in the source.
-- Use clinical vocabulary (slit-lamp, OCT, FFA, ICGA, fundus, IOP, etc.) — not generic language.
-- sourceRef is a short pointer the deck author can cite back to: "Section 2 page 3", "Transcript 12:30-14:00", "Slide 7 of original deck", etc.
-- If multiple files are provided, prefix sourceRef with the file role: "[PRIMARY_PPTX] Slide 7", "[SOURCE pdf] Page 3", "[PRIOR_TRANSCRIPT] 10:42".
-- omit fields that have no content rather than emitting empty arrays of placeholder text.`;
+//
+// The EXTRACT and DRAFT system prompts are loaded from the central prompt
+// registry at runtime — see src/server/prompts/_base/op-deck-extract.md and
+// op-deck-draft.md. Editing prompt language happens in those markdown files
+// only; this service stays prompt-text-free so future domains (cardiology,
+// dentistry) work with a single config change in _domains/.
 
 interface ExtractionResult {
   topics: Array<{ topic: string; summary: string; sourceRefs?: string[] }>;
@@ -468,8 +444,12 @@ async function extractFromSources(loaded: LoadedDoc[]): Promise<ExtractionResult
 
   parts.push({ text: 'Produce the extraction JSON now.' });
 
+  // System prompt is the markdown-source-of-truth at
+  // src/server/prompts/_base/op-deck-extract.md, loaded + domain-interpolated
+  // at call time. Editing prompt language happens there, not here.
+  const extractPrompt = await loadPrompt('op-deck-extract');
   const extraction = await aiExtractFromSourceJson<ExtractionResult>({
-    systemPrompt: EXTRACT_SYSTEM_PROMPT,
+    systemPrompt: extractPrompt.text,
     parts,
     temperature: 0.2,
   });
@@ -483,72 +463,10 @@ async function extractFromSources(loaded: LoadedDoc[]): Promise<ExtractionResult
 }
 
 // ─── Draft step ────────────────────────────────────────────────────────────
-
-const DRAFT_SYSTEM_PROMPT = `You are a senior ophthalmology consultant + master curriculum designer at LV Prasad Eye Institute. You are authoring a teaching deck from a structured extraction Gemini produced from the faculty's source materials.
-
-OUTPUT — strict JSON, no prose, no markdown fences:
-{
-  "deckTitle": string,
-  "slides": [
-    {
-      "layout": "TITLE_ONLY" | "TITLE_BULLETS" | "TWO_COLUMN" | "IMAGE_FOCUS" | "QUOTE" | "INTERACTION" | "CLOSING",
-      "title": string,            // <= 90 chars
-      "bullets": string[],        // 0-6 items, each <= 140 chars
-      "speakerNotes": string,     // 1-3 sentences for the presenter; <= 400 chars
-      "citation": string | null   // pointer back to source (Gemini's sourceRef)
-    }
-  ],
-  "initialSuggestions": [        // 0-8 issues you flagged WHILE drafting — surfaced as suggestions in the studio
-    {
-      "kind": "CLINICAL" | "DENSITY" | "PEDAGOGY" | "VISUAL" | "INTERACTION",
-      "slideIndex": number,      // 0-based; reference your own slides array
-      "severity": "HIGH" | "MED" | "LOW",
-      "message": string,         // <= 200 chars, actionable
-      "rationale": string        // 1-2 sentence reasoning the faculty would respect
-    }
-  ]
-}
-
-INTENT BRANCH
-- If intent = ENHANCE_EXISTING: the extraction includes "primaryDeckOutline". Keep the original slide order and titles when possible — only insert / merge / split where the source genuinely needs it. The faculty wants their deck improved, not rebuilt.
-- If intent = DRAFT_FROM_SCRATCH: you author the structure freely. Open with TITLE_ONLY hero, close with CLOSING.
-
-STRUCTURE RULES (briefing-driven)
-- Total slide count scales with duration: 30 min → 8-12, 45 min → 12-16, 60 min → 14-22, 90 min → 18-28.
-- Bullets are crisp phrases, not full sentences. No trailing periods.
-- Speaker notes carry the *why*. Bullets carry the *what*.
-- Cite back to the source via "citation" using the sourceRef Gemini gave you.
-
-PEDAGOGY RULES
-- Tailor depth to briefing.audience. PG-1/early residents: anatomy-first, classification-heavy. Senior residents/fellows: decision-points, evidence, edge cases.
-- At least ONE IMAGE_FOCUS slide for visual learning (use imagesAvailable if present).
-- At least ONE INTERACTION slide every 6-8 slides (poll, T/F, decision-point question). Each option as a separate bullet.
-- Include EXACTLY ONE "Common pitfalls" / "Learner errors" slide near the end with 4-6 bullets.
-- briefing.localContext (LVPEI patient mix, adherence patterns) should show up in case discussion + pitfalls if relevant.
-
-TALK ARCHITECTURE — learner-centered principles
-- Slide 2 (right after the TITLE_ONLY hero) is an EMPOWERMENT PROMISE: title "By the end you will…" with ≤3 measurable verb-led bullets. If briefing.objectives exceeds 3 ideas, narrow to the 3 highest-yield.
-- Identify ONE CORE MESSAGE. Echo it in (a) the hero subtitle/notes, (b) at least one mid-deck slide title, (c) CLOSING bullet[0]. The single sentence the learner walks out with.
-- Plant up to 4 ATTENTION HOOKS across the deck (around slide 2-3, mid-deck, just before pitfalls, last content slide). Each hook is one of: thought-provoking question / striking stat / 1-line vignette / bold statement / brief quote. Mark with "HOOK:" prefix in speakerNotes.
-- The first slide of each major section starts with a TRANSITION bullet "From X → to Y" so the deck flows like a story.
-- CLOSING bullet[0] is an ACTIONABLE TAKE-HOME — the one clinically implementable thing the resident will change in clinic on Monday. Not "Thank you" alone.
-
-SPEAKER NOTES STYLE — voice + body
-- Use CAPS for emphasis, "/" for pauses, "..." for slow-down moments. Example: "AAC and PAC LOOK similar / but the cup-to-disc ratio in AAC is NORMAL ... that's the trap."
-- Respect prior knowledge. No "this is simple", "everyone knows", or absolute claims unless source justifies them.
-- For 3-4 key slides (opening, IMAGE_FOCUS, INTERACTION, CLOSING) append a "STAGE:" line: posture / gesture / eye-contact hint.
-- For IMAGE_FOCUS, speakerNotes MUST (1) name what to look for first, (2) include "...pause 3s..." for the visual scan, (3) note if a side-by-side comparison would teach better.
-
-TIME BUDGET
-- Allocate slide count and per-slide time so the total matches briefing.durationMin. Append "TIME: ~Xm" at the end of speakerNotes on non-trivial slides — TITLE 0.5m, content 2-3m, INTERACTION 3-5m, IMAGE_FOCUS 3-4m, CLOSING 1m.
-
-INITIAL SUGGESTIONS (deliberately small list)
-- Only flag things that genuinely need faculty judgment — not nitpicks. Examples:
-  • CLINICAL: a guideline number that needs faculty verification.
-  • DENSITY: slide you authored that is borderline overloaded (>5 dense bullets).
-  • PEDAGOGY: an "open question" from source that would make a great poll the deck didn't already use.
-  • INTERACTION: a slide that begs for a case-vignette pause.
-- Faculty veto is preserved — these are PROPOSALS, the slides above are what gets rendered initially.`;
+//
+// System prompt lives at src/server/prompts/_base/op-deck-draft.md — load
+// at call time, edit there. The schema below (DraftedSlide / DraftResult)
+// is the contract between Opus's JSON output and the persistence step.
 
 interface DraftedSlide {
   layout?: string;
@@ -556,6 +474,14 @@ interface DraftedSlide {
   bullets?: unknown;
   speakerNotes?: unknown;
   citation?: unknown;
+  /**
+   * Per-slide dynamic visualization brief Opus writes. Drives the image
+   * generation step downstream — Gemini Flash converts this into an
+   * image-render prompt, Gemini 2.5 Flash Image renders the bytes.
+   * When set on a non-IMAGE_FOCUS slide, the generator still produces an
+   * image; the renderer paints it where a slot is available.
+   */
+  imageBrief?: unknown;
 }
 
 interface DraftResult {
@@ -580,6 +506,12 @@ const ALLOWED_LAYOUTS: SlideLayout[] = [
   'CLOSING',
 ];
 
+// Upper bound on persisted slide count. Generous — coverage > count is the
+// op-deck-draft.md rule, so we don't truncate a 30-slide deck the prompt
+// authored because supplementary PDFs added topics. Pure safety belt for
+// degenerate LLM output.
+const MAX_SLIDES_PER_DECK = 80;
+
 function normalize(draft: DraftResult): {
   deckTitle: string;
   slides: Array<{
@@ -588,6 +520,7 @@ function normalize(draft: DraftResult): {
     bullets: string[];
     speakerNotes: string;
     citation: string | null;
+    imageBrief: string | null;
   }>;
   initialSuggestions: Array<{
     kind: string;
@@ -603,7 +536,7 @@ function normalize(draft: DraftResult): {
       : 'Untitled Deck';
   const raw = Array.isArray(draft.slides) ? draft.slides : [];
   const slides = raw
-    .slice(0, 30)
+    .slice(0, MAX_SLIDES_PER_DECK)
     .map((s) => ({
       layout: (ALLOWED_LAYOUTS.includes(s.layout as SlideLayout)
         ? s.layout
@@ -612,17 +545,26 @@ function normalize(draft: DraftResult): {
       bullets: Array.isArray(s.bullets)
         ? (s.bullets as unknown[])
             .filter((b): b is string => typeof b === 'string' && b.trim().length > 0)
-            .slice(0, 6)
+            // Allow up to 8 bullets per slide (op-deck-draft.md schema bumped
+            // from 6 → 8; coverage-first decks benefit from a couple more).
+            .slice(0, 8)
             .map((b) => b.trim().slice(0, 200))
         : [],
-      speakerNotes: typeof s.speakerNotes === 'string' ? s.speakerNotes.slice(0, 1000) : '',
+      speakerNotes: typeof s.speakerNotes === 'string' ? s.speakerNotes.slice(0, 1500) : '',
       citation:
         typeof s.citation === 'string' && s.citation.trim() ? s.citation.trim().slice(0, 200) : null,
+      imageBrief:
+        typeof s.imageBrief === 'string' && s.imageBrief.trim()
+          ? s.imageBrief.trim().slice(0, 400)
+          : null,
     }))
     .filter((s) => s.title.trim().length > 0);
 
   const initialSuggestions = (draft.initialSuggestions ?? [])
-    .slice(0, 8)
+    // op-deck-draft.md cap raised from 8 → 12 to surface ENHANCE-mode
+    // proposed-rename / proposed-merge notes that the HARD CONTRACT rejects
+    // silently. Faculty sees them in the Studio.
+    .slice(0, 12)
     .filter(
       (r): r is { kind: string; slideIndex: number; severity: string; message: string; rationale: string } =>
         typeof r.kind === 'string' &&
@@ -673,12 +615,17 @@ async function draftFromExtraction(args: {
     styleBlock +
     `\nEXTRACTION (from upstream extractor)\n${JSON.stringify(args.extraction, null, 2)}\n\n` +
     `Author the deck JSON now.`;
+  const draftPrompt = await loadPrompt('op-deck-draft');
   return aiEnhanceContentJson<DraftResult>({
-    systemPrompt: DRAFT_SYSTEM_PROMPT,
+    systemPrompt: draftPrompt.text,
     userMessage,
     jsonOutput: true,
     temperature: 0.35,
-    maxTokens: 8000,
+    // 8000 was tuned for the legacy hardcoded prompt; op-deck-draft.md is
+    // larger (HARD ENHANCE contract + coverage-first phrasing) and authors
+    // longer decks when source coverage demands it. Loosen so coverage isn't
+    // truncated mid-slide.
+    maxTokens: 16000,
   });
 }
 
@@ -700,29 +647,49 @@ function deriveTopicTagForForge(inputTitle: string | null | undefined, objective
 const IMAGE_GEN_CONCURRENCY = 3;
 
 /**
- * Generate a clinical-illustration image per IMAGE_FOCUS slide via the
- * existing aiGenerateImageForSlide router (Gemini writes prompt → Gemini
- * 2.5 Flash Image renders). Uploads each PNG to S3 under the forge job's
- * folder and persists imageS3Key + imagePrompt back to the Slide row.
+ * Slide shape generateSlideImages expects — the normalized DraftResult.slides
+ * plus the Slide.id we resolve post-persist. The rich imageBrief is what
+ * makes per-slide prompts content-aware instead of generic.
+ */
+interface SlideForImageGen {
+  id: string;
+  order: number;
+  layout: SlideLayout;
+  title: string;
+  bullets: string[];
+  speakerNotes: string | null;
+  /** Opus's per-slide visualization brief; null when no image desired. */
+  imageBrief: string | null;
+}
+
+/**
+ * Generate clinical-illustration images for every slide where one helps —
+ * IMAGE_FOCUS layouts AND any slide where Opus set imageBrief (e.g. a
+ * TITLE_BULLETS slide describing anatomy that wins with a side diagram).
+ *
+ * Pipeline per slide: aiGenerateImageForSlide → Gemini Flash writes the
+ * image prompt from {title, bullets, imageBrief, speakerNotes} → Gemini
+ * 2.5 Flash Image (Nano Banana) renders bytes → S3 upload →
+ * Slide.imageS3Key + imagePrompt persisted.
  *
  * Best-effort: a slide that fails to generate keeps imageS3Key = null and
- * the renderer falls back to its placeholder. Aggregate failure to set up
- * the step also returns silently — image richness is a nice-to-have, never
- * a deck blocker. All per-slide failures are logged for triage.
+ * the renderer falls back to its placeholder. Per-slide and aggregate
+ * failures are logged for triage but never block the forge.
  */
 async function generateSlideImages(opts: {
   jobId: string;
   requestedById: string;
+  slides: SlideForImageGen[];
 }): Promise<{ generated: number; failed: number; skipped: number }> {
-  const slides = await db.slide.findMany({
-    where: { deckForgeJobId: opts.jobId },
-    orderBy: { order: 'asc' },
-    select: { id: true, order: true, layout: true, title: true, bullets: true },
-  });
-
-  const candidates = slides.filter((s) => s.layout === 'IMAGE_FOCUS');
+  // A slide is a candidate when it has an explicit imageBrief OR it's
+  // IMAGE_FOCUS (legacy belt-and-braces — Opus is meant to always set
+  // imageBrief on IMAGE_FOCUS, but if it forgets, the layout signal still
+  // triggers generation).
+  const candidates = opts.slides.filter(
+    (s) => (s.imageBrief && s.imageBrief.trim().length > 0) || s.layout === SlideLayout.IMAGE_FOCUS,
+  );
   if (candidates.length === 0) {
-    return { generated: 0, failed: 0, skipped: slides.length };
+    return { generated: 0, failed: 0, skipped: opts.slides.length };
   }
 
   let generated = 0;
@@ -730,7 +697,7 @@ async function generateSlideImages(opts: {
 
   // Sequential batching with a small concurrency window. Promise.all on the
   // whole list risks Gemini-side rate-limits on faculty decks with many
-  // IMAGE_FOCUS slides; chunks of IMAGE_GEN_CONCURRENCY keep that bounded.
+  // image slides; chunks of IMAGE_GEN_CONCURRENCY keep that bounded.
   for (let i = 0; i < candidates.length; i += IMAGE_GEN_CONCURRENCY) {
     const batch = candidates.slice(i, i + IMAGE_GEN_CONCURRENCY);
     const results = await Promise.allSettled(
@@ -738,6 +705,8 @@ async function generateSlideImages(opts: {
         const result = await aiGenerateImageForSlide({
           title: slide.title,
           bullets: slide.bullets,
+          imageBrief: slide.imageBrief ?? undefined,
+          speakerNotes: slide.speakerNotes ?? undefined,
         });
         const imageBytes = Buffer.from(result.image.data, 'base64');
         // Use .png extension regardless of mime — pptxgenjs's addImage with a
@@ -769,7 +738,7 @@ async function generateSlideImages(opts: {
       }
     }
   }
-  return { generated, failed, skipped: slides.length - candidates.length };
+  return { generated, failed, skipped: opts.slides.length - candidates.length };
 }
 
 // ─── Orchestrator ──────────────────────────────────────────────────────────
@@ -881,14 +850,36 @@ export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardFo
       });
     });
 
-    // Generate clinical-illustration images for IMAGE_FOCUS slides. Best-
-    // effort — a failure here never blocks the forge; the renderer falls
-    // back to a placeholder for slides without an imageS3Key. Runs before
-    // persistDeckAsDocument so the persisted .pptx already carries images.
+    // Generate clinical-illustration images for every slide where Opus set
+    // imageBrief OR for IMAGE_FOCUS layouts. Best-effort — a failure here
+    // never blocks the forge; the renderer falls back to a placeholder for
+    // slides without an imageS3Key. Runs before persistDeckAsDocument so
+    // the persisted .pptx already carries images.
+    //
+    // We re-query the persisted slides to pair our in-memory normalized
+    // result.slides[i] (which carries imageBrief) with the DB row's id
+    // (needed to write back imageS3Key + imagePrompt). createMany doesn't
+    // return ids in Postgres-Prisma, so this round-trip is unavoidable.
     try {
+      const persistedSlides = await db.slide.findMany({
+        where: { deckForgeJobId: created.id },
+        orderBy: { order: 'asc' },
+        select: { id: true, order: true },
+      });
+      const slidesForImageGen: SlideForImageGen[] = result.slides.map((s, i) => ({
+        id: persistedSlides[i]?.id ?? '',
+        order: i,
+        layout: s.layout,
+        title: s.title,
+        bullets: s.bullets,
+        speakerNotes: s.speakerNotes || null,
+        imageBrief: s.imageBrief,
+      })).filter((s) => s.id.length > 0);
+
       const imageStats = await generateSlideImages({
         jobId: created.id,
         requestedById: input.requestedById,
+        slides: slidesForImageGen,
       });
       console.info('[wizard-forge] image generation', {
         jobId: created.id,

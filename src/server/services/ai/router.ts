@@ -422,25 +422,31 @@ export async function aiExtractFromSourceJson<T>(input: ExtractSourceInput): Pro
 }
 
 // ─── Image pipeline (single-vendor: Gemini writes, Gemini renders) ─────────
-
-const IMAGE_PROMPT_SYSTEM = `You are a medical-illustration prompt writer for an ophthalmology teaching deck.
-Given a slide title + bullets, output ONE concise image prompt (<= 350 chars) that an image generator can render.
-
-RULES
-- Anatomically precise. Use clinical vocabulary (slit-lamp, fundus, OCT, FFA, anterior segment, posterior pole, etc.).
-- Prefer clean medical-illustration / textbook-style imagery over photorealism unless the slide is a real photographic finding (e.g. "fundus photograph of NPDR").
-- Specify framing/view (cross-section, 30° fundus field, slit-beam optical section).
-- No text labels in the image — they belong on the slide, not in the picture.
-- No people's faces unless clinically relevant (e.g., facial nerve palsy).
-- Output the prompt only, no preamble, no quotes, no explanation.`;
+//
+// System prompt lives at src/server/prompts/_base/op-deck-image-prompt.md.
+// Imported lazily inside aiGenerateImagePrompt so this module stays
+// import-cycle-free with the loader.
 
 export interface ImagePromptInput {
   /** Slide / case title — what the image is about. */
   title: string;
   /** Optional bullets that describe what the image needs to show. */
   bullets?: string[];
+  /**
+   * Optional rich brief Opus wrote per slide describing the exact visual
+   * (e.g. "Coronal cross-section of trabecular meshwork showing Schlemm's
+   * canal closed by peripheral anterior synechiae"). When set, the image-
+   * prompt writer leans on this over bullets — dynamic per-slide context
+   * the deck author already authored. Wins over generic bullet inference.
+   */
+  imageBrief?: string;
   /** Optional caller hint, e.g. "anatomy diagram" or "fundus photograph". */
   styleHint?: string;
+  /**
+   * Optional speaker-notes excerpt for the slide — gives the prompt writer
+   * additional clinical context (what to look for first, comparison hints).
+   */
+  speakerNotes?: string;
 }
 
 /**
@@ -450,16 +456,24 @@ export interface ImagePromptInput {
  * not a reasoning task.
  */
 export async function aiGenerateImagePrompt(input: ImagePromptInput): Promise<string> {
+  const { loadPrompt } = await import('@/server/prompts/loader');
+  const sysPrompt = await loadPrompt('op-deck-image-prompt');
   const userMessage =
     `Slide title: ${input.title}\n` +
+    (input.imageBrief
+      ? `Image brief (authored per-slide by Opus):\n${input.imageBrief}\n`
+      : '') +
     (input.bullets?.length
       ? `Bullets:\n${input.bullets.map((b) => `- ${b}`).join('\n')}\n`
+      : '') +
+    (input.speakerNotes
+      ? `Speaker notes excerpt:\n${input.speakerNotes.slice(0, 400)}\n`
       : '') +
     (input.styleHint ? `Style hint: ${input.styleHint}\n` : '') +
     `\nWrite the image prompt now.`;
   try {
     const text = await geminiGenerate({
-      systemInstruction: IMAGE_PROMPT_SYSTEM,
+      systemInstruction: sysPrompt.text,
       userParts: [{ text: userMessage }],
       responseMimeType: 'text/plain',
       temperature: 0.4,
