@@ -40,10 +40,34 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# ─── Optional force flags ──────────────────────────────────────────────────
+# Use these when containers are stale but git is already up to date (e.g. after
+# an interrupted deploy, or when secrets change without a code commit):
+#   --force            rebuild + recreate ALL services
+#   --force=app        force rebuild + recreate `app` only
+#   --force=livekit    force recreate `livekit` + `coturn`
+#   --force=egress     force recreate `livekit-egress`
+FORCE_APP=0; FORCE_LIVEKIT=0; FORCE_EGRESS=0
+for arg in "$@"; do
+  case "$arg" in
+    --force)            FORCE_APP=1; FORCE_LIVEKIT=1; FORCE_EGRESS=1 ;;
+    --force=app)        FORCE_APP=1 ;;
+    --force=livekit)    FORCE_LIVEKIT=1 ;;
+    --force=egress)     FORCE_EGRESS=1 ;;
+    *)
+      echo "[deploy] unknown flag: $arg" >&2
+      echo "[deploy] valid flags: --force, --force=app, --force=livekit, --force=egress" >&2
+      exit 1
+      ;;
+  esac
+done
+
 COMPOSE="docker compose -f docker-compose.prod.yml --env-file .env"
 
 echo "[deploy] repo root: $REPO_ROOT"
 echo "[deploy] $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+[ "$FORCE_APP" -eq 1 ] || [ "$FORCE_LIVEKIT" -eq 1 ] || [ "$FORCE_EGRESS" -eq 1 ] && \
+  echo "[deploy] force flags: app=$FORCE_APP livekit=$FORCE_LIVEKIT egress=$FORCE_EGRESS"
 
 # ─── 1. Pull (stashing local nginx edits) ──────────────────────────────────
 
@@ -67,8 +91,15 @@ if [ "$NEEDS_STASH" -eq 1 ]; then
 fi
 
 if [ "$BEFORE_SHA" = "$AFTER_SHA" ]; then
-  echo "[deploy] no new commits since last deploy — nothing pulled"
+  echo "[deploy] no new commits since last deploy"
   CHANGED_FILES=""
+  # Warn if no --force flags given — containers may predate the last source change
+  # (e.g. if a previous deploy was interrupted or if only secrets changed).
+  if [ "$FORCE_APP" -eq 0 ] && [ "$FORCE_LIVEKIT" -eq 0 ] && [ "$FORCE_EGRESS" -eq 0 ]; then
+    echo "[deploy] ⚠  No --force flag given. If containers are stale (check: docker ps -a),"
+    echo "[deploy]    re-run with: ./scripts/deploy.sh --force"
+    echo "[deploy]    or target a specific service: --force=app / --force=livekit / --force=egress"
+  fi
 else
   CHANGED_FILES="$(git diff --name-only "$BEFORE_SHA" "$AFTER_SHA")"
   echo "[deploy] pulled $(echo "$CHANGED_FILES" | wc -l) file change(s) from $BEFORE_SHA to $AFTER_SHA"
@@ -89,9 +120,32 @@ NEEDS_APP=0
 if [ -n "$CHANGED_FILES" ] && echo "$CHANGED_FILES" | grep -qE '^(src/|prisma/|package(-lock)?\.json|next\.config\.ts|Dockerfile)'; then
   NEEDS_APP=1
 fi
+if [ "$FORCE_APP" -eq 1 ]; then
+  NEEDS_APP=1
+fi
 if [ "$NEEDS_APP" -eq 1 ]; then
+  # Guard: builds fail with "failed to export" when the overlay-fs layer store
+  # runs out of disk. Prune dangling layers first, then check we have >= 5 GB.
+  echo "[deploy] pruning dangling Docker images to free space before build"
+  docker image prune -f 2>/dev/null || true
+  # Also prune build cache older than 48h so repeated no-cache builds don't
+  # accumulate multi-GB caches indefinitely.
+  docker buildx prune -f --filter until=48h 2>/dev/null || true
+  AVAIL_KB=$(df /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}' || echo "0")
+  if [ "$AVAIL_KB" -lt 5242880 ]; then  # 5 GB in KB
+    echo "[deploy] ⚠  Less than 5 GB free on /var/lib/docker (${AVAIL_KB} KB). Running full Docker prune."
+    docker system prune -f --volumes 2>/dev/null || true
+    AVAIL_KB=$(df /var/lib/docker 2>/dev/null | awk 'NR==2{print $4}' || echo "0")
+    echo "[deploy]    Free after prune: ${AVAIL_KB} KB"
+  fi
+
   echo "[deploy] app sources changed — rebuilding image (no-cache)"
-  $COMPOSE build --no-cache app
+  if ! $COMPOSE build --no-cache app; then
+    echo "[deploy] ✗ build failed — checking disk and logs" >&2
+    df -h /var/lib/docker >&2
+    docker logs vaidix-app --tail 20 2>&1 >&2 || true
+    exit 1
+  fi
   echo "[deploy] recreating app container"
   $COMPOSE up -d --force-recreate app
 fi
@@ -108,6 +162,13 @@ if [ -n "$CHANGED_FILES" ]; then
   if echo "$CHANGED_FILES" | grep -qE 'egress\.yaml\.tpl'; then
     NEEDS_EGRESS=1
   fi
+fi
+if [ "$FORCE_LIVEKIT" -eq 1 ]; then
+  NEEDS_LIVEKIT=1
+  NEEDS_COTURN=1
+fi
+if [ "$FORCE_EGRESS" -eq 1 ]; then
+  NEEDS_EGRESS=1
 fi
 if [ "$NEEDS_LIVEKIT" -eq 1 ]; then
   echo "[deploy] livekit/turnserver templates changed — recreating livekit + coturn"

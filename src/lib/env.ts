@@ -35,6 +35,12 @@ const envSchema = z.object({
   // worker running on the host) uses to reach object storage; for local dev
   // that's localhost:9000.
   S3_ENDPOINT: z.string().url(),
+  // S3_PUBLIC_ENDPOINT is the browser-reachable URL for the same storage.
+  // In production MinIO is only on Docker's internal network (minio:9000),
+  // proxied publicly at https://s3.vaidix.lvpei.org via nginx. Presigned
+  // PUT/GET URLs are signed against this host so browsers can actually reach
+  // them. Defaults to S3_ENDPOINT so local dev needs no extra config.
+  S3_PUBLIC_ENDPOINT: z.string().url().optional(),
   S3_BUCKET: z.string(),
   S3_ACCESS_KEY: z.string(),
   S3_SECRET_KEY: z.string(),

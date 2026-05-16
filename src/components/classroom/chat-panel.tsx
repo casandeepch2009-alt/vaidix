@@ -190,14 +190,51 @@ export function ChatPanel({
     }
   }
 
-  // Load scrollback on mount via the room client (LMS or extracted host).
+  // Load scrollback on mount and poll every 15s as a fallback for data-channel
+  // misses (e.g. during reconnects when publishData is skipped). The data
+  // channel handles instant delivery; this catches anything that slips through.
+  // Merge by ID so optimistic (tmp-*) and DC-arrived messages aren't overwritten
+  // by the poll returning a snapshot that doesn't include the very latest items.
   useEffect(() => {
     let mounted = true
-    void client
-      .loadChat(sessionId, 100)
-      .then((msgs) => { if (mounted) setMessages(msgs) })
-      .catch(() => {/* swallow — chat will start empty */})
-    return () => { mounted = false }
+    const load = () =>
+      client
+        .loadChat(sessionId, 100)
+        .then((msgs) => {
+          if (!mounted) return
+          setMessages((prev) => {
+            const apiMap = new Map(msgs.map((m) => [m.id, m]))
+            const out: ChatMessage[] = []
+            const seen = new Set<string>()
+            for (const m of prev) {
+              if (m.id.startsWith('tmp-')) {
+                // Optimistic local send not yet replaced by server echo.
+                out.push(m)
+                seen.add(m.id)
+              } else if (apiMap.has(m.id)) {
+                // Server has it — prefer the canonical row (attachment URL).
+                out.push(apiMap.get(m.id)!)
+                seen.add(m.id)
+              } else {
+                // DC-received from another participant that hasn't yet shown
+                // up in the API snapshot (read-replica lag / race). Keeping
+                // it here prevents the poll from blanking out very recent
+                // remote messages.
+                out.push(m)
+                seen.add(m.id)
+              }
+            }
+            for (const m of msgs) {
+              if (!seen.has(m.id)) out.push(m)
+            }
+            out.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+            return out
+          })
+        })
+        .catch(() => {})
+    void load()
+    const iv = setInterval(load, 15_000)
+    return () => { mounted = false; clearInterval(iv) }
   }, [sessionId, client])
 
   // Real-time data-channel receive
@@ -214,9 +251,14 @@ export function ChatPanel({
     }
   }, [lastDc, currentUser.id])
 
-  // Auto-scroll to bottom
+  // Auto-scroll to bottom — runs after DOM paint so scrollHeight reflects
+  // the newly rendered message row.
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight })
+    const el = scrollRef.current
+    if (!el) return
+    requestAnimationFrame(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+    })
   }, [messages])
 
   async function uploadFile(file: File) {

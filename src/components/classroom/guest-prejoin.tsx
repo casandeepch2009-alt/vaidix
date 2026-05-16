@@ -361,7 +361,7 @@ export function GuestPrejoin(props: GuestPrejoinProps) {
               </div>
               <h2 className="mt-4 text-base font-semibold">Waiting for the host…</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                We&apos;ve let {props.hostName} know you&apos;re here.
+                We&apos;ve let <strong>{props.hostName ?? 'the host'}</strong> know you&apos;re here.{' '}
                 You&apos;ll join the call as soon as you&apos;re admitted.
               </p>
             </motion.div>
@@ -473,7 +473,7 @@ function GuestLiveRoom({
   // alive peer connection doesn't keep churning behind it.
   if (phase === 'lost') {
     return (
-      <div className="flex h-screen w-screen items-center justify-center bg-slate-950 px-4 text-white">
+      <div className="flex h-dvh w-screen items-center justify-center bg-slate-950 px-4 text-white">
         <div className="w-full max-w-md rounded-2xl border border-white/10 bg-white/5 p-8 text-center shadow-xl backdrop-blur">
           <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-amber-500/15">
             <Loader2 className="size-6 text-amber-300" />
@@ -503,9 +503,9 @@ function GuestLiveRoom({
       video={canPublish}
       onDisconnected={onDisconnected}
       data-lk-theme="default"
-      className="h-screen w-screen"
+      className="fixed inset-0 z-40"
     >
-      <div className="relative flex h-full flex-col bg-slate-950 text-white">
+      <div className="relative flex h-full flex-col bg-slate-950 text-white overflow-hidden">
         <GuestHeader title={title} />
         <main className="flex-1 overflow-hidden p-3">
           <GuestStage />

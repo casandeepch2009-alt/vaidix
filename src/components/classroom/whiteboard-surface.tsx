@@ -95,20 +95,18 @@ const TldrawSurface = forwardRef<SurfaceHandle, SurfaceProps>(function TldrawSur
   )
 
   return (
-    <Tldraw
-      onMount={handleMount}
-      // Hide the bottom-right "made with tldraw" debug menu in our embed —
-      // saves vertical space in the side panel layout.
-      hideUi={false}
-      // tldraw's overflow guard: our panel sits in a flex column with
-      // min-height:0, so the canvas needs to fill its parent.
-      className="h-full! w-full!"
-      // Read-only mode renders the same canvas but suppresses input.
-      // tldraw v5 puts this on the editor instance, not the component prop —
-      // we apply via onMount instead.
-      // (Toggle is handled below.)
-      key={readOnly ? 'ro' : 'rw'}
-    />
+    // Absolute positioning inside the panel's `relative` container ensures
+    // tldraw's ResizeObserver always sees a stable pixel height regardless of
+    // flexbox / framer-motion animation state at mount time. The previous
+    // h-full!/w-full! Tailwind v4 syntax had no effect in v3, leaving tldraw
+    // with height:0 during the sidebar slide-in animation.
+    <div style={{ position: 'absolute', inset: 0 }}>
+      <Tldraw
+        onMount={handleMount}
+        hideUi={false}
+        key={readOnly ? 'ro' : 'rw'}
+      />
+    </div>
   )
 })
 

@@ -43,8 +43,15 @@ export interface SendEmailOptions {
 }
 
 export async function sendEmail(opts: SendEmailOptions) {
+  // Ensure a display name is present — bare email addresses land in spam.
+  const from = env.EMAIL_FROM.includes('<')
+    ? env.EMAIL_FROM
+    : `Vaidix <${env.EMAIL_FROM}>`
+  // Extract the raw address for List-Unsubscribe (strips "Display <addr>" wrapper).
+  const rawAddr = (from.match(/<([^>]+)>/) ?? [])[1] ?? env.EMAIL_FROM
+
   const info = await mailer.sendMail({
-    from: env.EMAIL_FROM,
+    from,
     to: Array.isArray(opts.to) ? opts.to.join(',') : opts.to,
     subject: opts.subject,
     html: opts.html,
@@ -53,6 +60,10 @@ export async function sendEmail(opts: SendEmailOptions) {
     cc: opts.cc?.join(','),
     bcc: opts.bcc?.join(','),
     attachments: opts.attachments,
+    headers: {
+      'List-Unsubscribe': `<mailto:${rawAddr}?subject=unsubscribe>`,
+      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    },
   });
   return { id: info.messageId, accepted: info.accepted, rejected: info.rejected };
 }

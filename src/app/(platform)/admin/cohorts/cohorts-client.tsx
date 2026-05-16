@@ -36,6 +36,7 @@ export function CohortsClient({ initial }: { initial: CohortRow[] }) {
   const [submitting, setSubmitting]         = useState(false)
   const [error, setError]                   = useState<string | null>(null)
   const [openCohortId, setOpenCohortId]     = useState<string | null>(null)
+  const [openCohortSection, setOpenCohortSection] = useState<'edit' | 'members'>('members')
   const [initialMembers, setInitialMembers] = useState<PickableUser[]>([])
   const [initialFaculty, setInitialFaculty] = useState<PickableUser[]>([])
   const [menuOpenId, setMenuOpenId]         = useState<string | null>(null)
@@ -220,6 +221,7 @@ export function CohortsClient({ initial }: { initial: CohortRow[] }) {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
+                        setOpenCohortSection('edit')
                         setOpenCohortId(c.id)
                         setMenuOpenId(null)
                       }}
@@ -231,6 +233,7 @@ export function CohortsClient({ initial }: { initial: CohortRow[] }) {
                       type="button"
                       onClick={(e) => {
                         e.stopPropagation()
+                        setOpenCohortSection('members')
                         setOpenCohortId(c.id)
                         setMenuOpenId(null)
                       }}
@@ -290,6 +293,7 @@ export function CohortsClient({ initial }: { initial: CohortRow[] }) {
 
       <CohortDetailDrawer
         cohortId={openCohortId}
+        initialSection={openCohortSection}
         onClose={() => setOpenCohortId(null)}
         onChanged={(newCount) => {
           if (!openCohortId) return

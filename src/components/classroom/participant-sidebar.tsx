@@ -1,12 +1,16 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { useParticipants, useLocalParticipant } from '@livekit/components-react'
-import { Hand, MicOff, UserMinus, UserPlus, Check, X } from 'lucide-react'
+import { useParticipants, useLocalParticipant, useDataChannel } from '@livekit/components-react'
+import { Hand, MicOff, UserMinus, UserPlus, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { useVideoRoomClient, type PendingAdmission } from './video-room-client'
 import { playWaitingRoomKnock } from './notification-sounds'
+
+const DC_TOPIC = 'role-change'
+const dcEncoder = new TextEncoder()
+const dcDecoder = new TextDecoder()
 
 export function ParticipantSidebar({
   sessionId,
@@ -38,11 +42,53 @@ export function ParticipantSidebar({
   const { localParticipant } = useLocalParticipant()
   const client = useVideoRoomClient()
   const [pending, setPending] = useState<PendingAdmission[]>([])
+  // Optimistic set of identities already promoted in this session so the
+  // "Promote to co-host" button swaps to a "Co-host" badge immediately
+  // without waiting for a LiveKit metadata round-trip. Seeded from the API
+  // on mount so the badge persists across page reloads.
+  const [promotedSet, setPromotedSet] = useState<Set<string>>(new Set())
+  // When THIS user was promoted via data channel, show a one-time banner.
+  const [showPromotedBanner, setShowPromotedBanner] = useState(false)
+  // Tracks the auto-reload timer fired after a successful self-promotion so
+  // the user can dismiss the banner (and cancel the reload) before it fires.
+  const promotedReloadTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => {
+    if (promotedReloadTimerRef.current) clearTimeout(promotedReloadTimerRef.current)
+  }, [])
+
+  // Seed promotedSet from DB on mount so existing co-hosts show the badge
+  // instead of the "Promote" button after a host refreshes the page.
+  useEffect(() => {
+    if (!canModerate) return
+    client.loadCoHosts(sessionId).then((ids) => {
+      if (ids.length > 0) setPromotedSet(new Set(ids))
+    }).catch(() => {/* non-critical — empty set is safe fallback */})
+  }, [sessionId, canModerate, client])
+
+  // Listen for role-change broadcasts from the host.
+  const { message: lastRoleDc } = useDataChannel(DC_TOPIC)
+  useEffect(() => {
+    if (!lastRoleDc) return
+    try {
+      const msg = JSON.parse(dcDecoder.decode(lastRoleDc.payload)) as { identity: string; role: string }
+      if (msg.role === 'CO_HOST') {
+        // Track host-side promotions so the "Promote" button flips to "Co-host"
+        // badge for all clients that see the broadcast, not just the host.
+        setPromotedSet((prev) => new Set([...prev, msg.identity]))
+        if (msg.identity === localParticipant.identity) {
+          setShowPromotedBanner(true)
+          // Auto-reload after 1.5s so the new co-host role takes effect without
+          // requiring the user to manually click the refresh button. Stored
+          // in a ref so dismissing the banner cancels the reload.
+          if (promotedReloadTimerRef.current) clearTimeout(promotedReloadTimerRef.current)
+          promotedReloadTimerRef.current = setTimeout(() => window.location.reload(), 1500)
+        }
+      }
+    } catch { /* ignore malformed */ }
+  }, [lastRoleDc, localParticipant.identity])
+
   // Track admission ids the host has already been notified about so a chime
-  // only fires for *new* arrivals. Plain `pending.length` increases would
-  // mis-fire when the list shrinks (admit/deny) then a different guest
-  // arrives at the same size. Using ids handles concurrent arrival + admit
-  // within the same 5 s poll window correctly.
+  // only fires for *new* arrivals.
   const seenPendingIdsRef = useRef<Set<string>>(new Set())
   // Skip the first fetch so a moderator opening the page mid-call does not
   // hear a knock for guests who were already in the queue.
@@ -133,7 +179,19 @@ export function ParticipantSidebar({
     await client.removeParticipant(sessionId, identity).catch(() => {/* swallow */})
   }
   async function promote(identity: string) {
-    await client.promoteParticipant(sessionId, identity).catch(() => {/* swallow */})
+    try {
+      await client.promoteParticipant(sessionId, identity)
+      // Optimistic UI: immediately swap button to "Co-host" badge
+      setPromotedSet((prev) => new Set([...prev, identity]))
+      // Notify the promoted participant via data channel so they see a
+      // "you've been promoted" banner without refreshing.
+      try {
+        await localParticipant.publishData(
+          dcEncoder.encode(JSON.stringify({ identity, role: 'CO_HOST' })),
+          { topic: DC_TOPIC, reliable: true }
+        )
+      } catch { /* non-critical broadcast — room may not be connected yet */ }
+    } catch {/* swallow */}
   }
   async function admit(id: string) {
     try {
@@ -151,6 +209,38 @@ export function ParticipantSidebar({
 
   return (
     <div className="divide-y">
+      {showPromotedBanner && (
+        <div className="flex items-start gap-2 bg-teal-500/10 border-b border-teal-500/20 px-3 py-2.5">
+          <div className="flex-1 min-w-0">
+            <p className="text-xs font-semibold text-teal-700 dark:text-teal-300">You've been promoted to co-host</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Refresh to get full host controls.</p>
+          </div>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={() => window.location.reload()}
+            title="Refresh now"
+            className="shrink-0 text-teal-600"
+          >
+            <RefreshCw className="size-3" />
+          </Button>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            onClick={() => {
+              if (promotedReloadTimerRef.current) {
+                clearTimeout(promotedReloadTimerRef.current)
+                promotedReloadTimerRef.current = null
+              }
+              setShowPromotedBanner(false)
+            }}
+            title="Dismiss"
+            className="shrink-0"
+          >
+            <X className="size-3" />
+          </Button>
+        </div>
+      )}
       {canModerate && pending.length > 0 && (
         <div className="p-3 bg-amber-500/5">
           <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
@@ -254,9 +344,15 @@ export function ParticipantSidebar({
                     <Button size="icon-xs" variant="ghost" title="Mute" onClick={() => mute(p.identity)}>
                       <MicOff className="size-3" />
                     </Button>
-                    <Button size="icon-xs" variant="ghost" title="Promote to co-host" onClick={() => promote(p.identity)}>
-                      <UserPlus className="size-3" />
-                    </Button>
+                    {promotedSet.has(p.identity) ? (
+                      <span className="inline-flex items-center rounded-full bg-teal-500/15 px-1.5 py-0.5 text-[9px] font-semibold text-teal-700 dark:text-teal-300 self-center">
+                        Co-host
+                      </span>
+                    ) : (
+                      <Button size="icon-xs" variant="ghost" title="Promote to co-host" onClick={() => promote(p.identity)}>
+                        <UserPlus className="size-3" />
+                      </Button>
+                    )}
                     <Button size="icon-xs" variant="ghost" title="Remove" onClick={() => remove(p.identity)}>
                       <UserMinus className="size-3" />
                     </Button>

@@ -685,8 +685,26 @@ function TimeDigitInput({
           setBuffer(String(value).padStart(2, '0'))
           e.currentTarget.blur()
         }
-        else if (e.key === 'ArrowUp')   { e.preventDefault(); onCommit(clamp(value + 1)) }
-        else if (e.key === 'ArrowDown') { e.preventDefault(); onCommit(clamp(value - 1)) }
+        else if (e.key === 'ArrowUp') {
+          e.preventDefault()
+          // Read from the local buffer, not the prop — when the user holds
+          // ArrowUp, React batches the parent's commit so `value` (the prop)
+          // stays stale across rapid keystrokes. Falling back to `value` if
+          // the buffer is empty preserves correctness on cold-open.
+          const current = buffer === '' ? value : Number(buffer)
+          const base = Number.isNaN(current) ? value : current
+          const next = clamp(base + 1)
+          setBuffer(String(next).padStart(2, '0'))
+          onCommit(next)
+        }
+        else if (e.key === 'ArrowDown') {
+          e.preventDefault()
+          const current = buffer === '' ? value : Number(buffer)
+          const base = Number.isNaN(current) ? value : current
+          const next = clamp(base - 1)
+          setBuffer(String(next).padStart(2, '0'))
+          onCommit(next)
+        }
       }}
       className="w-10 bg-transparent text-center text-base font-bold tabular-nums text-foreground outline-none"
     />

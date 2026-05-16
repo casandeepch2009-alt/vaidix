@@ -69,6 +69,9 @@ export function useSpotlight(sessionId: string): SpotlightState & {
   })
 
   function setSpotlight(identity: string | null) {
+    // Optimistic update: the host sees the change instantly rather than
+    // waiting for the SSE round-trip (emit → server → broadcast → onEvent).
+    setTarget(identity)
     if (identity) {
       void emit('SPOTLIGHT_SET', { targetUserId: identity })
     } else {

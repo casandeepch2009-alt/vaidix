@@ -18,7 +18,8 @@ export function WaitingRoom({
         </div>
         <h2 className="mt-4 text-lg font-semibold">You're in the waiting room</h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          {session.host.name} or a co-host will admit you to{' '}
+          <span className="font-medium">{session.host.name}</span>
+          {' '}or a co-host will admit you to{' '}
           <span className="font-medium">{session.title}</span>.
         </p>
         <p className="mt-3 text-xs text-muted-foreground">Checking every few seconds…</p>
