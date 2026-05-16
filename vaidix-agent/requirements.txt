@@ -1,2 +1,10 @@
 livekit-agents[deepgram]==0.12.*
 httpx>=0.27,<0.29
+# PyAV: imported transitively by livekit.agents.utils.codecs.decoder at module
+# load time. The [deepgram] extras in livekit-agents 0.12.x does NOT pull this
+# in, so the agent boots cleanly in pip-install but crashes on first import
+# with `ModuleNotFoundError: No module named 'av'`. Pin <14 because PyAV 14
+# introduced API changes that livekit-agents 0.12 isn't compatible with.
+# The Dockerfile runs an import smoke after pip install to catch regressions
+# of this exact class at build time, not at runtime.
+av>=11,<14
