@@ -377,50 +377,73 @@ cd <repo>
 git push origin master
 ```
 
-### On EC2
+### On EC2 — one command (since v2.7)
 
 ```bash
 ssh ubuntu@13.234.37.54
 cd ~/vaidix
 
-git fetch origin
-git log HEAD..origin/master --oneline  # sanity check what's incoming
-
-git pull origin master
-
-# Build NEW image. CRITICAL: must succeed before running migrations.
-docker compose -f docker-compose.prod.yml --env-file .env build app
-
-# Apply any pending migrations. Idempotent; safe to always run.
-docker compose -f docker-compose.prod.yml --env-file .env run --rm app npx prisma migrate deploy
-
-# Restart app + workers + nginx (nginx is needed to clear DNS cache for the new container)
-docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate app workers nginx
-
-# Verify
-sleep 30
-docker ps --format 'table {{.Names}}\t{{.Status}}' | grep -E 'vaidix-(app|nginx|workers)'
-curl -fsS https://vaidix.arthivaa.com/api/health && echo " ← LIVE"
-docker logs vaidix-app --tail 30 | grep -iE "error|ready"
+./scripts/deploy.sh
 ```
 
-**Why each step matters:**
+That's it. The script is idempotent, change-aware, and uses the **correct compose service names** (`app`, `livekit`, `coturn`, `livekit-egress`, `nginx`) — not the container names (`vaidix-app`, `vaidix-livekit`, ...) that previously caused silent no-ops when operators reached for what they saw in `docker ps`.
 
-| Step | Why |
-|---|---|
-| `git fetch` + `log` before `pull` | Shows what's about to change, so you can spot something unexpected |
-| `build` before `migrate deploy` | The migrations live in the image. If the build hasn't completed, the one-shot container uses the old image's migration set. |
-| `migrate deploy` before app restart | App will crash on first request if schema is missing columns (P2022 error) |
-| `--force-recreate ... nginx` | Without restarting nginx, it keeps the old container's IP cached → 502 errors |
+**What `deploy.sh` does, in order:**
+
+1. **Stash local nginx hostname edits** so `git pull` never conflicts on `nginx/sites-enabled/`.
+2. **Pull from origin/master** and compute the set of changed files.
+3. **Render templated configs from `.env`** via `scripts/render-configs.sh` — refuses to render if any required env var is empty or still contains the literal `CHANGE_ME` placeholder. Templates: `egress.yaml.tpl`, `turnserver.conf.tpl`, `livekit.prod.yaml.tpl`.
+4. **Apply pending Prisma migrations** (`migrate deploy` — idempotent, additive-only).
+5. **Rebuild + recreate `app`** ONLY when `src/`, `prisma/`, `package.json`, `next.config.ts`, or `Dockerfile` changed.
+6. **Recreate `livekit` + `coturn`** when `livekit.prod.yaml.tpl`, `turnserver.conf.tpl`, or `scripts/render-configs.sh` changed.
+7. **Recreate `livekit-egress`** when `egress.yaml.tpl` changed.
+8. **Reload `nginx`** when anything under `nginx/` changed.
+9. **Health check** — surface app boot logs + LiveKit ICE/TURN advertisement.
+
+**Why this matters (history of incidents prevented):**
+
+| Incident class | Pre-v2.7 cause | Prevented by |
+|---|---|---|
+| "v2.6 deck fix never deployed" | Operator typed `vaidix-app` (container name) instead of `app` (service name); compose silently no-op'd | `deploy.sh` uses service names |
+| "Guest's name keeps refreshing" (v2.4) | `turnserver.conf` hardcoded `CHANGE_ME_STRONG_TURN_PASSWORD` placeholder; operator runbook said "remember to sed it", they didn't | Tracked file removed; `.tpl` substitutes from `.env`; render refuses on placeholder |
+| "Egress storm" (v2.4) | `egress.yaml.tpl` had `ws://192.168.1.7:7880` LAN IP shipping unchanged to prod | Same envsubst + validation pattern |
+| "Forgot to rebuild after schema change" | Operator pulled, restarted, forgot `--no-cache build` | `deploy.sh` step 5 always rebuilds on `src/` or `prisma/` change |
 
 ### Schema changes (Prisma)
 
 If your commit includes schema changes:
 
 1. **On laptop**: ALWAYS run `npx prisma migrate dev --name "describe_change"` to generate a migration file. Commit the migration file together with your schema change.
-2. **On EC2**: `git pull` brings the new migration file. `prisma migrate deploy` applies it to RDS.
+2. **On EC2**: `./scripts/deploy.sh` applies it automatically via step 4.
 
 Never edit `prisma/schema.prisma` without generating a migration. The schema-vs-DB drift that causes runtime errors (`P2022: column does not exist`) is always due to skipped migrations.
+
+### Rotating secrets (TURN password, LiveKit keys, DB password)
+
+`deploy.sh` reads `.env`. To rotate any secret without disturbing other entries:
+
+```bash
+# Idempotent upsert (preserves comments, blank lines, all other keys):
+upsert_env() {
+  local key="$1" value="$2" file="${3:-.env}"
+  if grep -qE "^${key}=" "$file" 2>/dev/null; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    [ -s "$file" ] && [ "$(tail -c 1 "$file")" != "" ] && echo "" >> "$file"
+    echo "${key}=${value}" >> "$file"
+  fi
+}
+
+# Example: rotate the TURN secret
+cp .env .env.bak.$(date +%Y%m%d-%H%M%S)
+upsert_env TURN_SHARED_SECRET "$(openssl rand -base64 24 | tr -d '+/=' | head -c 32)"
+
+# Re-render configs + restart only the affected containers:
+./scripts/render-configs.sh
+docker compose -f docker-compose.prod.yml --env-file .env up -d --force-recreate livekit coturn
+```
+
+The rendered `turnserver.conf` and `livekit.prod.yaml` are `.gitignore`d — they are deploy artifacts, not source. Editing them by hand on the box creates drift that the next `deploy.sh` will silently overwrite. Always edit `.env` instead, then re-render.
 
 ---
 

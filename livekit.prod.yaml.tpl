@@ -1,14 +1,24 @@
 # ════════════════════════════════════════════════════════════════════════════
-# Vaidix — LiveKit Server Config (PRODUCTION)
+# Vaidix — LiveKit Server Config (PRODUCTION) — TEMPLATE
 # ════════════════════════════════════════════════════════════════════════════
+# Rendered to ./livekit.prod.yaml by scripts/render-configs.sh at deploy time.
+# Edit THIS .tpl file, NOT the rendered output (which is .gitignored).
+#
 # Mounted by docker-compose.prod.yml at /etc/livekit.yaml inside the container.
 # DEV uses livekit.yaml in the repo root — DO NOT collapse the two; the dev
 # file hardcodes a LAN IP so the host browser can ICE-connect, and that
 # strategy breaks on a cloud host.
 #
-# Keep `keys:` and `webhook.api_key` in sync with .env LIVEKIT_API_KEY /
-# LIVEKIT_API_SECRET on the production host. Both files must use the same
-# pair or every token mint will fail validation with "invalid API key".
+# Env vars consumed (validated by render-configs.sh, render aborts on
+# unrotated-placeholder / empty values):
+#   ${COTURN_REALM}         — TURN realm; matches turnserver.conf
+#   ${TURN_SHARED_SECRET}   — TURN password; matches turnserver.conf
+#   ${LIVEKIT_API_KEY}      — token-mint API key; matches .env
+#   ${LIVEKIT_API_SECRET}   — token-mint secret; matches .env
+#
+# The same ${TURN_SHARED_SECRET} renders into BOTH this file's `credential`
+# fields AND turnserver.conf's `user=livekit:…` — guarantees the two cannot
+# drift, which was the v2.4 root cause of "guest's name keeps refreshing".
 
 port: 7880
 bind_addresses:
@@ -30,7 +40,7 @@ rtc:
   # auto-fills it from the metadata service. If you ever need to pin it
   # (e.g. a host without metadata service access), uncomment and set
   # to the Elastic IP, NOT the private/docker IP.
-  # node_ip: "13.234.37.54"
+  # node_ip: "${COTURN_EXTERNAL_IP}"
 
   # External TURN relay — advertised to clients alongside LiveKit's own
   # host candidates so participants behind symmetric NATs (mobile hotspots,
@@ -42,32 +52,29 @@ rtc:
   # fall back to and the LiveKit signal channel reconnected every 15-30s.
   # That reconnect storm is what users saw as "guest's name keeps refreshing".
   #
-  # `credential` MUST match the password set in turnserver.conf under
-  # `user=livekit:<password>`. Rotate both files together. AWS security
+  # `credential` is sourced from ${TURN_SHARED_SECRET} — same value renders
+  # into turnserver.conf, so by construction they cannot drift. AWS security
   # group on the EC2 host must open inbound UDP 3478 + TCP 3478 + the
   # UDP relay range 49152-65535 declared in turnserver.conf.
-  #
-  # Host is the same public address clients reach the app at; an IP also
-  # works if you don't have a DNS record specifically for coturn.
   turn_servers:
-    - host: turn.vaidix.arthivaa.com
+    - host: ${COTURN_REALM}
       port: 3478
       protocol: udp
       username: livekit
-      credential: CHANGE_ME_STRONG_TURN_PASSWORD
-    - host: turn.vaidix.arthivaa.com
+      credential: ${TURN_SHARED_SECRET}
+    - host: ${COTURN_REALM}
       port: 3478
       protocol: tcp
       username: livekit
-      credential: CHANGE_ME_STRONG_TURN_PASSWORD
+      credential: ${TURN_SHARED_SECRET}
 
 redis:
   address: redis:6379
 
 keys:
   # MUST match .env LIVEKIT_API_KEY / LIVEKIT_API_SECRET on the same host.
-  # Rotate both together; the secret needs to be at least 32 chars.
-  devkey: secret_change_me_in_week_0_day_5_32chars_min
+  # Rendered from the SAME .env values, so they cannot drift.
+  ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 
 logging:
   level: info
@@ -86,7 +93,7 @@ room:
   departure_timeout: 20
 
 webhook:
-  api_key: devkey
+  api_key: ${LIVEKIT_API_KEY}
   urls:
     # In prod everything runs inside Docker on vaidix-net, so we address the
     # Next.js app by service name. host.docker.internal works on Docker
