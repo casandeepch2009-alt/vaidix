@@ -12,6 +12,7 @@ import {
   HeadObjectCommand,
   CreateBucketCommand,
   HeadBucketCommand,
+  PutBucketCorsCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { env } from './env';
@@ -61,6 +62,21 @@ export async function ensureBucket(): Promise<void> {
   } catch {
     await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
   }
+  // Allow browsers to PUT via presigned URLs from any origin.
+  // Without this, MinIO/S3 blocks the CORS preflight and the chat
+  // attachment upload fails with "Failed to fetch".
+  await s3.send(new PutBucketCorsCommand({
+    Bucket: BUCKET,
+    CORSConfiguration: {
+      CORSRules: [{
+        AllowedHeaders: ['*'],
+        AllowedMethods: ['PUT', 'GET', 'HEAD'],
+        AllowedOrigins: ['*'],
+        ExposeHeaders: ['ETag'],
+        MaxAgeSeconds: 3600,
+      }],
+    },
+  }));
 }
 
 export async function presignUpload(

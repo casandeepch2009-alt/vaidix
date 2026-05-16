@@ -272,14 +272,14 @@ function LiveRoom({
   // banner copy without violating the no-refs-during-render rule.
   const [reconnectAttempts, setReconnectAttempts] = useState(0)
 
-  // Sidebar state lives at the LiveRoom level (above LiveKitRoom) on purpose:
-  // a reconnect attempt bumps the LiveKitRoom key, which remounts everything
-  // beneath it. If activeTab / sidebarOpen lived inside InnerRoom they'd be
-  // wiped, which is why the whiteboard panel "collapsed ~2s after open"
-  // when a transient blip happened (QA #13). Lifting them up makes the
-  // panel state survive reconnects.
+  // Sidebar + whiteboard state lives at the LiveRoom level (above LiveKitRoom)
+  // on purpose: a reconnect attempt bumps the LiveKitRoom key, which remounts
+  // everything beneath it. If these lived inside InnerRoom they'd be wiped,
+  // which is why the whiteboard collapsed ~2s after open (QA #13). Lifting
+  // them up makes all panel state survive reconnects.
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [activeTab, setActiveTab] = useState('chat')
+  const [wbFullscreen, setWbFullscreen] = useState(false)
 
   const SLOW_CONNECT_MS = 5000
   const VERY_SLOW_MS = 15000
@@ -410,6 +410,8 @@ function LiveRoom({
           setSidebarOpen={setSidebarOpen}
           activeTab={activeTab}
           setActiveTab={setActiveTab}
+          wbFullscreen={wbFullscreen}
+          setWbFullscreen={setWbFullscreen}
         />
         <RoomAudioRenderer />
       </LiveKitRoom>
@@ -541,6 +543,8 @@ function InnerRoom({
   setSidebarOpen,
   activeTab,
   setActiveTab,
+  wbFullscreen,
+  setWbFullscreen,
 }: {
   session: SessionInfo
   currentUser: {
@@ -559,13 +563,14 @@ function InnerRoom({
   isHostish: boolean
   onLeave: () => void
   onJoinBreakout: (b: { id: string; name: string }) => void
-  /// Sidebar state is owned by the LiveRoom parent so a LiveKitRoom remount
-  /// (transient disconnect) does not wipe the user's open panel / active tab.
-  /// See QA #13 for the original symptom this prop-drilling resolves.
+  /// Sidebar + whiteboard fullscreen state owned by LiveRoom so LiveKitRoom
+  /// remounts (key={bumper} on reconnect) do not reset the user's panel state.
   sidebarOpen: boolean
   setSidebarOpen: (open: boolean) => void
   activeTab: string
   setActiveTab: (tab: string) => void
+  wbFullscreen: boolean
+  setWbFullscreen: (v: boolean) => void
 }) {
 
   const captionsActive = session.captionsProfile !== 'off'
@@ -709,11 +714,6 @@ function InnerRoom({
               onLangChange={changeCaptionsLang}
             />
           )}
-          {/* Download transcript PDF — only enabled once the post-session
-              transcript has been finalized. Pre-finalization the button used
-              to open a 404 page reading "No transcript found" (QA #7). */}
-          <TranscriptPdfButton sessionId={session.id} />
-
           {isHostish && (
             <HostControlsMenu sessionId={session.id} isHost={role === 'HOST'} />
           )}
@@ -817,13 +817,27 @@ function InnerRoom({
                 />
               )}
               {activeTab === 'chat' && (
-                <ChatPanel sessionId={session.id} currentUser={currentUser} />
+                <ChatPanel
+                  sessionId={session.id}
+                  currentUser={currentUser}
+                  onNewMessages={(n) => {
+                    // Only badge when the panel is open but buried (shouldn't
+                    // happen — tab is 'chat') or, more importantly, when the
+                    // poll fires after the user switches away from chat mid-session.
+                    if (!sidebarOpen || activeTab !== 'chat') setUnreadChatCount((c) => c + n)
+                  }}
+                />
               )}
               {activeTab === 'notes' && (
                 <SharedNotesPanel sessionId={session.id} isHostish={isHostish} />
               )}
               {activeTab === 'whiteboard' && (
-                <WhiteboardPanel sessionId={session.id} isHostish={isHostish} />
+                <WhiteboardPanel
+                  sessionId={session.id}
+                  isHostish={isHostish}
+                  fullscreen={wbFullscreen}
+                  onFullscreenChange={setWbFullscreen}
+                />
               )}
               {activeTab === 'leaderboard' && (
                 <LeaderboardPanel sessionId={session.id} />

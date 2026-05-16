@@ -61,9 +61,15 @@ interface SurfaceHandle {
 export function WhiteboardPanel({
   sessionId,
   isHostish,
+  fullscreen,
+  onFullscreenChange,
 }: {
   sessionId: string
   isHostish: boolean
+  /// Lifted to LiveRoom (above LiveKitRoom key={bumper}) so fullscreen
+  /// survives reconnect remounts. Do NOT move back to local state.
+  fullscreen: boolean
+  onFullscreenChange: (v: boolean) => void
 }) {
   const { localParticipant } = useLocalParticipant()
   const room = useRoomContext()
@@ -71,7 +77,6 @@ export function WhiteboardPanel({
 
   const [editableByResidents, setEditableByResidents] = useState(false)
   const [hydrated, setHydrated] = useState(false)
-  const [fullscreen, setFullscreen] = useState(false)
   const [saveStatus, setSaveStatus] = useState<'idle' | 'pending' | 'saving' | 'saved' | 'error'>(
     'idle'
   )
@@ -236,7 +241,7 @@ export function WhiteboardPanel({
         <SaveBadge status={saveStatus} />
         <button
           type="button"
-          onClick={() => setFullscreen((v) => !v)}
+          onClick={() => onFullscreenChange(!fullscreen)}
           title={fullscreen ? 'Exit fullscreen' : 'Open in fullscreen'}
           className="flex items-center justify-center w-7 h-7 rounded-md text-white/55 hover:text-white/90 hover:bg-white/8"
         >

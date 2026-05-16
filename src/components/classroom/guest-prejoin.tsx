@@ -28,11 +28,8 @@
 import {
   useCallback,
   useEffect,
-  useImperativeHandle,
   useMemo,
-  useRef,
   useState,
-  forwardRef,
 } from 'react'
 import { useRouter } from 'next/navigation'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -49,7 +46,7 @@ import {
   useTracks,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
-import { DisconnectReason, Track } from 'livekit-client'
+import { DisconnectReason, Track, ParticipantKind } from 'livekit-client'
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, MonitorOff,
   PhoneOff, Loader2, Clock, Shield, LogIn,
@@ -361,7 +358,7 @@ export function GuestPrejoin(props: GuestPrejoinProps) {
               </div>
               <h2 className="mt-4 text-base font-semibold">Waiting for the host…</h2>
               <p className="mt-1 text-sm text-muted-foreground">
-                We&apos;ve let <strong>{props.hostName ?? 'the host'}</strong> know you&apos;re here.{' '}
+                We&apos;ve let <strong>{props.hostName ?? 'the host'}</strong>{' '}know you&apos;re here.{' '}
                 You&apos;ll join the call as soon as you&apos;re admitted.
               </p>
             </motion.div>
@@ -494,27 +491,36 @@ function GuestLiveRoom({
     )
   }
 
+  // Wrap LiveKitRoom in a plain fixed div — LiveKit injects `lk-room-container`
+  // which carries `position: relative` from @livekit/components-styles, winning
+  // the cascade over a Tailwind `fixed` on the same element. Same pattern used
+  // by InnerRoom in live-session.tsx.
   return (
-    <LiveKitRoom
-      token={token}
-      serverUrl={url}
-      connect
-      audio={canPublish}
-      video={canPublish}
-      onDisconnected={onDisconnected}
-      data-lk-theme="default"
-      className="fixed inset-0 z-40"
-    >
-      <div className="relative flex h-full flex-col bg-slate-950 text-white overflow-hidden">
-        <GuestHeader title={title} />
-        <main className="flex-1 overflow-hidden p-3">
-          <GuestStage />
-        </main>
-        <RoomAudioRenderer />
-        <GuestControls canPublish={canPublish} onLeave={onManualLeave} />
-        {phase === 'reconnecting' && <ReconnectingOverlay />}
-      </div>
-    </LiveKitRoom>
+    <div className="fixed inset-0 z-40 overflow-hidden bg-slate-950">
+      <LiveKitRoom
+        token={token}
+        serverUrl={url}
+        connect
+        audio={canPublish}
+        // video intentionally omitted — camera starts off; user enables manually.
+        // auto-enabling video on mount causes a browser-permission race where the
+        // camera flashes briefly then the GuestControls state (optimistic true)
+        // immediately turns it back off when the user tries to "turn it on."
+        onDisconnected={onDisconnected}
+        data-lk-theme="default"
+        className="h-full"
+      >
+        <div className="relative flex h-full flex-col text-white overflow-hidden">
+          <GuestHeader title={title} />
+          <main className="flex-1 overflow-hidden p-3">
+            <GuestStage />
+          </main>
+          <RoomAudioRenderer />
+          <GuestControls canPublish={canPublish} onLeave={onManualLeave} />
+          {phase === 'reconnecting' && <ReconnectingOverlay />}
+        </div>
+      </LiveKitRoom>
+    </div>
   )
 }
 
@@ -538,9 +544,8 @@ function ReconnectingOverlay() {
 }
 
 function GuestHeader({ title }: { title: string }) {
-  // Show all participants in the room so the guest knows who they're with —
-  // matches what authenticated users see in their header strip.
-  const participants = useParticipants()
+  const allParticipants = useParticipants()
+  const participants = allParticipants.filter((p) => p.kind !== ParticipantKind.AGENT)
   const count = participants.length
   return (
     <header className="flex items-center justify-between border-b border-white/5 bg-black/40 px-4 py-2.5 text-sm">
@@ -620,79 +625,78 @@ function GuestStage() {
   )
 }
 
+// GuestControls lives inside <LiveKitRoom> so useLocalParticipant() works here.
+// We read isMicrophoneEnabled / isCameraEnabled from LiveKit directly instead of
+// tracking independent boolean state — the old pattern started as micOn=true /
+// camOn=true but LiveKit's own camera-enable (from video={true} on <LiveKitRoom>)
+// could race with browser permissions, leaving the buttons in an inverted state
+// where every click did the opposite of what the user expected.
 function GuestControls({ canPublish, onLeave }: { canPublish: boolean; onLeave: () => void }) {
-  // Avoid `useLocalParticipant` here — keeping the dependency surface narrow
-  // means the guest controls never accidentally try to invoke an admin RPC.
-  const [micOn, setMicOn] = useState(true)
-  const [camOn, setCamOn] = useState(true)
+  const { localParticipant, isMicrophoneEnabled, isCameraEnabled } = useLocalParticipant()
   const [shareOn, setShareOn] = useState(false)
-  const lpRef = useRef<{
-    setMicrophoneEnabled: (v: boolean) => Promise<unknown>
-    setCameraEnabled: (v: boolean) => Promise<unknown>
-    setScreenShareEnabled: (v: boolean) => Promise<unknown>
-  } | null>(null)
+  const [sharing, setSharing] = useState(false)
+
+  const toggleMic = useCallback(async () => {
+    await localParticipant.setMicrophoneEnabled(!isMicrophoneEnabled).catch(() => {/* ignore */})
+  }, [localParticipant, isMicrophoneEnabled])
+
+  const toggleCam = useCallback(async () => {
+    await localParticipant.setCameraEnabled(!isCameraEnabled).catch(() => {/* ignore */})
+  }, [localParticipant, isCameraEnabled])
+
+  const toggleShare = useCallback(async () => {
+    if (sharing) return
+    setSharing(true)
+    const next = !shareOn
+    try {
+      await localParticipant.setScreenShareEnabled(next)
+      const pub = localParticipant.getTrackPublication(Track.Source.ScreenShare)
+      setShareOn(next ? !!pub && !pub.isMuted : false)
+    } catch {
+      // user cancelled OS source picker — don't flip shareOn
+    } finally {
+      setSharing(false)
+    }
+  }, [sharing, shareOn, localParticipant])
+
   return (
-    <LocalParticipantBridge ref={lpRef}>
-      <footer className="flex items-center justify-center gap-3 border-t border-white/10 bg-black/60 px-4 py-3">
-        {canPublish && (
-          <>
-            <Button
-              size="icon"
-              variant={micOn ? 'secondary' : 'destructive'}
-              onClick={async () => {
-                const next = !micOn
-                setMicOn(next)
-                await lpRef.current?.setMicrophoneEnabled(next)
-              }}
-              title={micOn ? 'Mute mic' : 'Unmute mic'}
-            >
-              {micOn ? <Mic className="size-4" /> : <MicOff className="size-4" />}
-            </Button>
-            <Button
-              size="icon"
-              variant={camOn ? 'secondary' : 'destructive'}
-              onClick={async () => {
-                const next = !camOn
-                setCamOn(next)
-                await lpRef.current?.setCameraEnabled(next)
-              }}
-              title={camOn ? 'Stop camera' : 'Start camera'}
-            >
-              {camOn ? <VideoIcon className="size-4" /> : <VideoOff className="size-4" />}
-            </Button>
-            <Button
-              size="icon"
-              variant={shareOn ? 'default' : 'secondary'}
-              onClick={async () => {
-                const next = !shareOn
-                setShareOn(next)
-                await lpRef.current?.setScreenShareEnabled(next)
-              }}
-              title={shareOn ? 'Stop sharing' : 'Share screen'}
-            >
-              {shareOn ? <MonitorOff className="size-4" /> : <Monitor className="size-4" />}
-            </Button>
-          </>
-        )}
-        <Button size="icon" variant="destructive" onClick={onLeave} title="Leave call">
-          <PhoneOff className="size-4" />
-        </Button>
-      </footer>
-    </LocalParticipantBridge>
+    <footer className="flex items-center justify-center gap-3 border-t border-white/10 bg-black/60 px-4 py-3">
+      {canPublish && (
+        <>
+          <Button
+            size="icon"
+            variant={isMicrophoneEnabled ? 'secondary' : 'destructive'}
+            onClick={toggleMic}
+            title={isMicrophoneEnabled ? 'Mute mic' : 'Unmute mic'}
+          >
+            {isMicrophoneEnabled ? <Mic className="size-4" /> : <MicOff className="size-4" />}
+          </Button>
+          <Button
+            size="icon"
+            variant={isCameraEnabled ? 'secondary' : 'destructive'}
+            onClick={toggleCam}
+            title={isCameraEnabled ? 'Stop camera' : 'Start camera'}
+          >
+            {isCameraEnabled ? <VideoIcon className="size-4" /> : <VideoOff className="size-4" />}
+          </Button>
+          <Button
+            size="icon"
+            variant={shareOn ? 'default' : 'secondary'}
+            onClick={toggleShare}
+            disabled={sharing}
+            title={shareOn ? 'Stop sharing' : 'Share screen'}
+          >
+            {sharing
+              ? <Loader2 className="size-4 animate-spin" />
+              : shareOn
+                ? <MonitorOff className="size-4" />
+                : <Monitor className="size-4" />}
+          </Button>
+        </>
+      )}
+      <Button size="icon" variant="destructive" onClick={onLeave} title="Leave call">
+        <PhoneOff className="size-4" />
+      </Button>
+    </footer>
   )
 }
-
-// useLocalParticipant has to be called inside the LiveKitRoom subtree, but we
-// also want to expose its methods to a sibling. This bridge captures the
-// participant handle once and forwards it via ref.
-const LocalParticipantBridge = forwardRef<unknown, { children: React.ReactNode }>(
-  function LocalParticipantBridge({ children }, ref) {
-    const { localParticipant } = useLocalParticipant()
-    useImperativeHandle(ref, () => ({
-      setMicrophoneEnabled: (v: boolean) => localParticipant.setMicrophoneEnabled(v),
-      setCameraEnabled: (v: boolean) => localParticipant.setCameraEnabled(v),
-      setScreenShareEnabled: (v: boolean) => localParticipant.setScreenShareEnabled(v),
-    }))
-    return <>{children}</>
-  },
-)

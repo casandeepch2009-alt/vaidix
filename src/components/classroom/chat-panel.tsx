@@ -94,9 +94,14 @@ const decoder = new TextDecoder()
 export function ChatPanel({
   sessionId,
   currentUser,
+  onNewMessages,
 }: {
   sessionId: string
   currentUser: { id: string; name: string }
+  /// Called with the count of truly-new messages whenever polling finds
+  /// messages not previously seen. Allows InnerRoom to show a badge even
+  /// when the data channel missed the delivery (e.g. during reconnect).
+  onNewMessages?: (count: number) => void
 }) {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [draft, setDraft] = useState('')
@@ -111,6 +116,12 @@ export function ChatPanel({
   const room = useRoomContext()
   const client = useVideoRoomClient()
   const scrollRef = useRef<HTMLDivElement>(null)
+  // Track which IDs we've already shown so the poll-based badge doesn't
+  // fire for messages that were already in the list before onNewMessages
+  // was hooked up. Stable ref — no re-render needed.
+  const seenIdsRef = useRef<Set<string>>(new Set())
+  const onNewMessagesRef = useRef(onNewMessages)
+  useEffect(() => { onNewMessagesRef.current = onNewMessages }, [onNewMessages])
 
   // @mention picker state. mentionQuery === null means the picker is closed;
   // empty-string means user just typed `@` and we're showing all candidates.
@@ -202,34 +213,40 @@ export function ChatPanel({
         .loadChat(sessionId, 100)
         .then((msgs) => {
           if (!mounted) return
+          // Count messages from OTHER users that polling sees for the first
+          // time. These are the ones the data channel missed (e.g. during
+          // reconnect). Own messages are never "new" from badge perspective.
+          let newFromPoll = 0
           setMessages((prev) => {
             const apiMap = new Map(msgs.map((m) => [m.id, m]))
             const out: ChatMessage[] = []
-            const seen = new Set<string>()
+            const merged = new Set<string>()
             for (const m of prev) {
               if (m.id.startsWith('tmp-')) {
-                // Optimistic local send not yet replaced by server echo.
                 out.push(m)
-                seen.add(m.id)
+                merged.add(m.id)
               } else if (apiMap.has(m.id)) {
-                // Server has it — prefer the canonical row (attachment URL).
                 out.push(apiMap.get(m.id)!)
-                seen.add(m.id)
+                merged.add(m.id)
               } else {
-                // DC-received from another participant that hasn't yet shown
-                // up in the API snapshot (read-replica lag / race). Keeping
-                // it here prevents the poll from blanking out very recent
-                // remote messages.
                 out.push(m)
-                seen.add(m.id)
+                merged.add(m.id)
               }
             }
             for (const m of msgs) {
-              if (!seen.has(m.id)) out.push(m)
+              if (!merged.has(m.id)) {
+                out.push(m)
+                // Only badge on messages from others that we haven't seen yet
+                if (m.userId !== currentUser.id && !seenIdsRef.current.has(m.id)) {
+                  newFromPoll++
+                }
+              }
+              seenIdsRef.current.add(m.id)
             }
             out.sort((a, b) => a.createdAt.localeCompare(b.createdAt))
             return out
           })
+          if (newFromPoll > 0) onNewMessagesRef.current?.(newFromPoll)
         })
         .catch(() => {})
     void load()

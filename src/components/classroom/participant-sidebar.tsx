@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParticipants, useLocalParticipant, useDataChannel } from '@livekit/components-react'
+import { ParticipantKind } from 'livekit-client'
 import { Hand, MicOff, UserMinus, UserPlus, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
@@ -38,7 +39,8 @@ export function ParticipantSidebar({
   currentUserRole?: string
   currentUserIsOrganizer?: boolean
 }) {
-  const participants = useParticipants()
+  const allParticipants = useParticipants()
+  const participants = allParticipants.filter((p) => p.kind !== ParticipantKind.AGENT)
   const { localParticipant } = useLocalParticipant()
   const client = useVideoRoomClient()
   const [pending, setPending] = useState<PendingAdmission[]>([])
