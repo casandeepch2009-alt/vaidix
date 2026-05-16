@@ -8,6 +8,7 @@
 // Updates session + recording records without trusting any client state.
 
 import { webhookReceiver, startSessionEgress } from '@/lib/livekit';
+import { TrackSource } from '@livekit/protocol';
 import { db } from '@/lib/db';
 import { getQueue, QUEUES } from '@/lib/queue';
 import { SessionStatus, RecordingStatus } from '@prisma/client';
@@ -385,23 +386,19 @@ export async function POST(req: Request) {
         break;
       }
       case 'track_published': {
-        // This is the correct moment to start egress: a participant has
-        // negotiated ICE, completed getUserMedia, and is actively pushing
-        // media into the room. The egress recorder bot will get its
-        // "start signal" immediately on join instead of timing out.
+        // Only start egress when a camera track is published. Room composite
+        // egress requires at least one video track within ~15 s of joining or
+        // it aborts with "Start signal not received" (code 412). Triggering on
+        // microphone tracks caused an infinite retry storm: mic published →
+        // egress started → waited 15 s for video → RECORDING_FAILED written →
+        // next mic event fired → RECORDING_FAILED not in ACTIVE_STATES →
+        // new egress dispatched → repeat every 15-30 s.
         //
-        // maybeStartRecording is idempotent — multiple track_published
-        // events (host's mic, then camera, then a guest's mic, etc.)
-        // all hit the same code path but only the first one actually
-        // dispatches; subsequent calls see an ACTIVE Recording row and
-        // short-circuit. Subscriber-only participants (webinar viewers)
-        // never publish a track, which is correct — there's nothing for
-        // egress to capture in a viewer-only session.
-        //
-        // We don't filter by track type (audio vs video) here. Both are
-        // valid recording starts: an audio-only session (e.g. case
-        // discussion with slides shared but no camera) should still
-        // record the audio.
+        // Screen-share (SCREEN_SHARE) also carries video and is included so
+        // screen-only sessions record correctly. Audio-only recording would
+        // require a separate audio-only egress type — deferred.
+        const src = event.track?.source;
+        if (src !== TrackSource.CAMERA && src !== TrackSource.SCREEN_SHARE) break;
         await maybeStartRecording(sessionId);
         break;
       }

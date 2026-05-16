@@ -6,6 +6,7 @@
 // chip when the room is larger.
 
 import { useParticipants, useLocalParticipant } from '@livekit/components-react'
+import { ParticipantKind } from 'livekit-client'
 import { motion } from 'framer-motion'
 import { cn } from '@/lib/utils'
 
@@ -90,7 +91,8 @@ export function ParticipantStrip({
   selfAvatarUrl?: string | null
   selfIsOrganizer?: boolean
 } = {}) {
-  const participants = useParticipants()
+  const allParticipants = useParticipants()
+  const participants = allParticipants.filter((p) => p.kind !== ParticipantKind.AGENT)
   const { localParticipant } = useLocalParticipant()
 
   const sorted = [...participants].sort((a, b) => {
