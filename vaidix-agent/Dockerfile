@@ -13,10 +13,11 @@ WORKDIR /agent
 COPY requirements.txt /agent/requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Build-time import smoke. Fails the image build if any agent-critical import
-# can't resolve — catches missing transitive deps (e.g. PyAV regressions) HERE,
-# instead of in a runtime crash loop after deploy.
-RUN python -c "import av; from livekit.agents import JobContext; print('agent imports OK')"
+# Build-time import smoke. MUST mirror every top-level import in main.py so
+# missing transitive deps (PyAV, livekit-plugins-*, etc.) fail THIS build
+# instead of crash-looping at runtime after deploy. If you add or change a
+# top-level import in main.py, update this line too.
+RUN python -c "import av; import httpx; from livekit import rtc; from livekit.agents import AutoSubscribe, JobContext, WorkerOptions, cli, stt; from livekit.plugins import deepgram; print('agent imports OK')"
 
 COPY main.py /agent/main.py
 
