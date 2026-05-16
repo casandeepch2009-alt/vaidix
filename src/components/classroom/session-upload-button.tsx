@@ -211,7 +211,7 @@ export function SessionUploadButton({ sessionId, onUploaded }: Props) {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".ppt,.pptx,.pdf,.doc,.docx,.md,.png,.jpg,.jpeg,.mp4,.mov"
+                    accept=".ppt,.pptx,.key,.pdf,.doc,.docx,.md,.png,.jpg,.jpeg,.mp4,.mov"
                     onChange={(e) => setFile(e.target.files?.[0] ?? null)}
                     disabled={phase !== 'idle'}
                     className="mt-1 block w-full rounded-md border border-input bg-background px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-primary/10 file:px-3 file:py-1 file:text-xs file:font-semibold file:text-primary"

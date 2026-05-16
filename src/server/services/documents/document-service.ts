@@ -18,6 +18,13 @@ import { getQueue, QUEUES } from '@/lib/queue';
 const KIND_FROM_MIME: Array<[RegExp, DocumentKind]> = [
   [/^application\/vnd\.openxmlformats-officedocument\.presentationml\.presentation$/, DocumentKind.PPT],
   [/^application\/vnd\.ms-powerpoint$/, DocumentKind.PPT],
+  // Apple Keynote (.key) — both modern and legacy mime forms. Text + speaker
+  // notes are NOT extractable yet (iWork iwa proto-binary archive needs a
+  // dedicated parser); the document is stored, classified as PPT, and the
+  // AI pipelines fall through to a metadata-only signal with a clear hint
+  // to faculty: "Export from Keynote → PowerPoint (.pptx)" for full ingestion.
+  [/^application\/vnd\.apple\.keynote$/, DocumentKind.PPT],
+  [/^application\/x-iwork-keynote-sffkey$/, DocumentKind.PPT],
   [/^application\/pdf$/, DocumentKind.PDF],
   [/^application\/msword$/, DocumentKind.DOC],
   [/^application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document$/, DocumentKind.DOC],

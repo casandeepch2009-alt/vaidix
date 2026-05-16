@@ -16,7 +16,7 @@
 
 import { db } from '@/lib/db';
 import { s3, BUCKET } from '@/lib/storage';
-import { GetObjectCommand } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import {
   DeckForgeStatus,
   DeckForgeSource,
@@ -29,9 +29,11 @@ import {
 import {
   aiExtractFromSourceJson,
   aiEnhanceContentJson,
+  aiGenerateImageForSlide,
   AiUnavailableError,
   AiUnparseableError,
 } from '@/server/services/ai/router';
+import { PptxDocument, PptxParseError } from '@/server/services/pptx/pptx-document';
 import { getFacultyHistoryContext } from './faculty-analytics-history';
 import {
   getFacultyStyleProfile,
@@ -161,6 +163,10 @@ async function loadDocs(inputs: WizardForgeInputDoc[]): Promise<LoadedDoc[]> {
   });
 }
 
+// Mimes Gemini can ingest directly as `inlineData` (multimodal). PPTX is
+// handled separately by PptxDocument — we extract text deterministically
+// and pass it as a `text` part instead of trying to inline the .pptx binary
+// (which Gemini does not parse natively).
 const GEMINI_INLINE_MIMES = new Set([
   'application/pdf',
   'text/plain',
@@ -171,11 +177,32 @@ const GEMINI_INLINE_MIMES = new Set([
   'image/webp',
 ]);
 
+// PPTX mime types we route through PptxDocument for deterministic extraction.
+// The old .ppt OLE binary is intentionally NOT in this set — PptxDocument is
+// .pptx (ZIP) only, and the placeholder fallback below handles .ppt cleanly.
+const PPTX_MIME_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+]);
+
+// Apple Keynote (.key) is accepted but not text-extractable yet (iWork iwa
+// proto-binary archive needs a dedicated parser). Recognised so we can emit
+// a helpful "export to .pptx for full ingestion" hint to Gemini + the
+// faculty, instead of the generic "cannot be inlined" placeholder.
+const KEYNOTE_MIME_TYPES = new Set([
+  'application/vnd.apple.keynote',
+  'application/x-iwork-keynote-sffkey',
+]);
+
 // Aggregate inline-blob cap per forge job. Gemini's hard limit is much
 // higher but we stay safe by capping the total at 20 MB.
 const TOTAL_INLINE_CAP_BYTES = 20 * 1024 * 1024;
 
-async function fetchInline(s3Key: string): Promise<{ data: string; mimeType: string; byteLength: number }> {
+// Per-PPTX extracted-text cap to keep the Gemini context bounded on
+// pathological 200-slide decks. Bytes well within Gemini's window but
+// generous enough that a 22-slide LVPEI faculty deck round-trips intact.
+const PPTX_TEXT_CAP_PER_DOC = 200 * 1024;
+
+async function fetchBytes(s3Key: string): Promise<{ buffer: Buffer; mimeType: string; byteLength: number }> {
   const out = await s3.send(new GetObjectCommand({ Bucket: BUCKET, Key: s3Key }));
   const stream = out.Body as AsyncIterable<Uint8Array> | undefined;
   if (!stream) throw new WizardForgeError('SOURCE_NOT_FOUND', `Empty S3 body for ${s3Key}`);
@@ -183,11 +210,121 @@ async function fetchInline(s3Key: string): Promise<{ data: string; mimeType: str
   for await (const c of stream) chunks.push(Buffer.from(c));
   const buf = Buffer.concat(chunks);
   return {
-    data: buf.toString('base64'),
+    buffer: buf,
     mimeType: out.ContentType ?? 'application/octet-stream',
     byteLength: buf.byteLength,
   };
 }
+
+export interface PptxExtraction {
+  slideCount: number;
+  /** Deterministic outline keyed to slide order — used to anchor ENHANCE_EXISTING. */
+  outline: Array<{ slideIndex: number; title: string; summary: string }>;
+  /** Human-readable per-slide block we feed to Gemini as a `text` part. */
+  text: string;
+  /** True when at least one slide carried speaker-notes content. */
+  hasSpeakerNotes: boolean;
+}
+
+/**
+ * Parse a .pptx buffer with the in-tree PptxDocument and turn it into:
+ *   (a) a `text` representation Gemini reads as part of the extraction call,
+ *       including titles, body text and (Mac/Win) Keynote/PowerPoint speaker
+ *       notes when present,
+ *   (b) a deterministic `outline` array used to overwrite Gemini's
+ *       primaryDeckOutline so the ENHANCE branch of the Opus draft prompt
+ *       gets the exact original slide order/titles (LLM drift on titles
+ *       defeats the enhance contract).
+ *
+ * Returns null on parse failure — caller falls back to the metadata-only
+ * placeholder so a malformed .pptx never blocks the forge.
+ *
+ * Exported so suggest-objectives (and any future PPTX-consuming AI flow) can
+ * reuse the same extraction contract — keep the PPTX-to-AI surface in one
+ * place to avoid drift.
+ */
+export function extractPptxContent(buf: Buffer, label: string): PptxExtraction | null {
+  let doc: PptxDocument;
+  try {
+    doc = PptxDocument.fromBuffer(buf);
+  } catch (e) {
+    console.warn('[wizard-forge] PPTX parse failed', {
+      label,
+      error: e instanceof PptxParseError ? e.message : String(e),
+    });
+    return null;
+  }
+  const slides = doc.slides();
+  const outline: PptxExtraction['outline'] = [];
+  const lines: string[] = [
+    `[Begin file: ${label} — ${slides.length} slide${slides.length === 1 ? '' : 's'}, extracted via PptxDocument (titles + body + speaker notes)]`,
+  ];
+  let chars = lines[0].length;
+  let hasSpeakerNotes = false;
+
+  for (const slide of slides) {
+    const titleShape = slide.shapes.find((s) => s.isTitle && s.text.trim());
+    const bodyShapes = slide.shapes.filter(
+      (s) => (!titleShape || s.slotId !== titleShape.slotId) && s.text.trim(),
+    );
+    // Fallback: if no <p:ph type="title"/> placeholder, treat the first
+    // text-bearing shape as the title (real-world decks built without
+    // layout placeholders — pptxgenjs-generated, some institutional templates).
+    const titleText = (
+      titleShape?.text ?? bodyShapes.shift()?.text ?? `Slide ${slide.index}`
+    )
+      .trim()
+      .replace(/\s+/g, ' ')
+      .slice(0, 200);
+
+    const bodyJoined = bodyShapes
+      .map((s) => s.text.trim().replace(/\s+/g, ' '))
+      .filter(Boolean)
+      .join(' / ');
+
+    // Speaker notes survive the round-trip across Mac Keynote → .pptx export
+    // and Windows PowerPoint — both write into ppt/notesSlides/notesSlideN.xml.
+    const notes = doc.notes(slide.index);
+    if (notes) hasSpeakerNotes = true;
+
+    outline.push({
+      slideIndex: slide.index,
+      title: titleText,
+      summary: bodyJoined.slice(0, 300),
+    });
+
+    const notesBlock = notes
+      ? `\nNOTES: ${notes.replace(/\s+/g, ' ').slice(0, 800)}`
+      : '';
+
+    const slideBlock =
+      `\n=== Slide ${slide.index} ===\n` +
+      `TITLE: ${titleText}\n` +
+      bodyShapes.map((s) => `TEXT: ${s.text.trim()}`).join('\n') +
+      notesBlock +
+      (slide.imageCount > 0 ? `\n[images on slide: ${slide.imageCount}]` : '');
+
+    if (chars + slideBlock.length > PPTX_TEXT_CAP_PER_DOC) {
+      lines.push(
+        `\n[…truncated at ${PPTX_TEXT_CAP_PER_DOC / 1024} KB; ${slides.length - slide.index + 1} slide(s) omitted from Gemini context. Outline still complete.]`,
+      );
+      break;
+    }
+    lines.push(slideBlock);
+    chars += slideBlock.length;
+  }
+
+  lines.push(`\n[End file: ${label}]`);
+  return {
+    slideCount: slides.length,
+    outline,
+    text: lines.join(''),
+    hasSpeakerNotes,
+  };
+}
+
+/** Mime set + per-doc cap exported for cross-service reuse (e.g. suggest-objectives). */
+export { PPTX_MIME_TYPES };
 
 // ─── Extract step ──────────────────────────────────────────────────────────
 
@@ -246,38 +383,103 @@ async function extractFromSources(loaded: LoadedDoc[]): Promise<ExtractionResult
         .join('\n'),
   });
 
+  // Track the PRIMARY_PPTX's deterministic outline. After Gemini returns,
+  // we overwrite extraction.primaryDeckOutline with this — Gemini can drift
+  // on slide titles and the ENHANCE branch of the Opus draft prompt
+  // (DRAFT_SYSTEM_PROMPT, "Keep the original slide order and titles") needs
+  // an exact verbatim anchor or it silently falls through to free-form draft.
+  let primaryOutline: PptxExtraction['outline'] | null = null;
   let totalBytes = 0;
+
   for (const d of loaded) {
-    if (!GEMINI_INLINE_MIMES.has(d.mimeType)) {
-      // PPT/DOC binaries — describe by metadata, content extraction in Phase 2.
+    const label = `${d.role} | ${d.title}`;
+
+    // ─── PPTX path: deterministic text + outline extraction via PptxDocument
+    if (PPTX_MIME_TYPES.has(d.mimeType)) {
+      const blob = await fetchBytes(d.s3Key);
+      totalBytes += blob.byteLength;
+      if (totalBytes > TOTAL_INLINE_CAP_BYTES) {
+        throw new WizardForgeError(
+          'SOURCE_TOO_LARGE',
+          `Combined source bytes exceed ${TOTAL_INLINE_CAP_BYTES / 1024 / 1024} MB inline cap`,
+        );
+      }
+      const extracted = extractPptxContent(blob.buffer, label);
+      if (extracted) {
+        parts.push({ text: extracted.text });
+        if (d.role === 'PRIMARY_PPTX') {
+          primaryOutline = extracted.outline;
+        }
+      } else {
+        // Parse failure — keep going with a metadata-only signal so the deck
+        // still gets drafted rather than failing the whole forge.
+        parts.push({
+          text:
+            `[${label}] PPTX parse failed; using metadata only. ` +
+            `Treat as an outline-only signal.`,
+        });
+      }
+      continue;
+    }
+
+    // ─── Gemini-inline path: PDF / image / plain text / markdown
+    if (GEMINI_INLINE_MIMES.has(d.mimeType)) {
+      const blob = await fetchBytes(d.s3Key);
+      totalBytes += blob.byteLength;
+      if (totalBytes > TOTAL_INLINE_CAP_BYTES) {
+        throw new WizardForgeError(
+          'SOURCE_TOO_LARGE',
+          `Combined source bytes exceed ${TOTAL_INLINE_CAP_BYTES / 1024 / 1024} MB inline cap`,
+        );
+      }
+      parts.push({ text: `[Begin file: ${label}]` });
+      // Prefer the DB-stamped mimeType (set by document-service.ts on upload)
+      // over the S3 object's ContentType — the upload route is authoritative
+      // and matches what Gemini's inlineData parser expects.
+      parts.push({ inlineData: { mimeType: d.mimeType, data: blob.buffer.toString('base64') } });
+      parts.push({ text: `[End file: ${d.title}]` });
+      continue;
+    }
+
+    // ─── Apple Keynote (.key) — accepted but not text-extractable yet.
+    //     Emit a clear hint so Gemini (and faculty reading the audit log)
+    //     understands the deck exists but its text content didn't make it
+    //     into the extraction. Faculty workaround: open in Keynote →
+    //     File → Export To → PowerPoint (.pptx), then re-upload.
+    if (KEYNOTE_MIME_TYPES.has(d.mimeType)) {
       parts.push({
         text:
-          `[${d.role} | ${d.title}] cannot be inlined as ${d.mimeType}. ` +
-          `Use the file metadata above; treat this as an outline-only signal. ` +
-          `Phase 2 will swap in a real .pptx text extractor.`,
+          `[${label}] is an Apple Keynote (.key) file — text/notes not parsed in this build. ` +
+          `Treat as a title-only signal. Faculty hint surfaces in UI: "Export from Keynote → PowerPoint (.pptx) for full extraction.".`,
       });
       continue;
     }
-    const blob = await fetchInline(d.s3Key);
-    totalBytes += blob.byteLength;
-    if (totalBytes > TOTAL_INLINE_CAP_BYTES) {
-      throw new WizardForgeError(
-        'SOURCE_TOO_LARGE',
-        `Combined source bytes exceed ${TOTAL_INLINE_CAP_BYTES / 1024 / 1024} MB inline cap`,
-      );
-    }
-    parts.push({ text: `[Begin file: ${d.role} | ${d.title}]` });
-    parts.push({ inlineData: { mimeType: blob.mimeType, data: blob.data } });
-    parts.push({ text: `[End file: ${d.title}]` });
+
+    // ─── Unhandled binaries (.doc/.docx, .ppt OLE, audio, video) — leave a
+    //     metadata-only signal so Gemini knows the file exists. Future fix
+    //     can add per-format extractors (e.g. mammoth for .docx) and route
+    //     them through the same `text` part contract.
+    parts.push({
+      text:
+        `[${label}] cannot be inlined as ${d.mimeType}; using metadata only. ` +
+        `Treat as an outline-only signal.`,
+    });
   }
 
   parts.push({ text: 'Produce the extraction JSON now.' });
 
-  return aiExtractFromSourceJson<ExtractionResult>({
+  const extraction = await aiExtractFromSourceJson<ExtractionResult>({
     systemPrompt: EXTRACT_SYSTEM_PROMPT,
     parts,
     temperature: 0.2,
   });
+
+  // Deterministic override — see comment on `primaryOutline` declaration.
+  if (primaryOutline) {
+    extraction.primaryDeckOutline = primaryOutline;
+  }
+
+  return extraction;
 }
 
 // ─── Draft step ────────────────────────────────────────────────────────────
@@ -493,6 +695,83 @@ function deriveTopicTagForForge(inputTitle: string | null | undefined, objective
   return first ?? null;
 }
 
+// Image generation runs concurrently across IMAGE_FOCUS slides — keep small
+// to respect Gemini Image RPS limits and avoid hammering a single forge.
+const IMAGE_GEN_CONCURRENCY = 3;
+
+/**
+ * Generate a clinical-illustration image per IMAGE_FOCUS slide via the
+ * existing aiGenerateImageForSlide router (Gemini writes prompt → Gemini
+ * 2.5 Flash Image renders). Uploads each PNG to S3 under the forge job's
+ * folder and persists imageS3Key + imagePrompt back to the Slide row.
+ *
+ * Best-effort: a slide that fails to generate keeps imageS3Key = null and
+ * the renderer falls back to its placeholder. Aggregate failure to set up
+ * the step also returns silently — image richness is a nice-to-have, never
+ * a deck blocker. All per-slide failures are logged for triage.
+ */
+async function generateSlideImages(opts: {
+  jobId: string;
+  requestedById: string;
+}): Promise<{ generated: number; failed: number; skipped: number }> {
+  const slides = await db.slide.findMany({
+    where: { deckForgeJobId: opts.jobId },
+    orderBy: { order: 'asc' },
+    select: { id: true, order: true, layout: true, title: true, bullets: true },
+  });
+
+  const candidates = slides.filter((s) => s.layout === 'IMAGE_FOCUS');
+  if (candidates.length === 0) {
+    return { generated: 0, failed: 0, skipped: slides.length };
+  }
+
+  let generated = 0;
+  let failed = 0;
+
+  // Sequential batching with a small concurrency window. Promise.all on the
+  // whole list risks Gemini-side rate-limits on faculty decks with many
+  // IMAGE_FOCUS slides; chunks of IMAGE_GEN_CONCURRENCY keep that bounded.
+  for (let i = 0; i < candidates.length; i += IMAGE_GEN_CONCURRENCY) {
+    const batch = candidates.slice(i, i + IMAGE_GEN_CONCURRENCY);
+    const results = await Promise.allSettled(
+      batch.map(async (slide) => {
+        const result = await aiGenerateImageForSlide({
+          title: slide.title,
+          bullets: slide.bullets,
+        });
+        const imageBytes = Buffer.from(result.image.data, 'base64');
+        // Use .png extension regardless of mime — pptxgenjs's addImage with a
+        // data URL is the canonical path and accepts mime in the prefix.
+        const s3Key = `documents/deck-forge/${opts.requestedById}/${opts.jobId}/slide-${slide.order}.png`;
+        await s3.send(
+          new PutObjectCommand({
+            Bucket: BUCKET,
+            Key: s3Key,
+            Body: imageBytes,
+            ContentType: result.image.mimeType || 'image/png',
+          }),
+        );
+        await db.slide.update({
+          where: { id: slide.id },
+          data: { imageS3Key: s3Key, imagePrompt: result.prompt },
+        });
+        return slide.order;
+      }),
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled') generated++;
+      else {
+        failed++;
+        console.warn('[wizard-forge] image gen failed for slide', {
+          jobId: opts.jobId,
+          reason: r.reason instanceof Error ? r.reason.message : String(r.reason),
+        });
+      }
+    }
+  }
+  return { generated, failed, skipped: slides.length - candidates.length };
+}
+
 // ─── Orchestrator ──────────────────────────────────────────────────────────
 
 export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardForgeOutcome> {
@@ -601,6 +880,26 @@ export async function wizardForgeDeck(input: WizardForgeInput): Promise<WizardFo
         },
       });
     });
+
+    // Generate clinical-illustration images for IMAGE_FOCUS slides. Best-
+    // effort — a failure here never blocks the forge; the renderer falls
+    // back to a placeholder for slides without an imageS3Key. Runs before
+    // persistDeckAsDocument so the persisted .pptx already carries images.
+    try {
+      const imageStats = await generateSlideImages({
+        jobId: created.id,
+        requestedById: input.requestedById,
+      });
+      console.info('[wizard-forge] image generation', {
+        jobId: created.id,
+        ...imageStats,
+      });
+    } catch (e) {
+      console.warn('[wizard-forge] image generation step crashed', {
+        jobId: created.id,
+        error: e instanceof Error ? e.message : String(e),
+      });
+    }
 
     // Surface the forged deck in the faculty's documents library. Best-effort.
     await persistDeckAsDocument({ jobId: created.id });

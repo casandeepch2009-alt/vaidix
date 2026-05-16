@@ -2119,6 +2119,15 @@ model Slide {
   sourceCitations Json?
   // Optional accent color override (hex, no '#'); else inherits theme.
   accentHex       String?
+  // Wizard-forge image asset (populated post-draft by aiGenerateImageForSlide).
+  // Null when generation was skipped (non-IMAGE_FOCUS layout) or failed
+  // (best-effort — a missing image never blocks the deck). The deck-pptx
+  // renderer fetches the S3 object and paints it into IMAGE_FOCUS slides;
+  // falls back to the dashed placeholder when null/fetch fails.
+  imageS3Key      String?
+  // The prompt aiGenerateImagePrompt produced — kept for audit and so
+  // faculty can regenerate with a tweaked prompt from the Studio later.
+  imagePrompt     String?     @db.Text
   createdAt       DateTime    @default(now())
   updatedAt       DateTime    @updatedAt
 
