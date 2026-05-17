@@ -399,6 +399,19 @@ function LiveRoom({
         onConnected={handleConnected}
         onDisconnected={handleDisconnected}
         className="size-full"
+        // Force every PeerConnection — publisher AND subscriber — through
+        // the TURN relay. Symptom we're fixing: participants saw themselves
+        // (publisher worked) but no one saw anyone else (subscriber failed)
+        // because the subscriber PC's direct-UDP path back from the SFU was
+        // blocked on at least one side of every pair. We verified coturn
+        // is reachable end-to-end (PowerShell STUN test, allocations in
+        // coturn logs), so forcing relay for both PC directions routes
+        // everything through that proven path. LiveKit Server v1.8 has no
+        // server-side `force_relay` knob (don't try adding it — it crashes
+        // the container at YAML parse time, we learned the hard way). The
+        // right surface is here on the client, propagated to every
+        // RTCPeerConnection the SDK constructs.
+        connectOptions={{ rtcConfig: { iceTransportPolicy: 'relay' } }}
       >
         <InnerRoom
           session={session}
