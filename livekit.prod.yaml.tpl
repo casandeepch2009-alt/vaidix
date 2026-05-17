@@ -36,6 +36,31 @@ rtc:
   # the browser tried to send media to a private Docker IP and ICE timed
   # out. Hence the split-config approach.
   use_external_ip: true
+
+  # Force every client peer connection through the TURN relay instead of
+  # letting WebRTC try direct host candidates first. We landed here after a
+  # week of "participants flicker every 14 s" reports: the direct UDP path
+  # was technically open in the SG and STUN binding round-tripped fine
+  # (54 ms in our tcpdump), but real LiveKit clients still couldn't sustain
+  # media end-to-end. Some sessions stabilised, others didn't, and from any
+  # single participant's POV the other side appeared to disconnect/reconnect
+  # every ~14 s — classic ICE "connected but RTP doesn't flow" failure mode.
+  # Asymmetry of which side fails per session made it untraceable as a
+  # single bug, just unreliable.
+  #
+  # Coturn was verified reachable end-to-end (PowerShell STUN test 2026-05-18
+  # got a 40-byte Binding Response in <100 ms; tcpdump confirmed packets
+  # in/out). Forcing relay routes ALL media through that proven path; no
+  # client gets to negotiate a flaky direct UDP candidate. Trade-off:
+  # one extra hop of latency (~10–20 ms p50 in ap-south-1) for users
+  # whose direct path WOULD have worked. In a teaching context this is
+  # invisible vs the unreliability we replaced.
+  #
+  # If we later publish a TURNS (TLS) endpoint on 5349 with a Let's Encrypt
+  # cert, this still works — `force_relay` is mode, not server selection;
+  # it picks whichever turn_server entry the client successfully allocates on.
+  force_relay: true
+
   # node_ip is intentionally omitted. With use_external_ip:true LiveKit
   # auto-fills it from the metadata service. If you ever need to pin it
   # (e.g. a host without metadata service access), uncomment and set
