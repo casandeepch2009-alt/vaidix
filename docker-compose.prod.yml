@@ -231,6 +231,13 @@ services:
     container_name: vaidix-coturn
     <<: *default-restart
     network_mode: host
+    # The default image CMD is:
+    #   ["--log-file=stdout", "--external-ip=$(detect-external-ip)"]
+    # which passes --external-ip on the CLI. Our rendered turnserver.conf
+    # already declares external-ip, so coturn fatals with "You cannot
+    # define external IP more than once". We override CMD to keep stdout
+    # logging but strip the auto-detect CLI flag.
+    command: ["--log-file=stdout"]
     volumes:
       # MUST mount to /etc/turnserver.conf — coturn's default config path.
       # Mounting elsewhere (e.g. /etc/coturn/turnserver.conf) means the
