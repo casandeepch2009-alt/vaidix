@@ -16,6 +16,7 @@ import {
 } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { ConnectionState, DisconnectReason, Track } from 'livekit-client'
+import { isAgentParticipant } from '@/lib/livekit-helpers'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Mic, MicOff, Video, VideoOff, Monitor, MonitorOff,
@@ -1487,13 +1488,18 @@ function HostMenuItem({
 // remain available in the participant sidebar but are removed from the grid.
 // ----------------------------------------------------------------------------
 function VideoGrid({ sessionId, isHostish, localUserName }: { sessionId: string; isHostish: boolean; localUserName?: string | null }) {
-  const allTracks = useTracks(
+  const rawTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
     { onlySubscribed: false }
   )
+  // Drop tracks belonging to the captions agent — withPlaceholder:true
+  // creates a placeholder tile for every participant even if they have no
+  // camera, so without this filter the agent shows up as a giant empty
+  // tile in the host's video grid (Feeddback.md, 2026-05-17 screenshots).
+  const allTracks = rawTracks.filter((t) => !isAgentParticipant(t.participant))
   const { targetIdentity, setSpotlight } = useSpotlight(sessionId)
 
   // Screen share is the dominant focus when present — slides are always king.

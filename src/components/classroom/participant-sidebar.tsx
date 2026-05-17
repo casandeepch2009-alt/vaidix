@@ -2,10 +2,10 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParticipants, useLocalParticipant, useDataChannel } from '@livekit/components-react'
-import { ParticipantKind } from 'livekit-client'
 import { Hand, MicOff, UserMinus, UserPlus, Check, X, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { isAgentParticipant } from '@/lib/livekit-helpers'
 import { useVideoRoomClient, type PendingAdmission } from './video-room-client'
 import { playWaitingRoomKnock } from './notification-sounds'
 
@@ -40,7 +40,7 @@ export function ParticipantSidebar({
   currentUserIsOrganizer?: boolean
 }) {
   const allParticipants = useParticipants()
-  const participants = allParticipants.filter((p) => p.kind !== ParticipantKind.AGENT)
+  const participants = allParticipants.filter((p) => !isAgentParticipant(p))
   const { localParticipant } = useLocalParticipant()
   const client = useVideoRoomClient()
   const [pending, setPending] = useState<PendingAdmission[]>([])
