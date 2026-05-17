@@ -155,7 +155,7 @@ NEEDS_LIVEKIT=0
 NEEDS_COTURN=0
 NEEDS_EGRESS=0
 if [ -n "$CHANGED_FILES" ]; then
-  if echo "$CHANGED_FILES" | grep -qE '(livekit\.prod\.yaml\.tpl|turnserver\.conf\.tpl|scripts/render-configs\.sh)'; then
+  if echo "$CHANGED_FILES" | grep -qE '(livekit\.prod\.yaml\.tpl|turnserver\.conf\.tpl|scripts/render-configs\.sh|docker-compose\.prod\.yml)'; then
     NEEDS_LIVEKIT=1
     NEEDS_COTURN=1
   fi

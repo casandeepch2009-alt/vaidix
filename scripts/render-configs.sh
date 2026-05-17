@@ -111,17 +111,21 @@ render() {
     exit 1
   fi
   envsubst < "$src" > "$out"
-  # mode 644 by default — bind-mounted into containers running as non-root uids
-  # (e.g. egress runs as its own user). 600 owned by host user blocks reads
-  # from inside the container. The host directory should be access-controlled.
-  # turnserver.conf carries the TURN password so we tighten to 640 (coturn
-  # runs as root in network_mode: host, so it can still read).
+  # mode 644 by default — bind-mounted into containers running as non-root
+  # uids (egress runs as its own user; coturn/coturn:latest runs as the
+  # `coturn` system user, NOT root, despite network_mode:host). 640 owned
+  # by the host deploy user blocks reads from inside those containers.
+  # The host directory itself should be access-controlled.
+  # An earlier comment claimed coturn runs as root under network_mode:host —
+  # that's wrong: network mode is independent of uid, and the symptom was
+  # coturn starting with NO config (empty realm, listener address only on
+  # private IPs) because it could not read the mounted file.
   chmod "$mode" "$out"
   RENDERED+=("$out")
 }
 
 render egress.yaml.tpl        egress.yaml
-render turnserver.conf.tpl    turnserver.conf       640
+render turnserver.conf.tpl    turnserver.conf       644
 render livekit.prod.yaml.tpl  livekit.prod.yaml     640
 
 echo "[render-configs] rendered:"

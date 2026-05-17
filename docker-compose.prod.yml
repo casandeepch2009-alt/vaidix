@@ -232,7 +232,13 @@ services:
     <<: *default-restart
     network_mode: host
     volumes:
-      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      # MUST mount to /etc/turnserver.conf — coturn's default config path.
+      # Mounting elsewhere (e.g. /etc/coturn/turnserver.conf) means the
+      # container boots with NO config, listens only on private interface
+      # IPs, has no realm, no external-ip, no users, and every TURN
+      # allocation fails silently. That misconfig is what caused every
+      # guest to disconnect ~15 s after joining (no media path).
+      - ./turnserver.conf:/etc/turnserver.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
 
 networks:
