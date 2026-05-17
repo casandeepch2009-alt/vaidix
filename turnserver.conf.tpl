@@ -64,10 +64,9 @@ total-quota=1200
 # Logging
 verbose
 fingerprint
-no-cli
-
-# Disable features we don't need (security)
-no-loopback-peers
+# `no-cli` (deprecated in 4.10 → use `--cli`) and `no-tlsv1*` (renamed in
+# 4.10 → use tls-version-min if TLS port is configured) were dropped here
+# after coturn 4.10.0 flagged them as "Bad configuration format" and
+# rejected the parse. We don't expose the TLS port (5349) yet anyway, so
+# the version pinning was always a no-op.
 no-multicast-peers
-no-tlsv1
-no-tlsv1_1
