@@ -510,13 +510,6 @@ function GuestLiveRoom({
         onDisconnected={onDisconnected}
         data-lk-theme="default"
         className="h-full"
-        // Force every PeerConnection (publisher AND subscriber) through TURN.
-        // Without this, the asymmetric NAT case bites: the guest publishes
-        // fine but other participants' tracks (subscriber direction) never
-        // reach the guest, so guest sees their own tile but no one else.
-        // Mirrors the same option on InnerRoom in live-session.tsx — both
-        // sides of every pair must use relay or one direction silently fails.
-        connectOptions={{ rtcConfig: { iceTransportPolicy: 'relay' } }}
       >
         <div className="relative flex h-full flex-col text-white overflow-hidden">
           <GuestHeader title={title} />
