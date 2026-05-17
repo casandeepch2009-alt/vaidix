@@ -46,7 +46,8 @@ import {
   useTracks,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
-import { DisconnectReason, Track, ParticipantKind } from 'livekit-client'
+import { DisconnectReason, Track } from 'livekit-client'
+import { isAgentParticipant } from '@/lib/livekit-helpers'
 import {
   Mic, MicOff, Video as VideoIcon, VideoOff, Monitor, MonitorOff,
   PhoneOff, Loader2, Clock, Shield, LogIn,
@@ -545,7 +546,7 @@ function ReconnectingOverlay() {
 
 function GuestHeader({ title }: { title: string }) {
   const allParticipants = useParticipants()
-  const participants = allParticipants.filter((p) => p.kind !== ParticipantKind.AGENT)
+  const participants = allParticipants.filter((p) => !isAgentParticipant(p))
   const count = participants.length
   return (
     <header className="flex items-center justify-between border-b border-white/5 bg-black/40 px-4 py-2.5 text-sm">
@@ -577,7 +578,7 @@ function GuestStage() {
   // The previous version only subscribed to Camera + ScreenShare, which
   // is why a session where the host had camera off looked like an empty
   // black screen to guests.
-  const tracks = useTracks(
+  const rawTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
@@ -585,6 +586,10 @@ function GuestStage() {
     ],
     { onlySubscribed: false },
   )
+  // Filter agent placeholders before deduping — withPlaceholder:true creates
+  // a tile per participant (including the captions agent), so without this
+  // the guest grid would show a giant "agent-AJ_xxx" empty tile.
+  const tracks = rawTracks.filter((t) => !isAgentParticipant(t.participant))
   // Dedupe by participant — useTracks returns one row per source per
   // participant, so a host with mic+camera would get TWO tiles otherwise.
   // Prefer camera/screen-share when both exist for the same participant.

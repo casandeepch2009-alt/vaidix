@@ -56,13 +56,22 @@ rtc:
   # into turnserver.conf, so by construction they cannot drift. AWS security
   # group on the EC2 host must open inbound UDP 3478 + TCP 3478 + the
   # UDP relay range 49152-65535 declared in turnserver.conf.
+  #
+  # `host` uses ${COTURN_EXTERNAL_IP} (a bare IPv4) rather than the realm
+  # DNS name on purpose: this deployment didn't have a `turn.<realm>` A
+  # record published, so clients NXDOMAIN'd on the lookup and ICE never
+  # tried the relay. Using the IP literal removes that DNS dependency —
+  # `realm` (an auth/audit string, not a hostname) stays as a DNS-style
+  # label for log readability. If you later publish a real A record + TLS
+  # cert for ${COTURN_REALM}, swap these two `host:` values back to the
+  # realm and add a `protocol: tls` entry on port 5349.
   turn_servers:
-    - host: ${COTURN_REALM}
+    - host: ${COTURN_EXTERNAL_IP}
       port: 3478
       protocol: udp
       username: livekit
       credential: ${TURN_SHARED_SECRET}
-    - host: ${COTURN_REALM}
+    - host: ${COTURN_EXTERNAL_IP}
       port: 3478
       protocol: tcp
       username: livekit
