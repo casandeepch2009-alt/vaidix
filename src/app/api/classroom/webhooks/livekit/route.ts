@@ -36,7 +36,11 @@ interface EgressEventPayload {
     roomName?: string;
     status?: number | string;
     file?: { filename?: string; location?: string };
-    fileResults?: Array<{ filename?: string; location?: string; size?: string | number; duration?: string | number }>;
+    // `size` and `duration` may arrive as bigint in addition to string/number:
+    // @livekit/server-sdk parses int64 protobuf fields as JS BigInt when the
+    // SDK is updated alongside livekit-server v1.9+. Older SDK versions sent
+    // them as numeric strings. Both shapes must be handled.
+    fileResults?: Array<{ filename?: string; location?: string; size?: string | number | bigint; duration?: string | number | bigint }>;
     error?: string;
   };
 }
@@ -64,13 +68,49 @@ function pickEgressFile(info: NonNullable<EgressEventPayload['egressInfo']>): { 
   // LiveKit Egress writes path-style filenames; we store as MinIO key.
   // Strip the bucket prefix if Egress was configured with a leading slash.
   const key = fname ? fname.replace(/^\//, '') : null;
+
+  // `size` may arrive as bigint, number, or numeric string. Older
+  // @livekit/server-sdk versions emitted a numeric string; the version
+  // shipped with v1.9+ emits int64 fields as JS BigInt. The previous
+  // code path `Math.round(sizeRaw)` threw "Cannot convert a BigInt value
+  // to a number" when sizeRaw was a BigInt, which crashed the egress_ended
+  // webhook handler and left every Recording row stuck in RECORDING.
   const sizeRaw = fr?.size;
-  const sizeBytes = sizeRaw == null ? null : BigInt(typeof sizeRaw === 'string' ? sizeRaw : Math.round(sizeRaw));
+  const sizeBytes: bigint | null =
+    sizeRaw == null
+      ? null
+      : typeof sizeRaw === 'bigint'
+        ? sizeRaw
+        : typeof sizeRaw === 'string'
+          ? BigInt(sizeRaw)
+          : BigInt(Math.round(sizeRaw)); // number → integer bigint
+
+  // `duration` is in nanoseconds. Same shape-variation problem as `size`:
+  // bigint / number / string are all possible from different SDK versions.
+  // Convert to integer seconds — a session won't exceed Number.MAX_SAFE_INTEGER
+  // seconds, so it's safe to land in a regular Number at the end.
   const durationRaw = fr?.duration;
-  // duration is reported in nanoseconds as a string in some LiveKit versions
-  const durationSec = durationRaw == null
-    ? null
-    : Math.round(Number(durationRaw) / (typeof durationRaw === 'string' && durationRaw.length > 7 ? 1_000_000_000 : 1));
+  let durationSec: number | null;
+  if (durationRaw == null) {
+    durationSec = null;
+  } else if (typeof durationRaw === 'bigint') {
+    // BigInt division stays in BigInt — divide first, then cast. Use
+    // the BigInt() constructor (not the `n` literal) so this transpiles
+    // cleanly when the TS target is below ES2020.
+    durationSec = Number(durationRaw / BigInt(1_000_000_000));
+  } else if (typeof durationRaw === 'string') {
+    // Pre-bigint SDKs emit nanosecond ints as decimal strings. Preserve
+    // the original length>7 heuristic that distinguished nanoseconds
+    // (always 8+ digits for any nontrivial duration) from accidental
+    // seconds-as-string payloads.
+    const divisor = durationRaw.length > 7 ? 1_000_000_000 : 1;
+    durationSec = Math.round(Number(durationRaw) / divisor);
+  } else {
+    // number — assume already in seconds (egress would never emit a
+    // nanosecond count as a plain JS Number due to precision loss).
+    durationSec = Math.round(durationRaw);
+  }
+
   return { key, sizeBytes, durationSec };
 }
 
