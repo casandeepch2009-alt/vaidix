@@ -119,13 +119,28 @@ services:
           memory: 2G
 
   # ─── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────
+  # v1.9 required (NOT v1.8) — livekit-client v2.18+ and the livekit-agents
+  # Python SDK both speak signaling protocol 16, which uses the /rtc/v1/*
+  # HTTP path family. v1.8 returns 404 on /rtc/v1/validate; the WS upgrade
+  # falls back to /rtc but later v1-only signaling messages get silently
+  # dropped → SDK's PeerConnection watchdog times out at ~14s → SDK issues
+  # LeaveRequest + fresh join (Reconnect:false, new pID). To every other
+  # participant it looked like the user dropping and re-joining every ~14s.
+  # Confirmed fixed on prod 2026-05-19 by swapping to v1.9.
+  #
+  # A prior attempt at this bump (reverted in commit 3805888) appeared to
+  # break joins, but on the controlled retry it worked cleanly — the
+  # earlier failure was likely the nginx upstream DNS staleness issue (see
+  # memory: livekit-recreate-also-recreates-nginx), not a v1.9 config
+  # incompatibility. The proper deploy command bounces nginx alongside
+  # livekit, which is what made the retry succeed.
   livekit:
-    image: livekit/livekit-server:v1.8
+    image: livekit/livekit-server:v1.9
     container_name: vaidix-livekit
     <<: *default-restart
     command: --config /etc/livekit.yaml
     # Redis password injected via Viper env override (verified against
-    # livekit/livekit-server:v1.8). Keeps the password out of livekit.yaml.
+    # livekit/livekit-server:v1.9). Keeps the password out of livekit.yaml.
     environment:
       LIVEKIT_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in .env}
     ports:
