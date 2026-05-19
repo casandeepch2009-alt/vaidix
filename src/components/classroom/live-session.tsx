@@ -13,6 +13,7 @@ import {
   useLocalParticipant,
   useRoomContext,
   useDataChannel,
+  useConnectionState,
 } from '@livekit/components-react'
 import '@livekit/components-styles'
 import { ConnectionState, DisconnectReason, Track } from 'livekit-client'
@@ -268,10 +269,15 @@ function LiveRoom({
   type ConnStatus = 'connecting' | 'connected' | 'reconnecting' | 'failed'
   const [status, setStatus] = useState<ConnStatus>('connecting')
   const [phase, setPhase] = useState<0 | 1 | 2>(0)   // copy variant 0/1/2
-  const [bumper, setBumper] = useState(0)            // bump → remounts <LiveKitRoom>
-  // Tracked in state (not a ref) so we can pass the live count into the
-  // banner copy without violating the no-refs-during-render rule.
-  const [reconnectAttempts, setReconnectAttempts] = useState(0)
+  // Bumping `bumper` remounts <LiveKitRoom>, which is the only way to re-arm
+  // the SDK's `connect` prop (read once on mount). We bump it ONLY on
+  // first mount and in `manualRejoin` — never as an auto-recovery path.
+  // Auto-bumping on a dropped connection used to trigger CLIENT_REQUEST_LEAVE
+  // server-side, then re-join as a fresh participant (Reconnect:false) every
+  // cycle, which looked to other participants like the user dropping and
+  // re-joining every few seconds. Transient drops are now handled by the
+  // SDK's own session-resume path, surfaced via <RoomReconnectWatcher>.
+  const [bumper, setBumper] = useState(0)
 
   // Sidebar + whiteboard state lives at the LiveRoom level (above LiveKitRoom)
   // on purpose: a reconnect attempt bumps the LiveKitRoom key, which remounts
@@ -285,8 +291,6 @@ function LiveRoom({
   const SLOW_CONNECT_MS = 5000
   const VERY_SLOW_MS = 15000
   const FAIL_GRACE_MS = 60000     // 60s before declaring initial connect failed
-  const RECONNECT_DELAY_MS = 2000 // brief settle before remount on reconnect
-  const MAX_RECONNECT_ATTEMPTS = 4
 
   // Drive the connecting-phase copy ("Connecting…" → "Still connecting…" →
   // "Slow connection…") and arm the FAIL_GRACE timer. Resets every time we
@@ -305,29 +309,21 @@ function LiveRoom({
     }
   }, [status, bumper])
 
-  // When we land in 'reconnecting' (a was-connected drop), wait briefly
-  // then bump the LiveKitRoom key to force a fresh connect attempt. After
-  // MAX_RECONNECT_ATTEMPTS without success, fall through to 'failed' so
-  // the user sees an actionable banner instead of an endless spinner.
-  useEffect(() => {
-    if (status !== 'reconnecting') return
-    if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setStatus('failed')
-      return
-    }
-    const t = setTimeout(() => {
-      setReconnectAttempts((n) => n + 1)
-      setStatus('connecting')
-      setBumper((b) => b + 1)
-    }, RECONNECT_DELAY_MS)
-    return () => clearTimeout(t)
-  }, [status, reconnectAttempts])
-
-  function handleConnected() {
-    setReconnectAttempts(0)
+  // handleConnected/handleReconnecting are deps of <RoomReconnectWatcher>'s
+  // effect, so they need stable identities to avoid re-running it every
+  // render. useCallback with no deps is fine — both bodies only call the
+  // stable setStatus setter.
+  const handleConnected = useCallback(() => {
     setStatus('connected')
-  }
+  }, [])
+
+  // SDK is mid-session-resume. Show a transient banner; the room itself
+  // stays mounted, no participant churn server-side. Don't downgrade if
+  // we've already escalated to 'failed' (the SDK can't transition back to
+  // 'reconnecting' from there without a manual remount anyway).
+  const handleReconnecting = useCallback(() => {
+    setStatus((s) => (s === 'connected' ? 'reconnecting' : s))
+  }, [])
 
   function handleDisconnected(reason?: DisconnectReason) {
     // Explicit, non-recoverable terminations — bail to the calendar instead
@@ -350,16 +346,23 @@ function LiveRoom({
       onLeave()
       return
     }
-    // Otherwise treat as recoverable. If we'd already reached 'connected'
-    // it's a transient drop → 'reconnecting' (auto-retry path). If we
-    // never connected, stay in 'connecting' so the FAIL_GRACE timer
-    // continues counting; LiveKit's own reconnect may still land before
-    // the timer fires.
-    setStatus((s) => (s === 'connected' ? 'reconnecting' : s === 'failed' ? 'failed' : s))
+    // Non-terminal disconnect from the SDK = the SDK has already exhausted
+    // its own session-resume attempts (which are surfaced via
+    // <RoomReconnectWatcher> as Reconnecting/Reconnected events without a
+    // remount). Don't auto-bump the LiveKitRoom key here: bumping unmounts
+    // the SDK's Room instance, emits CLIENT_REQUEST_LEAVE on the existing
+    // server-side participant, and re-joins as a fresh participant with a
+    // new pID and `Reconnect: false` — visible to everyone else as a
+    // drop+rejoin, with full state loss (subscriptions, track perms,
+    // role). Surface a failed banner with manual Retry instead; the user
+    // decides when to pay that cost.
+    //
+    // Still-'connecting' on initial mount keeps counting against
+    // FAIL_GRACE_MS; that's a separate path and unchanged.
+    setStatus((s) => (s === 'connecting' ? s : 'failed'))
   }
 
   function manualRejoin() {
-    setReconnectAttempts(0)
     setStatus('connecting')
     setBumper((b) => b + 1)
   }
@@ -382,7 +385,6 @@ function LiveRoom({
       <ConnectionBanner
         status={status}
         phase={phase}
-        attempts={reconnectAttempts}
         serverUrl={url}
         onRejoin={manualRejoin}
         onLeave={onLeave}
@@ -400,6 +402,18 @@ function LiveRoom({
         onDisconnected={handleDisconnected}
         className="size-full"
       >
+        {/* Surfaces the SDK's own transient reconnect attempts (session
+            resume, Reconnect:true on the wire) as banner state, WITHOUT
+            remounting the room. Without this, a brief network blip would
+            silently route through the SDK's resume path but the UI would
+            stay 'connected' the whole time, then look frozen if media
+            tracks paused — confusing. With this, the banner says
+            "Reconnecting…" for the duration of the resume and clears the
+            moment the SDK recovers. */}
+        <RoomReconnectWatcher
+          onReconnecting={handleReconnecting}
+          onReconnected={handleConnected}
+        />
         <InnerRoom
           session={session}
           currentUser={currentUser}
@@ -427,14 +441,12 @@ function LiveRoom({
 function ConnectionBanner({
   status,
   phase,
-  attempts,
   serverUrl,
   onRejoin,
   onLeave,
 }: {
   status: 'connecting' | 'connected' | 'reconnecting' | 'failed'
   phase: 0 | 1 | 2
-  attempts: number
   serverUrl: string
   onRejoin: () => void
   onLeave: () => void
@@ -495,12 +507,12 @@ function ConnectionBanner({
   }
 
   // 'connecting' or 'reconnecting' — soft pill, lower visual weight, no
-  // user action required. Copy escalates with phase.
+  // user action required. Copy escalates with phase. Reconnecting always
+  // means the SDK is mid-session-resume; if it gives up we transition to
+  // 'failed' (handled above) and show the actionable banner instead.
   const reconnecting = status === 'reconnecting'
   const copy = reconnecting
-    ? attempts > 0
-      ? `Reconnecting… (attempt ${attempts + 1})`
-      : 'Connection lost — reconnecting…'
+    ? 'Reconnecting…'
     : phase === 0
       ? 'Connecting to the live class…'
       : phase === 1
@@ -515,6 +527,53 @@ function ConnectionBanner({
       </div>
     </div>
   )
+}
+
+// Bridges the LiveKit SDK's internal ConnectionState into LiveRoom's status
+// machine. The SDK runs its own session-resume on transient drops
+// (network blip, NAT rebinding, brief ICE loss) and re-attaches the
+// existing participant on the server side — preserving subscriptions,
+// track permissions, role grants. The previous design ignored those
+// resume attempts and instead remounted <LiveKitRoom> after 2s, which
+// emitted CLIENT_REQUEST_LEAVE + a fresh join (Reconnect:false) every
+// cycle. To everyone else in the room that looked like the user dropping
+// and re-joining every few seconds, with all server-side participant
+// state lost on each round.
+//
+// This watcher must live INSIDE <LiveKitRoom> because useConnectionState
+// requires the LiveKit context. It renders null — its only job is to
+// observe state transitions and call the parent callbacks. The callbacks
+// are wrapped in useCallback in the parent so this effect doesn't
+// re-arm on every render.
+function RoomReconnectWatcher({
+  onReconnecting,
+  onReconnected,
+}: {
+  onReconnecting: () => void
+  onReconnected: () => void
+}) {
+  const connState = useConnectionState()
+  const prevState = useRef<ConnectionState>(connState)
+
+  useEffect(() => {
+    const previous = prevState.current
+    prevState.current = connState
+
+    // LiveKit reports two distinct resume modes: full Reconnecting (PCs
+    // are being rebuilt) and SignalReconnecting (only WSS dropped, media
+    // still live). For banner purposes treat both as "reconnecting" —
+    // the user just needs to know recovery is in progress.
+    const isResuming = (s: ConnectionState) =>
+      s === ConnectionState.Reconnecting || s === ConnectionState.SignalReconnecting
+
+    if (isResuming(connState) && !isResuming(previous)) {
+      onReconnecting()
+    } else if (connState === ConnectionState.Connected && isResuming(previous)) {
+      onReconnected()
+    }
+  }, [connState, onReconnecting, onReconnected])
+
+  return null
 }
 
 // Tabs reachable from the bottom toolbar — sidebar header omits these to
