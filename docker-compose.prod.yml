@@ -119,23 +119,8 @@ services:
           memory: 2G
 
   # ─── LiveKit Server (WebRTC SFU) ─────────────────────────────────────────
-  # v1.9 is required (not v1.8): livekit-client v2.x (browser SDK) and
-  # the livekit-agents Python SDK (used by vaidix-captions-agent) both
-  # speak signaling protocol 16, which adds the /rtc/v1/* HTTP path
-  # family (/rtc/v1, /rtc/v1/validate, etc.). v1.8 does not implement
-  # those routes — observable symptom on the v1.8 server was:
-  #   - GET https://livekit.<domain>/rtc/v1/validate -> 404 from server
-  #   - WS to /rtc/v1 fails the same way, client falls back to v0 /rtc
-  #   - Initial connect succeeds via v0 fallback, but later v1-only
-  #     signaling messages from the client are silently dropped, the
-  #     SDK's PeerConnection watchdog times out at ~14s, and the SDK
-  #     issues a full reconnect (LeaveRequest + fresh join with
-  #     Reconnect:false). Visible to every other participant as a
-  #     drop+rejoin loop every ~14 seconds for ALL clients.
-  # livekit-egress is already on v1.9 here, so bumping the server keeps
-  # the whole stack aligned on the same protocol family.
   livekit:
-    image: livekit/livekit-server:v1.9
+    image: livekit/livekit-server:v1.8
     container_name: vaidix-livekit
     <<: *default-restart
     command: --config /etc/livekit.yaml
