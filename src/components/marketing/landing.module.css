@@ -58,6 +58,42 @@
   border-bottom: 1px solid rgba(30, 155, 142, 0.10);
 }
 
+/* Nav logo — tight-cropped mark with a soft teal/blue halo so it reads
+   against the near-white glass nav. Mirrors the sign-in page treatment,
+   tuned for a light background (warmer, lower-intensity glow). */
+.navLogoWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+}
+.navLogoHalo {
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle, rgba(45, 179, 170, 0.32) 0%, rgba(91, 111, 219, 0.18) 48%, transparent 72%);
+  filter: blur(10px);
+  animation: navLogoPulse 3.6s ease-in-out infinite;
+  pointer-events: none;
+}
+.navLogoImg {
+  position: relative;
+  height: 44px;
+  width: 44px;
+  object-fit: contain;
+  filter:
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.9))
+    drop-shadow(0 0 6px rgba(45, 179, 170, 0.45))
+    drop-shadow(0 0 14px rgba(91, 111, 219, 0.30));
+}
+@keyframes navLogoPulse {
+  0%, 100% { opacity: 0.65; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.06); }
+}
+
 /* Hero aurora */
 .heroBg {
   background:
@@ -391,6 +427,66 @@
 
 @keyframes growBar { from { width: 0; } to { width: var(--w); } }
 .growBar { animation: growBar 1.5s cubic-bezier(0.16, 1, 0.3, 1) 0.4s both; }
+
+/* Hero live-session mock — CSS-rendered product preview, no video asset needed */
+.liveMockBody {
+  aspect-ratio: 16 / 9;
+  position: relative;
+  background:
+    radial-gradient(ellipse at 30% 30%, rgba(30, 155, 142, 0.10), transparent 60%),
+    radial-gradient(ellipse at 70% 80%, rgba(91, 111, 219, 0.06), transparent 60%),
+    #ffffff;
+  overflow: hidden;
+}
+.mockTile {
+  border-radius: 12px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+.mockTilePresenter {
+  background: linear-gradient(135deg, #13635b 0%, #1e9b8e 50%, #2db3aa 100%);
+}
+.mockTileA { background: linear-gradient(135deg, #4a4f7a, #5B6FDB); }
+.mockTileB { background: linear-gradient(135deg, #4AB074, #2db3aa); }
+.mockTileC { background: linear-gradient(135deg, #D85D4F, #e7866d); }
+.mockTileD { background: linear-gradient(135deg, #6b7494, #9aa3bc); }
+
+@keyframes alertPop {
+  0%, 55%  { opacity: 0; transform: translateY(8px) scale(0.96); }
+  60%, 90% { opacity: 1; transform: translateY(0) scale(1); }
+  95%, 100% { opacity: 0; transform: translateY(-4px) scale(0.98); }
+}
+.alertPop { animation: alertPop 7s ease-in-out infinite; }
+
+@keyframes tileBreathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(45, 179, 170, 0); }
+  50%      { box-shadow: 0 0 0 3px rgba(45, 179, 170, 0.22); }
+}
+.tileBreathe { animation: tileBreathe 4s ease-in-out infinite; }
+
+/* Deck Forge mock — PDF → slides transformation */
+.deckMockBody {
+  aspect-ratio: 4 / 3;
+  position: relative;
+  background: linear-gradient(135deg, #f9fcfc 0%, #edfaf8 100%);
+  overflow: hidden;
+  padding: 18px;
+}
+@keyframes slideIn {
+  0%      { opacity: 0; transform: translateX(-12px); }
+  60%, 100% { opacity: 1; transform: translateX(0); }
+}
+.slideIn1 { animation: slideIn 1.8s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both; }
+.slideIn2 { animation: slideIn 1.8s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both; }
+.slideIn3 { animation: slideIn 1.8s cubic-bezier(0.16, 1, 0.3, 1) 0.8s both; }
+.slideIn4 { animation: slideIn 1.8s cubic-bezier(0.16, 1, 0.3, 1) 1.1s both; }
+
+@keyframes arrowMove {
+  0%, 100% { transform: translateX(0); opacity: 0.6; }
+  50%      { transform: translateX(4px); opacity: 1; }
+}
+.arrowMove { animation: arrowMove 2s ease-in-out infinite; }
 
 /* Testimonial quote mark */
 .quoteMark {

@@ -25,16 +25,19 @@ const dmSerif = DM_Serif_Display({
  * Rendered at `/` for unauthenticated visitors (authenticated users are
  * redirected to /dashboard by src/app/page.tsx before this ever mounts).
  *
- * Heads-up: the .mediaFrame blocks under "Hero", "Live Classroom", and
- * "Deck Forge" are placeholders for real product GIFs/MP4s — see the
- * TODO comments next to each. Swap the inner placeholder div for a
- * <video> tag once footage is captured.
+ * Structure: Hero → LVPEI strip → Big claim → 3H framework → Stats →
+ * Lifecycle overview (Plan / Teach / Master) → Pre-Conference module →
+ * Live-Conference module → Post-Conference module → AI Core → Testimonial →
+ * Trust strip → FAQ → Demo CTA → Footer.
+ *
+ * Heads-up: the .mediaFrame blocks are placeholders for real product
+ * GIFs/MP4s. Swap the inner placeholder div for a <video> tag once
+ * footage is captured.
  */
 export function Landing() {
   const [demoSent, setDemoSent] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
-  // Scroll reveal + active nav highlight
   useEffect(() => {
     const root = rootRef.current;
     if (!root) return;
@@ -52,7 +55,7 @@ export function Landing() {
     );
     root.querySelectorAll(`.${styles.reveal}`).forEach((el) => observer.observe(el));
 
-    const navSections = ['lxs', 'features', 'ai', 'faculty', 'assessment', 'faq'];
+    const navSections = ['lifecycle', 'pre', 'live', 'post', 'ai', 'faq'];
     const onScroll = () => {
       const pos = window.scrollY + 80;
       navSections.forEach((id) => {
@@ -83,17 +86,27 @@ export function Landing() {
       <nav className={styles.navGlass} style={{ position: 'fixed', top: 0, left: 0, right: 0, zIndex: 50 }}>
         <div style={{ maxWidth: '72rem', margin: '0 auto', padding: '0 1.5rem', height: 66, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Image src="/vaidix-logo.png" alt="Vaidix" width={36} height={36} priority style={{ height: 36, width: 'auto' }} />
+            <div className={styles.navLogoWrap}>
+              <span aria-hidden className={styles.navLogoHalo} />
+              <Image
+                src="/logo.png"
+                alt="Vaidix"
+                width={44}
+                height={44}
+                priority
+                className={styles.navLogoImg}
+              />
+            </div>
             <span style={{ fontSize: 17, fontWeight: 900, color: '#0d1224', letterSpacing: '-0.01em' }}>Vaidix</span>
             <span className={styles.pill} style={{ fontSize: '0.62rem', padding: '3px 10px' }}>LXS</span>
           </div>
 
-          <div className="hidden md:flex" style={{ alignItems: 'center', gap: 32, fontSize: 13, fontWeight: 600, color: '#4a5370' }}>
-            <a href="#lxs">Why LXS</a>
-            <a href="#features">Features</a>
+          <div className="hidden md:flex" style={{ alignItems: 'center', gap: 28, fontSize: 13, fontWeight: 600, color: '#4a5370' }}>
+            <a href="#lifecycle">The Lifecycle</a>
+            <a href="#pre">Pre</a>
+            <a href="#live">Live</a>
+            <a href="#post">Post</a>
             <a href="#ai">AI Core</a>
-            <a href="#faculty">For Faculty</a>
-            <a href="#assessment">Assessment</a>
             <a href="#faq">FAQ</a>
           </div>
 
@@ -116,33 +129,33 @@ export function Landing() {
           <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 28 }}>
             <div className={styles.pill}>
               <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#1e9b8e', display: 'inline-block' }} />
-              Purpose-built for Medical Residency &amp; Fellowship Programs
+              A Cognitive Gymnasium for Medical Training
             </div>
           </div>
 
-          <h1 style={{ fontSize: 'clamp(58px, 7vw, 84px)', fontWeight: 900, color: '#0d1224', letterSpacing: '-0.025em', lineHeight: 1.02, marginBottom: 28 }}>
-            From morning rounds<br />
-            <span className={`${dmSerif.className} ${styles.gTeal}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>to mastery.</span>
+          <h1 style={{ fontSize: 'clamp(54px, 6.6vw, 80px)', fontWeight: 900, color: '#0d1224', letterSpacing: '-0.025em', lineHeight: 1.02, marginBottom: 28 }}>
+            We don&apos;t build video conferencing.<br />
+            <span className={`${dmSerif.className} ${styles.gTeal}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>We build cognitive gymnasiums.</span>
           </h1>
 
-          <p style={{ fontSize: 20, color: '#343c57', maxWidth: '40rem', margin: '0 auto 40px', lineHeight: 1.6 }}>
-            The Learning Xperience System for medical residency — live clinical teaching, AI-guided case learning, and competency assessment in one platform built for the bedside.
+          <p style={{ fontSize: 20, color: '#343c57', maxWidth: '44rem', margin: '0 auto 40px', lineHeight: 1.6 }}>
+            Compassionate, AI-powered training grounds where students become <strong>3H doctors</strong> — Head, Heart, Hands. End-to-end, from morning rounds to mastery.
           </p>
 
-          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 64, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 16, marginBottom: 56, flexWrap: 'wrap' }}>
             <a href="#demo" className={styles.btnPrimary} style={{ padding: '16px 36px', borderRadius: 16, fontSize: 15, textDecoration: 'none' }}>Request a Demo →</a>
-            <a href="#features" className={styles.btnGhost} style={{ padding: '16px 36px', borderRadius: 16, fontSize: 15, textDecoration: 'none' }}>See How It Works</a>
+            <a href="#lifecycle" className={styles.btnGhost} style={{ padding: '16px 36px', borderRadius: 16, fontSize: 15, textDecoration: 'none' }}>See the Lifecycle</a>
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '12px 24px', fontSize: 13, color: '#4a5370' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <svg className={styles.icoSm} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
-              DPDPA Compliant · PHI Protected
+              <svg className={styles.icoSm} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+              AI trained for ophthalmology
             </div>
             <div style={{ width: 1, height: 16, background: '#c9cedc' }} className="hidden sm:block" />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <svg className={styles.icoSm} viewBox="0 0 24 24" stroke="#1e9b8e"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></svg>
-              Indic language support · India-first
+              English + Indic captions
             </div>
             <div style={{ width: 1, height: 16, background: '#c9cedc' }} className="hidden sm:block" />
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -153,7 +166,7 @@ export function Landing() {
         </div>
 
         {/* Hero product preview — SWAP with real GIF */}
-        <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '72rem', marginTop: 80, padding: '0 1rem' }} className={styles.float}>
+        <div style={{ position: 'relative', zIndex: 10, width: '100%', maxWidth: '72rem', marginTop: 64, padding: '0 1rem' }} className={styles.float}>
           <div className={styles.mediaFrame}>
             <span className={styles.cornerTag}>PRODUCT PREVIEW</span>
             <div className={styles.mediaBar}>
@@ -161,36 +174,118 @@ export function Landing() {
               <span className={styles.mediaBarLabel}>Vaidix · Live Session</span>
               <div className={styles.mediaBarLive}><div className={styles.liveDot} />LIVE</div>
             </div>
-            <div className={styles.mediaBody}>
-              {/* TODO: replace this block with <video> autoplay loop muted playsinline src="/marketing/hero-live.mp4" */}
-              <button type="button" className={styles.playBtn} aria-label="Play product preview">
-                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-              </button>
-              <div className={styles.mediaTitle}>Watch the live classroom in action</div>
-              <div className={styles.mediaSub}>A 30-second walkthrough of a live grand round on Vaidix</div>
+            <div className={styles.liveMockBody}>
+              {/* Speaker tile (presenter) */}
+              <div className={`${styles.mockTile} ${styles.mockTilePresenter} ${styles.tileBreathe}`} style={{ position: 'absolute', top: '5%', left: '3%', width: '58%', height: '62%' }}>
+                <div style={{ position: 'absolute', top: 10, left: 12, fontSize: 9, fontWeight: 800, color: 'rgba(255,255,255,.9)', letterSpacing: '0.14em', textTransform: 'uppercase' }}>Presenter</div>
+                <div style={{ position: 'absolute', bottom: 12, left: 12, right: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'rgba(255,255,255,.25)', border: '1.5px solid rgba(255,255,255,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900, color: '#fff' }}>PS</div>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#fff', lineHeight: 1.1 }}>Dr. Priya Sharma</div>
+                    <div style={{ fontSize: 9, color: 'rgba(255,255,255,.7)', marginTop: 2 }}>Glaucoma · LVPEI</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Participant tiles (right grid) */}
+              <div style={{ position: 'absolute', top: '5%', right: '3%', width: '34%', height: '62%', display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 6 }}>
+                {[
+                  { c: styles.mockTileA, initials: 'AR', label: 'Arjun' },
+                  { c: styles.mockTileB, initials: 'NK', label: 'Neha' },
+                  { c: styles.mockTileC, initials: 'SK', label: 'Sahil' },
+                  { c: styles.mockTileD, initials: '+12', label: '12 more' },
+                ].map((t) => (
+                  <div key={t.initials} className={`${styles.mockTile} ${t.c}`}>
+                    <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, color: 'rgba(255,255,255,.9)' }}>{t.initials}</div>
+                    <div style={{ position: 'absolute', bottom: 4, left: 6, fontSize: 8, color: 'rgba(255,255,255,.75)', fontWeight: 600 }}>{t.label}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Live caption */}
+              <div style={{ position: 'absolute', bottom: '20%', left: '3%', right: '38%', padding: '8px 12px', background: 'rgba(13,18,36,0.92)', borderRadius: 10, color: '#fff', boxShadow: '0 4px 16px rgba(13,18,36,.18)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#5dd4ca" strokeWidth={2.4} strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+                  <span style={{ fontSize: 9, fontWeight: 700, color: '#5dd4ca', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Live caption · EN</span>
+                </div>
+                <div style={{ fontSize: 11, lineHeight: 1.4, color: '#e4e7ef' }}>
+                  &ldquo;Slit-lamp shows posterior subcapsular opacity — how does this shift your differential?&rdquo;
+                </div>
+              </div>
+
+              {/* Engagement KPI */}
+              <div style={{ position: 'absolute', bottom: '6%', right: '3%', width: '34%', padding: 12, background: '#fff', borderRadius: 12, border: '1px solid rgba(74,176,116,.28)', boxShadow: '0 4px 14px rgba(30,155,142,.1)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: '#177d73', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Engagement</span>
+                  <span style={{ fontSize: 14, fontWeight: 900, color: '#177d73' }}>87%</span>
+                </div>
+                <div style={{ height: 5, borderRadius: 999, background: 'rgba(30,155,142,.12)' }}>
+                  <div className={styles.growBar} style={{ '--w': '87%', height: 5, borderRadius: 999, background: 'linear-gradient(90deg,#1e9b8e,#4AB074)' } as React.CSSProperties} />
+                </div>
+                <div style={{ fontSize: 9, color: '#4a5370', marginTop: 6 }}>↑ Trending up · 5 min</div>
+              </div>
+
+              {/* Presenter alert */}
+              <div className={styles.alertPop} style={{ position: 'absolute', bottom: '3%', left: '3%', right: '38%', padding: '7px 11px', background: 'linear-gradient(135deg, rgba(30,155,142,.95), rgba(45,179,170,.95))', borderRadius: 10, color: '#fff', display: 'flex', alignItems: 'center', gap: 8, boxShadow: '0 6px 20px rgba(30,155,142,.35)' }}>
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="m13 2-3 7h7l-9 13 3-9H4l9-11z"/></svg>
+                <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '0.03em' }}>Presenter alert: 3 silent for 8 min — try a poll</span>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
 
-      {/* ══════════════════════════ TESTIMONIAL ══════════════════════════ */}
-      <section className={styles.sectionWhite} style={{ padding: '5rem 1.5rem', borderTop: '1px solid #e4e7ef', borderBottom: '1px solid #e4e7ef' }}>
-        <div className={styles.reveal} style={{ maxWidth: '48rem', margin: '0 auto' }}>
-          <div className={styles.cardWhite} style={{ position: 'relative', padding: 'clamp(40px, 6vw, 56px)', borderRadius: 24 }}>
-            <span className={styles.quoteMark}>&ldquo;</span>
-            <p style={{ fontSize: 'clamp(24px, 3vw, 28px)', fontWeight: 500, color: '#1a1f33', lineHeight: 1.4, position: 'relative', zIndex: 1 }}>
-              Vaidix consolidated four separate tools we used for our residency programme. The faculty time saved is measurable; the resident engagement is undeniable.
-            </p>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 32 }}>
-              <div style={{ width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #1e9b8e, #2db3aa)' }}>
-                <svg className={styles.ico} viewBox="0 0 24 24" stroke="white"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      {/* ══════════════════════════ LVPEI COLLABORATION STRIP ══════════════════════════ */}
+      <section style={{ background: '#ffffff', padding: '2.25rem 1.5rem', borderTop: '1px solid #e4e7ef', borderBottom: '1px solid #e4e7ef' }}>
+        <div style={{ maxWidth: '72rem', margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '16px 28px', textAlign: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span className={styles.pill} style={{ background: 'rgba(91,111,219,.08)', color: '#5B6FDB', borderColor: 'rgba(91,111,219,.22)' }}>Collaboration</span>
+            <span style={{ fontSize: 14, fontWeight: 700, color: '#0d1224' }}>In partnership with LV Prasad Eye Institute</span>
+          </div>
+          <div style={{ width: 1, height: 18, background: '#c9cedc' }} className="hidden sm:block" />
+          <span style={{ fontSize: 13, color: '#4a5370' }}>Ophthalmology curriculum co-designed with LVPEI teachers.</span>
+        </div>
+      </section>
+
+
+      {/* ══════════════════════════ THE BIG CLAIM ══════════════════════════ */}
+      <section className={styles.sectionLight} style={{ padding: '6rem 1.5rem' }}>
+        <div className={styles.reveal} style={{ maxWidth: '60rem', margin: '0 auto', textAlign: 'center' }}>
+          <div className={styles.pill} style={{ marginBottom: 24 }}>The Distinction</div>
+          <h2 style={{ fontSize: 'clamp(36px, 4.6vw, 52px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.15, marginBottom: 20, letterSpacing: '-0.02em' }}>
+            Generic video conferencing delivers a session.<br />
+            <span className={`${dmSerif.className} ${styles.gTeal}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Vaidix trains a doctor.</span>
+          </h2>
+          <p style={{ color: '#343c57', fontSize: 18, maxWidth: '38rem', margin: '0 auto', lineHeight: 1.6 }}>
+            We turn every clinical session into a <strong>cognitive experience</strong> — designed with intent, taught with engagement, mastered through reflection and assessment.
+          </p>
+        </div>
+      </section>
+
+
+      {/* ══════════════════════════ 3H FRAMEWORK ══════════════════════════ */}
+      <section className={styles.sectionWhite} style={{ padding: '5rem 1.5rem 6rem' }}>
+        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
+          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 48 }}>
+            <div className={styles.pill} style={{ marginBottom: 16 }}>The 3H Framework</div>
+            <h2 style={{ fontSize: 'clamp(30px, 3.6vw, 40px)', fontWeight: 900, color: '#0d1224', marginBottom: 12 }}>Three dimensions of clinical mastery</h2>
+            <p style={{ color: '#343c57', fontSize: 16, maxWidth: '36rem', margin: '0 auto' }}>What it means to train a 3H doctor.</p>
+          </div>
+          <div className="grid md:grid-cols-3" style={{ gap: 20 }}>
+            {[
+              { label: 'HEAD', color: '#5B6FDB', text: 'Knowledge depth — pathophysiology, diagnosis, evidence-based protocols.', svg: <><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></> },
+              { label: 'HEART', color: '#D85D4F', text: 'Clinical empathy — patient communication, ethics, professional behaviour.', svg: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/> },
+              { label: 'HANDS', color: '#4AB074', text: 'Procedural skill — DOPS-assessed technique and surgical readiness.', svg: <><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></> },
+            ].map((h, i) => (
+              <div key={i} className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32, textAlign: 'center', background: `${h.color}0d`, borderColor: `${h.color}26`, transitionDelay: `${i * 0.08}s` }}>
+                <div className={styles.iconWrapLg} style={{ margin: '0 auto 16px', background: `${h.color}1a` }}>
+                  <svg className={styles.icoLg} viewBox="0 0 24 24" stroke={h.color}>{h.svg}</svg>
+                </div>
+                <div style={{ fontWeight: 900, fontSize: 22, marginBottom: 8, color: h.color }}>{h.label}</div>
+                <div style={{ fontSize: 14, color: '#343c57', lineHeight: 1.6 }}>{h.text}</div>
               </div>
-              <div>
-                <div style={{ fontWeight: 700, color: '#0d1224' }}>Program Director</div>
-                <div style={{ fontSize: 13, color: '#4a5370' }}>Tertiary eye care institute · South India</div>
-              </div>
-            </div>
+            ))}
           </div>
         </div>
       </section>
@@ -217,210 +312,319 @@ export function Landing() {
       </section>
 
 
-      {/* ══════════════════════════ WHY LXS ══════════════════════════ */}
-      <section id="lxs" className={styles.sectionLight} style={{ padding: '7rem 1.5rem' }}>
+      {/* ══════════════════════════ LIFECYCLE OVERVIEW ══════════════════════════ */}
+      <section id="lifecycle" className={styles.sectionLight} style={{ padding: '7rem 1.5rem' }}>
         <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
-          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 64 }}>
-            <div className={styles.pill} style={{ marginBottom: 20 }}>Not Your Average LMS</div>
-            <h2 style={{ fontSize: 'clamp(44px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
-              Why <span className={dmSerif.className} style={{ fontStyle: 'italic', fontWeight: 400 }}>Learning Xperience</span><span className={styles.gTeal}>?</span>
+          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 56 }}>
+            <div className={styles.pill} style={{ marginBottom: 20 }}>One Platform · Three Modules</div>
+            <h2 style={{ fontSize: 'clamp(40px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
+              The Cognitive Session,<br />
+              <span className={`${dmSerif.className} ${styles.gTeal}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>end to end.</span>
             </h2>
-            <p style={{ color: '#343c57', fontSize: 18, maxWidth: '36rem', margin: '0 auto', lineHeight: 1.6 }}>
-              LMS platforms deliver content. Vaidix delivers <strong>clinical transformation</strong>.
+            <p style={{ color: '#343c57', fontSize: 18, maxWidth: '38rem', margin: '0 auto', lineHeight: 1.6 }}>
+              Every clinical teaching session has three phases. We built a dedicated module — and dedicated AI — for each.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-2" style={{ gap: 24, marginBottom: 40 }}>
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 36 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-                <div className={styles.iconWrap} style={{ background: '#f0f2f7' }}>
-                  <svg className={styles.ico} viewBox="0 0 24 24" stroke="#9aa3bc"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 9h6M9 13h4"/></svg>
+          <div className="grid md:grid-cols-3" style={{ gap: 20 }}>
+            {[
+              {
+                phase: '01',
+                tag: 'PLAN',
+                title: 'Pre-Conference',
+                text: 'Generate the deck, blueprint the objectives, forge the cases, illustrate the slides — in minutes.',
+                features: ['Blueprint Generator', 'Deck Forge', 'Case Forge', 'AI Illustrations'],
+                href: '#pre',
+                color: '#5B6FDB',
+                bg: 'rgba(91,111,219,.07)',
+              },
+              {
+                phase: '02',
+                tag: 'TEACH',
+                title: 'Live Conference',
+                text: 'Hospital-grade video with AI engagement scoring, Indic captions, and presenter alerts when students drift.',
+                features: ['Low-latency Video', 'Engagement Intelligence', 'Polls · Q&A', 'AI Captions'],
+                href: '#live',
+                color: '#1e9b8e',
+                bg: 'rgba(30,155,142,.07)',
+              },
+              {
+                phase: '03',
+                tag: 'MASTER',
+                title: 'Post-Conference',
+                text: 'Recordings, reflective journaling, Socratic case dialogue, DOPS / Mini-CEX / EPA assessment, Kirkpatrick L1–L4.',
+                features: ['AI Transcripts', 'Journal + Coach', 'DOPS · Mini-CEX · EPA', 'WhatsApp Pearls'],
+                href: '#post',
+                color: '#4AB074',
+                bg: 'rgba(74,176,116,.07)',
+              },
+            ].map((p, i) => (
+              <a key={p.tag} href={p.href} className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32, transitionDelay: `${i * 0.1}s`, background: p.bg, borderColor: `${p.color}26`, textDecoration: 'none', display: 'block', color: 'inherit' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
+                  <span style={{ fontSize: 11, fontWeight: 900, color: p.color, letterSpacing: '0.18em' }}>{p.phase}</span>
+                  <span style={{ width: 24, height: 1, background: `${p.color}66` }} />
+                  <span style={{ fontSize: 11, fontWeight: 900, color: p.color, letterSpacing: '0.18em' }}>{p.tag}</span>
                 </div>
-                <div>
-                  <div style={{ fontSize: 10, color: '#9aa3bc', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700 }}>Old Paradigm</div>
-                  <div style={{ fontWeight: 700, color: '#252b43' }}>Learning Management System</div>
+                <h3 style={{ fontSize: 24, fontWeight: 900, color: '#0d1224', marginBottom: 12, letterSpacing: '-0.01em' }}>{p.title}</h3>
+                <p style={{ fontSize: 14, color: '#343c57', lineHeight: 1.65, marginBottom: 20 }}>{p.text}</p>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                  {p.features.map((f) => (
+                    <span key={f} className={styles.chip} style={{ background: `${p.color}10`, borderColor: `${p.color}30`, color: p.color }}>{f}</span>
+                  ))}
+                </div>
+                <div style={{ marginTop: 24, fontSize: 13, fontWeight: 700, color: p.color, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  Explore module →
+                </div>
+              </a>
+            ))}
+          </div>
+        </div>
+      </section>
+
+
+      {/* ══════════════════════════ PRE-CONFERENCE ══════════════════════════ */}
+      <section id="pre" className={styles.sectionWhite} style={{ padding: '7rem 1.5rem' }}>
+        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
+          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 56 }}>
+            <div className={styles.pill} style={{ marginBottom: 16, background: 'rgba(91,111,219,.08)', color: '#5B6FDB', borderColor: 'rgba(91,111,219,.22)' }}>
+              <span style={{ fontWeight: 900 }}>01 · PLAN</span>
+            </div>
+            <h2 style={{ fontSize: 'clamp(40px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
+              Before the session.<br />
+              <span className={dmSerif.className} style={{ fontStyle: 'italic', fontWeight: 400, color: '#5B6FDB' }}>Plan with AI.</span>
+            </h2>
+            <p style={{ color: '#343c57', fontSize: 18, maxWidth: '40rem', margin: '0 auto', lineHeight: 1.6 }}>
+              Teacher walk in prepared. AI does the heavy lifting — turning documents into decks, transcripts into cases, and objectives into a teaching roadmap.
+            </p>
+          </div>
+
+          {/* Deck Forge — featured */}
+          <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 40, marginBottom: 24 }}>
+            <div className="grid md:grid-cols-2" style={{ gap: 48, alignItems: 'center' }}>
+              <div>
+                <div className={styles.chip} style={{ marginBottom: 20, background: 'rgba(91,111,219,.08)', borderColor: 'rgba(91,111,219,.2)', color: '#5B6FDB' }}>Deck Forge</div>
+                <h3 style={{ fontSize: 32, fontWeight: 900, color: '#0d1224', lineHeight: 1.15, marginBottom: 20 }}>Upload a PDF.<br />Get a teaching deck.</h3>
+                <p style={{ color: '#343c57', lineHeight: 1.65, marginBottom: 24, fontSize: 15 }}>
+                  Drop any clinical paper, textbook chapter, or protocol document. AI extracts teaching points, generates a clean slide structure, illustrates the visuals — and exports to fully editable PPTX.
+                </p>
+                <ul className={styles.checkList} style={{ padding: 0, margin: 0 }}>
+                  <li>Saves teacher 4+ hours of prep per session</li>
+                  <li>AI suggestions: add slides, reorder, cut</li>
+                  <li>AI-generated clinical illustrations inline</li>
+                  <li>One-click export to PPTX</li>
+                </ul>
+              </div>
+              <div className={`${styles.mediaFrame} ${styles.floatD}`}>
+                <div className={styles.mediaBar}>
+                  <div className={styles.dotR} /><div className={styles.dotY} /><div className={styles.dotG} />
+                  <span className={styles.mediaBarLabel}>Deck Forge</span>
+                </div>
+                <div className={styles.deckMockBody}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1.6fr', gap: 14, alignItems: 'center', height: '100%' }}>
+                    {/* Source PDF */}
+                    <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #d0f3ef', padding: 12, boxShadow: '0 4px 14px rgba(30,155,142,.08)' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#D85D4F" strokeWidth={2}><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                        <span style={{ fontSize: 9, fontWeight: 800, color: '#D85D4F', letterSpacing: '0.08em' }}>PDF</span>
+                      </div>
+                      <div style={{ height: 4, background: '#e4e7ef', borderRadius: 2, marginBottom: 5 }} />
+                      <div style={{ height: 4, background: '#e4e7ef', borderRadius: 2, marginBottom: 5, width: '85%' }} />
+                      <div style={{ height: 4, background: '#e4e7ef', borderRadius: 2, marginBottom: 5, width: '70%' }} />
+                      <div style={{ height: 4, background: '#e4e7ef', borderRadius: 2, marginBottom: 5 }} />
+                      <div style={{ height: 4, background: '#e4e7ef', borderRadius: 2, marginBottom: 5, width: '60%' }} />
+                      <div style={{ fontSize: 9, color: '#9aa3bc', marginTop: 10, textAlign: 'center' }}>Glaucoma_2024.pdf</div>
+                    </div>
+
+                    {/* Arrow */}
+                    <div className={styles.arrowMove} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                      <span style={{ fontSize: 8, fontWeight: 800, color: '#177d73', letterSpacing: '0.1em' }}>AI</span>
+                      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#1e9b8e" strokeWidth={2.5} strokeLinecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                    </div>
+
+                    {/* Output slides */}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                      {[
+                        { cls: styles.slideIn1, title: 'Objectives', bg: 'linear-gradient(135deg,#edfaf8,#d0f3ef)' },
+                        { cls: styles.slideIn2, title: 'Pathophysiology', bg: 'linear-gradient(135deg,#fff,#edfaf8)' },
+                        { cls: styles.slideIn3, title: 'Differentials', bg: 'linear-gradient(135deg,#fff,#edfaf8)' },
+                        { cls: styles.slideIn4, title: 'Management', bg: 'linear-gradient(135deg,#edfaf8,#a4e8e0)' },
+                      ].map((s) => (
+                        <div key={s.title} className={s.cls} style={{ aspectRatio: '4/3', borderRadius: 6, background: s.bg, border: '1px solid rgba(30,155,142,.2)', padding: 6, display: 'flex', flexDirection: 'column', justifyContent: 'space-between' }}>
+                          <div style={{ fontSize: 7, fontWeight: 800, color: '#177d73', letterSpacing: '0.05em' }}>{s.title}</div>
+                          <div>
+                            <div style={{ height: 2, background: 'rgba(30,155,142,.3)', borderRadius: 1, marginBottom: 2 }} />
+                            <div style={{ height: 2, background: 'rgba(30,155,142,.25)', borderRadius: 1, width: '70%' }} />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Blueprint + Case Forge + Illustrations */}
+          <div className="grid md:grid-cols-3" style={{ gap: 20 }}>
+            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 28 }}>
+              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(91,111,219,.10)' }}>
+                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#5B6FDB"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h4"/></svg>
+              </div>
+              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>Blueprint Generator</div>
+              <p style={{ color: '#343c57', fontSize: 13, lineHeight: 1.65, marginBottom: 16 }}>AI generates a pre-session teaching roadmap — learning objectives, key questions, suggested interactive moments — for your topic and audience.</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.chip}>Objectives</span><span className={styles.chip}>Pre-session Q-bank</span>
+              </div>
+            </div>
+
+            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 28, transitionDelay: '0.08s' }}>
+              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(30,155,142,.10)' }}>
+                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/></svg>
+              </div>
+              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>Case Forge</div>
+              <p style={{ color: '#343c57', fontSize: 13, lineHeight: 1.65, marginBottom: 16 }}>Generate structured Socratic cases from a session transcript, a paper, or a teacher note. Six clinical stages — Story to Reflection — wired in automatically.</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.chip}>6-stage case</span><span className={styles.chip}>From transcript</span>
+              </div>
+            </div>
+
+            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 28, transitionDelay: '0.16s' }}>
+              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(74,176,116,.10)' }}>
+                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#4AB074"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>
+              </div>
+              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>AI Illustrations</div>
+              <p style={{ color: '#343c57', fontSize: 13, lineHeight: 1.65, marginBottom: 16 }}>Clinically accurate illustrations generated inline — anatomy, sign atlases, surgical sequences. Teacher stop hunting Google Images.</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.chip}>Inline image gen</span><span className={styles.chip}>Atlas-grade</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      {/* ══════════════════════════ LIVE-CONFERENCE ══════════════════════════ */}
+      <section id="live" className={styles.statsDark} style={{ padding: '7rem 1.5rem' }}>
+        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
+          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 56 }}>
+            <div className={styles.pillDark} style={{ marginBottom: 16 }}>
+              <span style={{ fontWeight: 900 }}>02 · TEACH</span>
+            </div>
+            <h2 style={{ fontSize: 'clamp(40px, 5vw, 56px)', fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: 20 }}>
+              During the session.<br />
+              <span className={`${dmSerif.className} ${styles.gDark}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Teach with cognitive precision.</span>
+            </h2>
+            <p style={{ color: '#6b7494', fontSize: 18, maxWidth: '42rem', margin: '0 auto', lineHeight: 1.6 }}>
+              This is not a video call with a chat bar. Vaidix actively watches the room — and tells the presenter when students drift.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-2" style={{ gap: 24, marginBottom: 24 }}>
+            <div className={`${styles.cardDark} ${styles.reveal}`} style={{ padding: 36 }}>
+              <div className={styles.chipDark} style={{ marginBottom: 16 }}>Grand Rounds, Reinvented</div>
+              <h3 style={{ fontSize: 24, fontWeight: 900, color: '#fff', marginBottom: 14, lineHeight: 1.2 }}>Hospital-grade video. Built for teaching, not meetings.</h3>
+              <p style={{ color: '#c9cedc', fontSize: 14, lineHeight: 1.65, marginBottom: 20 }}>Low-latency video, real-time captions in English and Indic languages, polls and interactive prompts, breakout rooms — every minute auto-recorded, transcribed, and AI-processed.</p>
               <ul style={{ padding: 0, margin: 0, listStyle: 'none' }}>
                 {[
-                  'Upload slides, record a video, upload a quiz',
-                  'Residents consume content passively',
-                  'Assessment is a checkbox, not a competency window',
-                  'AI is an afterthought — a chatbot in the corner',
-                  'Faculty spends 4+ hours per session on admin',
+                  'Hospital-grade low-latency video',
+                  'Live captions: English + Indic',
+                  'Interactive hooks: polls, T/F, dilemmas',
+                  'Pinned Q&A, hand-raise, threaded replies',
+                  'Breakout rooms with sub-session recording',
                 ].map((t, i) => (
-                  <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: '#4a5370', marginBottom: 12 }}>
-                    <span style={{ color: '#f87171', fontWeight: 700, marginTop: 2 }}>✗</span>{t}
+                  <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: '#c9cedc', marginBottom: 10 }}>
+                    <span style={{ color: '#2db3aa', fontWeight: 700, marginTop: 2 }}>→</span>{t}
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className={`${styles.gradBorder} ${styles.reveal}`} style={{ background: '#fff' }}>
-              <div style={{ padding: 36 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 28 }}>
-                  <div className={styles.iconWrap} style={{ background: 'rgba(30,155,142,.10)' }}>
-                    <svg className={styles.ico} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>
+            <div className={`${styles.cardDark} ${styles.reveal}`} style={{ padding: 36, transitionDelay: '0.12s' }}>
+              <div className={styles.chipDark} style={{ marginBottom: 16 }}>Engagement Intelligence</div>
+              <h3 style={{ fontSize: 24, fontWeight: 900, color: '#fff', marginBottom: 14, lineHeight: 1.2 }}>The room is being read. The presenter is being told.</h3>
+              <p style={{ color: '#c9cedc', fontSize: 14, lineHeight: 1.65, marginBottom: 20 }}>Vaidix tracks attention, participation, and interaction in real time — and delivers private nudges to the presenter so no student is lost silently.</p>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ padding: 14, borderRadius: 14, background: 'rgba(74,176,116,.07)', border: '1px solid rgba(74,176,116,.2)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#6ee7b7' }}>Session Engagement</span>
+                    <span style={{ fontSize: 12, fontWeight: 900, color: '#6ee7b7' }}>87%</span>
                   </div>
-                  <div>
-                    <div style={{ fontSize: 10, color: '#177d73', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700 }}>Vaidix</div>
-                    <div style={{ fontWeight: 700, color: '#0d1224' }}>Learning Xperience System</div>
+                  <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,.1)' }}>
+                    <div className={styles.growBar} style={{ '--w': '87%', height: 6, borderRadius: 999, background: 'linear-gradient(90deg,#1e9b8e,#4AB074)' } as React.CSSProperties} />
                   </div>
                 </div>
-                <ul className={styles.checkList} style={{ padding: 0, margin: 0 }}>
-                  <li>Live sessions with AI engagement scoring + real-time captions</li>
-                  <li>AI-guided case dialogues across 6 structured clinical stages</li>
-                  <li>DOPS, Mini-CEX, EPA — structured competency assessment</li>
-                  <li>Proprietary clinical AI trained for medical education</li>
-                  <li>Automated audit trails for accreditation compliance</li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 36 }}>
-            <div style={{ textAlign: 'center', marginBottom: 36 }}>
-              <div style={{ fontSize: 11, color: '#9aa3bc', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, marginBottom: 8 }}>The 3H Framework</div>
-              <div style={{ fontSize: 24, fontWeight: 900, color: '#0d1224' }}>Three dimensions of clinical mastery</div>
-            </div>
-            <div className="grid md:grid-cols-3" style={{ gap: 20 }}>
-              {[
-                { label: 'HEAD', color: '#5B6FDB', text: 'Knowledge depth — pathophysiology, diagnosis, evidence-based protocols', svg: <><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z"/><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z"/></> },
-                { label: 'HEART', color: '#D85D4F', text: 'Clinical empathy — patient communication, ethics, professional behaviour', svg: <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/> },
-                { label: 'HANDS', color: '#4AB074', text: 'Procedural skill — DOPS-assessed technique and surgical readiness', svg: <><path d="M18 11V6a2 2 0 0 0-4 0v5"/><path d="M14 10V4a2 2 0 0 0-4 0v6"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></> },
-              ].map((h, i) => (
-                <div key={i} style={{ padding: 28, borderRadius: 16, textAlign: 'center', background: `${h.color}0d`, border: `1px solid ${h.color}26` }}>
-                  <div className={styles.iconWrapLg} style={{ margin: '0 auto 16px', background: `${h.color}1a` }}>
-                    <svg className={styles.icoLg} viewBox="0 0 24 24" stroke={h.color}>{h.svg}</svg>
+                <div style={{ padding: 14, borderRadius: 14, background: 'rgba(30,155,142,.07)', border: '1px solid rgba(30,155,142,.2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#2db3aa' }} />
+                    <span style={{ fontSize: 12, fontWeight: 700, color: '#5dd4ca' }}>Presenter Alert</span>
                   </div>
-                  <div style={{ fontWeight: 900, fontSize: 20, marginBottom: 8, color: h.color }}>{h.label}</div>
-                  <div style={{ fontSize: 13, color: '#343c57' }}>{h.text}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ══════════════════════════ FEATURES ══════════════════════════ */}
-      <section id="features" className={styles.sectionWhite} style={{ padding: '7rem 1.5rem' }}>
-        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
-          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 64 }}>
-            <div className={styles.pill} style={{ marginBottom: 20 }}>Platform Features</div>
-            <h2 style={{ fontSize: 'clamp(44px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
-              Every Tool a <span className={styles.gTeal}>Clinical Teacher Needs</span>
-            </h2>
-          </div>
-
-          {/* 01 Live Classroom */}
-          <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 40, marginBottom: 24 }}>
-            <div className="grid md:grid-cols-2" style={{ gap: 48, alignItems: 'center' }}>
-              <div>
-                <div className={styles.chip} style={{ marginBottom: 20 }}>01 — Live Classroom</div>
-                <h3 style={{ fontSize: 32, fontWeight: 900, color: '#0d1224', lineHeight: 1.15, marginBottom: 20 }}>Grand Rounds,<br />Reinvented</h3>
-                <p style={{ color: '#343c57', lineHeight: 1.65, marginBottom: 24, fontSize: 15 }}>
-                  Live teaching sessions with low-latency video, real-time captions in English and Indic languages, interactive Q&amp;A, polls, and breakout rooms. Every session auto-recorded, transcribed, and AI-processed.
-                </p>
-                <ul className={styles.checkList} style={{ padding: 0, margin: 0 }}>
-                  <li>Hospital-grade low-latency video conferencing</li>
-                  <li>Live captions in English and Indic languages</li>
-                  <li>Interactive hooks: polls, T/F, dilemma prompts</li>
-                  <li>Pinned Q&amp;A, hand-raise, threaded replies</li>
-                  <li>Breakout rooms with sub-session recording</li>
-                </ul>
-              </div>
-              {/* TODO: replace with <video> for real classroom GIF */}
-              <div className={`${styles.mediaFrame} ${styles.floatD}`}>
-                <span className={styles.cornerTag}>GIF</span>
-                <div className={styles.mediaBar}>
-                  <div className={styles.dotR} /><div className={styles.dotY} /><div className={styles.dotG} />
-                  <div className={styles.mediaBarLive}><div className={styles.liveDot} />LIVE</div>
-                </div>
-                <div className={`${styles.mediaBody} ${styles.mediaBodyCompact}`}>
-                  <button type="button" className={styles.playBtn} aria-label="Play classroom demo">
-                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  </button>
-                  <div className={styles.mediaTitle}>Live Classroom Demo</div>
-                  <div className={styles.mediaSub}>Captions · Q&amp;A · Polls · Engagement</div>
+                  <p style={{ fontSize: 12, color: '#c9cedc' }}>3 participants silent for 8 min — consider launching a poll now</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* 02 + 03 */}
-          <div className="grid md:grid-cols-2" style={{ gap: 24, marginBottom: 24 }}>
-            {/* 02 Case Learning */}
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32 }}>
-              <div className={styles.chip} style={{ marginBottom: 16 }}>02 — Case-Based Learning</div>
-              <h3 style={{ fontSize: 24, fontWeight: 900, color: '#0d1224', marginBottom: 12 }}>AI Tutor That Thinks Like a Clinician</h3>
-              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 20 }}>Our proprietary clinical AI guides residents through structured cases across 6 stages — a mentor that prompts, probes, and adapts.</p>
-              <div style={{ padding: 16, borderRadius: 16, background: '#f9f9fb', border: '1px solid #e4e7ef', marginBottom: 20 }}>
-                <div style={{ padding: '10px 14px', borderRadius: '16px 16px 16px 2px', background: '#edfaf8', border: '1px solid rgba(30,155,142,.2)', fontSize: 12, color: '#252b43', marginBottom: 10 }}>
-                  A 68-year-old presents with 6 months of progressive vision loss. What would you examine first?
-                </div>
-                <div style={{ padding: '10px 14px', borderRadius: '16px 16px 2px 16px', background: '#fff', border: '1px solid #e4e7ef', fontSize: 12, color: '#252b43', marginBottom: 10, marginLeft: 20 }}>
-                  Start with visual acuity — corrected and uncorrected — then slit-lamp for lens clarity...
-                </div>
-                <div style={{ padding: '10px 14px', borderRadius: '16px 16px 16px 2px', background: '#edfaf8', border: '1px solid rgba(30,155,142,.2)', fontSize: 12 }}>
-                  <span style={{ fontWeight: 700, color: '#177d73' }}>Good reasoning.</span> <span style={{ color: '#252b43' }}>Slit-lamp shows posterior subcapsular opacity. How does this shift your differential?</span>
-                </div>
+          {/* Live preview frame — CSS mock of the classroom UI */}
+          <div className={styles.reveal} style={{ marginTop: 8 }}>
+            <div className={styles.mediaFrame}>
+              <div className={styles.mediaBar}>
+                <div className={styles.dotR} /><div className={styles.dotY} /><div className={styles.dotG} />
+                <span className={styles.mediaBarLabel}>Live Classroom · Glaucoma Grand Round</span>
+                <div className={styles.mediaBarLive}><div className={styles.liveDot} />LIVE</div>
               </div>
-              <ul className={styles.checkList} style={{ padding: 0, margin: 0, fontSize: 13 }}>
-                <li>6 clinical stages: Story → Reflection</li>
-                <li>Socratic dialogue — prompts thinking, never spoon-feeds</li>
-                <li>Case Forge: generate cases from session transcripts</li>
-              </ul>
-            </div>
+              <div className={styles.liveMockBody}>
+                {/* Same live mock pattern, scaled up */}
+                <div className={`${styles.mockTile} ${styles.mockTilePresenter} ${styles.tileBreathe}`} style={{ position: 'absolute', top: '5%', left: '3%', width: '58%', height: '62%' }}>
+                  <div style={{ position: 'absolute', top: 14, left: 16, fontSize: 11, fontWeight: 800, color: 'rgba(255,255,255,.9)', letterSpacing: '0.14em', textTransform: 'uppercase' }}>Presenter</div>
+                  <div style={{ position: 'absolute', bottom: 16, left: 16, right: 16, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: '50%', background: 'rgba(255,255,255,.25)', border: '1.5px solid rgba(255,255,255,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, fontWeight: 900, color: '#fff' }}>PS</div>
+                    <div>
+                      <div style={{ fontSize: 15, fontWeight: 700, color: '#fff', lineHeight: 1.1 }}>Dr. Priya Sharma</div>
+                      <div style={{ fontSize: 11, color: 'rgba(255,255,255,.7)', marginTop: 3 }}>Glaucoma · LVPEI</div>
+                    </div>
+                  </div>
+                </div>
 
-            {/* 03 Deck Forge */}
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32, transitionDelay: '0.15s' }}>
-              <div className={styles.chip} style={{ marginBottom: 16 }}>03 — Deck Forge</div>
-              <h3 style={{ fontSize: 24, fontWeight: 900, color: '#0d1224', marginBottom: 12 }}>Upload a PDF.<br />Get a Teaching Deck.</h3>
-              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 20 }}>Upload any document. AI extracts teaching points, generates slide structure, produces export-ready decks — in minutes.</p>
-              {/* TODO: replace with <video> for real deck forge GIF */}
-              <div className={styles.mediaFrame} style={{ marginBottom: 20 }}>
-                <span className={styles.cornerTag}>GIF</span>
-                <div className={styles.mediaBar}>
-                  <div className={styles.dotR} /><div className={styles.dotY} /><div className={styles.dotG} />
-                  <span className={styles.mediaBarLabel}>Deck Forge</span>
+                <div style={{ position: 'absolute', top: '5%', right: '3%', width: '34%', height: '62%', display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 8 }}>
+                  {[
+                    { c: styles.mockTileA, initials: 'AR', label: 'Arjun' },
+                    { c: styles.mockTileB, initials: 'NK', label: 'Neha' },
+                    { c: styles.mockTileC, initials: 'SK', label: 'Sahil' },
+                    { c: styles.mockTileD, initials: '+12', label: '12 more' },
+                  ].map((t) => (
+                    <div key={t.initials} className={`${styles.mockTile} ${t.c}`}>
+                      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, fontWeight: 900, color: 'rgba(255,255,255,.9)' }}>{t.initials}</div>
+                      <div style={{ position: 'absolute', bottom: 6, left: 8, fontSize: 10, color: 'rgba(255,255,255,.75)', fontWeight: 600 }}>{t.label}</div>
+                    </div>
+                  ))}
                 </div>
-                <div className={`${styles.mediaBody} ${styles.mediaBodyCompact}`}>
-                  <button type="button" className={styles.playBtn} aria-label="Play deck forge demo">
-                    <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                  </button>
-                  <div className={styles.mediaTitle}>PDF → Teaching Deck</div>
-                  <div className={styles.mediaSub}>Watch the full transformation in 15 seconds</div>
-                </div>
-              </div>
-              <ul className={styles.checkList} style={{ padding: 0, margin: 0, fontSize: 13 }}>
-                <li>Saves faculty 4+ hours of prep per session</li>
-                <li>AI suggestions: add, reorder, cut</li>
-                <li>Exports to fully editable PPTX</li>
-              </ul>
-            </div>
-          </div>
 
-          {/* Blueprint + Pearl */}
-          <div className="grid md:grid-cols-2" style={{ gap: 24 }}>
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32 }}>
-              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(30,155,142,.10)' }}>
-                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#1e9b8e"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h4"/></svg>
-              </div>
-              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>Blueprint Generator</div>
-              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>AI generates a pre-session teaching roadmap — objectives, key questions, suggested interactive moments — for your topic and audience.</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span className={styles.chip}>Learning objectives</span><span className={styles.chip}>Pre-session Q-bank</span>
-              </div>
-            </div>
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32, transitionDelay: '0.15s' }}>
-              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(30,155,142,.10)' }}>
-                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/></svg>
-              </div>
-              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>Pearl Library + WhatsApp</div>
-              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>Microlearning &ldquo;pearls&rdquo; — bite-sized clinical facts and tips — delivered to residents&apos; WhatsApp. Learning that fits in the OT corridor.</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span className={styles.chip}>WhatsApp delivery</span><span className={styles.chip}>Scheduled sends</span>
+                <div style={{ position: 'absolute', bottom: '20%', left: '3%', right: '38%', padding: '10px 14px', background: 'rgba(13,18,36,0.92)', borderRadius: 12, color: '#fff', boxShadow: '0 4px 16px rgba(13,18,36,.18)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 5 }}>
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5dd4ca" strokeWidth={2.4} strokeLinecap="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v4M8 23h8"/></svg>
+                    <span style={{ fontSize: 10, fontWeight: 700, color: '#5dd4ca', letterSpacing: '0.1em', textTransform: 'uppercase' }}>Live caption · EN</span>
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.4, color: '#e4e7ef' }}>
+                    &ldquo;Slit-lamp shows posterior subcapsular opacity — how does this shift your differential?&rdquo;
+                  </div>
+                </div>
+
+                <div style={{ position: 'absolute', bottom: '6%', right: '3%', width: '34%', padding: 14, background: '#fff', borderRadius: 12, border: '1px solid rgba(74,176,116,.28)', boxShadow: '0 4px 14px rgba(30,155,142,.1)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                    <span style={{ fontSize: 11, fontWeight: 700, color: '#177d73', letterSpacing: '0.06em', textTransform: 'uppercase' }}>Engagement</span>
+                    <span style={{ fontSize: 16, fontWeight: 900, color: '#177d73' }}>87%</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 999, background: 'rgba(30,155,142,.12)' }}>
+                    <div className={styles.growBar} style={{ '--w': '87%', height: 6, borderRadius: 999, background: 'linear-gradient(90deg,#1e9b8e,#4AB074)' } as React.CSSProperties} />
+                  </div>
+                  <div style={{ fontSize: 10, color: '#4a5370', marginTop: 7 }}>↑ Trending up · 5 min</div>
+                </div>
+
+                <div className={styles.alertPop} style={{ position: 'absolute', bottom: '3%', left: '3%', right: '38%', padding: '9px 13px', background: 'linear-gradient(135deg, rgba(30,155,142,.95), rgba(45,179,170,.95))', borderRadius: 12, color: '#fff', display: 'flex', alignItems: 'center', gap: 10, boxShadow: '0 6px 20px rgba(30,155,142,.35)' }}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round"><path d="m13 2-3 7h7l-9 13 3-9H4l9-11z"/></svg>
+                  <span style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.03em' }}>Presenter alert: 3 silent for 8 min — try a poll</span>
+                </div>
               </div>
             </div>
           </div>
@@ -428,26 +632,167 @@ export function Landing() {
       </section>
 
 
-      {/* ══════════════════════════ AI ══════════════════════════ */}
-      <section id="ai" className={styles.statsDark} style={{ padding: '7rem 1.5rem' }}>
+      {/* ══════════════════════════ POST-CONFERENCE ══════════════════════════ */}
+      <section id="post" className={styles.sectionLight} style={{ padding: '7rem 1.5rem' }}>
         <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
-          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 64 }}>
-            <div className={styles.pillDark} style={{ marginBottom: 20 }}>Vaidix Intelligence</div>
-            <h2 style={{ fontSize: 'clamp(44px, 5vw, 56px)', fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: 20 }}>
-              Purpose-built AI.<br /><span className={`${dmSerif.className} ${styles.gDark}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Not a bolted-on chatbot.</span>
+          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 56 }}>
+            <div className={styles.pill} style={{ marginBottom: 16, background: 'rgba(74,176,116,.10)', color: '#177d73', borderColor: 'rgba(74,176,116,.25)' }}>
+              <span style={{ fontWeight: 900 }}>03 · MASTER</span>
+            </div>
+            <h2 style={{ fontSize: 'clamp(40px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
+              After the session.<br />
+              <span className={dmSerif.className} style={{ fontStyle: 'italic', fontWeight: 400, color: '#4AB074' }}>Master through reflection and assessment.</span>
             </h2>
-            <p style={{ color: '#6b7494', fontSize: 18, maxWidth: '40rem', margin: '0 auto', lineHeight: 1.6 }}>
-              Every capability is powered by purpose-trained clinical AI — built for medical education, not adapted from a generic assistant.
+            <p style={{ color: '#343c57', fontSize: 18, maxWidth: '42rem', margin: '0 auto', lineHeight: 1.6 }}>
+              The session ends. Learning begins. Vaidix closes the loop — recordings, reflection, Socratic cases, competency assessment, all in one cognitive workflow.
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3" style={{ gap: 20, marginBottom: 40 }}>
+          {/* Recordings + Journal coach */}
+          <div className="grid md:grid-cols-2" style={{ gap: 24, marginBottom: 24 }}>
+            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32 }}>
+              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(30,155,142,.10)' }}>
+                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
+              </div>
+              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 20, marginBottom: 8 }}>Recordings + AI Transcripts</div>
+              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>Every session auto-recorded, transcoded, transcribed in English + Indic, and streamed via CDN with expiry-controlled share links.</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.chip}>HLS streaming</span><span className={styles.chip}>Multi-language</span><span className={styles.chip}>Share tokens</span>
+              </div>
+            </div>
+
+            <div className={`${styles.gradBorder} ${styles.reveal}`} style={{ background: '#fff', transitionDelay: '0.1s' }}>
+              <div style={{ padding: 32 }}>
+                <div style={{ fontSize: 10, color: '#177d73', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, marginBottom: 10 }}>Reflective Learning</div>
+                <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 20, marginBottom: 8 }}>Journal + AI Coach</div>
+                <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>Students log clinical reflections. The AI coach reads each entry, identifies gaps, and offers a Socratic prompt — not an answer.</p>
+                <div style={{ padding: 14, borderRadius: 12, background: '#edfaf8', border: '1px solid rgba(30,155,142,.15)' }}>
+                  <p style={{ fontSize: 12, color: '#252b43', fontStyle: 'italic', lineHeight: 1.6, marginBottom: 10 }}>&ldquo;I struggled to differentiate OCT patterns between NTG and POAG today...&rdquo;</p>
+                  <div style={{ padding: 12, borderRadius: 10, background: '#fff', border: '1px solid rgba(30,155,142,.18)', fontSize: 12 }}>
+                    <span style={{ fontWeight: 700, color: '#177d73' }}>Coach: </span>
+                    <span style={{ color: '#343c57' }}>What structural differences were you expecting, and what did you observe?</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Case Bank + Pearls */}
+          <div className="grid md:grid-cols-2" style={{ gap: 24, marginBottom: 24 }}>
+            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32 }}>
+              <div className={styles.chip} style={{ marginBottom: 16 }}>Case Bank</div>
+              <h3 style={{ fontSize: 22, fontWeight: 900, color: '#0d1224', marginBottom: 12 }}>An AI tutor that thinks like a clinician</h3>
+              <p style={{ color: '#343c57', fontSize: 13, lineHeight: 1.65, marginBottom: 16 }}>Our clinical AI guides students through structured cases across 6 stages — Socratic dialogue that prompts, probes, and adapts. A mentor that never gives up.</p>
+              <div style={{ padding: 14, borderRadius: 14, background: '#f9f9fb', border: '1px solid #e4e7ef' }}>
+                <div style={{ padding: '8px 12px', borderRadius: '14px 14px 14px 2px', background: '#edfaf8', border: '1px solid rgba(30,155,142,.2)', fontSize: 12, color: '#252b43', marginBottom: 8 }}>
+                  68-year-old with 6 months progressive vision loss. What would you examine first?
+                </div>
+                <div style={{ padding: '8px 12px', borderRadius: '14px 14px 2px 14px', background: '#fff', border: '1px solid #e4e7ef', fontSize: 12, color: '#252b43', marginBottom: 8, marginLeft: 20 }}>
+                  Start with VA — corrected and uncorrected — then slit-lamp...
+                </div>
+                <div style={{ padding: '8px 12px', borderRadius: '14px 14px 14px 2px', background: '#edfaf8', border: '1px solid rgba(30,155,142,.2)', fontSize: 12 }}>
+                  <span style={{ fontWeight: 700, color: '#177d73' }}>Good reasoning. </span>
+                  <span style={{ color: '#252b43' }}>Slit-lamp shows posterior subcapsular opacity. How does that shift your differential?</span>
+                </div>
+              </div>
+            </div>
+
+            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32, transitionDelay: '0.1s' }}>
+              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(74,176,116,.10)' }}>
+                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#4AB074"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5Z"/></svg>
+              </div>
+              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 20, marginBottom: 8 }}>Pearl Library + WhatsApp</div>
+              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>Microlearning &ldquo;pearls&rdquo; — bite-sized clinical facts and tips — delivered straight to students&apos; WhatsApp. Learning that fits in the OT corridor.</p>
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                <span className={styles.chip}>WhatsApp delivery</span><span className={styles.chip}>Scheduled sends</span><span className={styles.chip}>Spaced repetition</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Assessment block */}
+          <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 40 }}>
+            <div style={{ textAlign: 'center', marginBottom: 32 }}>
+              <div className={styles.chip} style={{ marginBottom: 12 }}>Competency Assessment</div>
+              <h3 style={{ fontSize: 'clamp(26px, 3vw, 32px)', fontWeight: 900, color: '#0d1224' }}>Assessment that proves competence</h3>
+              <p style={{ color: '#343c57', fontSize: 14, maxWidth: '36rem', margin: '12px auto 0' }}>DOPS, Mini-CEX, and EPA tracking embedded in the clinical workflow — digitally, traceably, accreditation-ready.</p>
+            </div>
+
+            <div className="grid md:grid-cols-3" style={{ gap: 16, marginBottom: 32 }}>
+              {[
+                { title: 'DOPS', sub: 'Direct Observation of Procedural Skills', color: '#1e9b8e', bg: 'rgba(30,155,142,.10)', text: 'Teacher fill structured forms while observing procedures. AI pre-fills criteria based on case context.' },
+                { title: 'Mini-CEX', sub: 'Mini Clinical Evaluation Exercise', color: '#5B6FDB', bg: 'rgba(91,111,219,.10)', text: 'History, examination, reasoning, communication — evaluated in real encounters. Mobile-first, under 5 minutes.' },
+                { title: 'EPA Tracking', sub: 'Entrustable Professional Activities', color: '#4AB074', bg: 'rgba(74,176,116,.10)', text: '5 entrustment levels — from observation only to supervising others. Visual milestone dashboard.' },
+              ].map((a) => (
+                <div key={a.title} style={{ padding: 20, borderRadius: 16, background: a.bg, border: `1px solid ${a.color}30` }}>
+                  <div style={{ fontWeight: 900, fontSize: 16, color: a.color, marginBottom: 4 }}>{a.title}</div>
+                  <div style={{ fontSize: 10, color: '#9aa3bc', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, marginBottom: 10 }}>{a.sub}</div>
+                  <p style={{ fontSize: 12, color: '#343c57', lineHeight: 1.6 }}>{a.text}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="grid md:grid-cols-2" style={{ gap: 32 }}>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#0d1224', marginBottom: 12 }}>Kirkpatrick 4-Level Evaluation</div>
+                {[
+                  { l: 'L1', label: 'Reaction',  desc: 'Did students find it valuable?',     bg: '#2db3aa' },
+                  { l: 'L2', label: 'Learning',  desc: 'Did knowledge and skills improve?',  bg: '#1e9b8e' },
+                  { l: 'L3', label: 'Behaviour', desc: 'Did clinical practice change?',      bg: '#177d73' },
+                  { l: 'L4', label: 'Results',   desc: 'Did patient outcomes improve?',      bg: '#13635b' },
+                ].map((k) => (
+                  <div key={k.l} style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 12 }}>
+                    <div style={{ width: 36, height: 36, borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900, color: '#fff', flexShrink: 0, background: k.bg }}>{k.l}</div>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1f33' }}>{k.label}</div>
+                      <div style={{ fontSize: 12, color: '#4a5370' }}>{k.desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div style={{ fontWeight: 900, fontSize: 18, color: '#0d1224', marginBottom: 12 }}>Student Portfolio</div>
+                {[
+                  { k: 'DOPS Completed',    v: '12 / 20',     color: '#177d73' },
+                  { k: 'Mini-CEX Logged',   v: '8 / 12',      color: '#177d73' },
+                  { k: 'EPA Level (Phaco)', v: 'Level 3 → 4', color: '#5B6FDB' },
+                  { k: 'Cases Completed',   v: '34',          color: '#177d73' },
+                ].map((p) => (
+                  <div key={p.k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 10, background: '#f9f9fb', border: '1px solid #e4e7ef', marginBottom: 8 }}>
+                    <span style={{ fontSize: 13, color: '#252b43' }}>{p.k}</span>
+                    <span style={{ fontWeight: 900, color: p.color }}>{p.v}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderRadius: 14, border: '2px solid rgba(45,179,170,.5)', background: '#edfaf8' }}>
+                  <span style={{ fontSize: 14, fontWeight: 900, color: '#115450' }}>Overall 3H Score</span>
+                  <span style={{ fontWeight: 900, color: '#0d1224', fontSize: 18 }}>82<span style={{ fontSize: 14, color: '#4a5370' }}>/100</span></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      {/* ══════════════════════════ AI CORE ══════════════════════════ */}
+      <section id="ai" className={styles.statsDark} style={{ padding: '7rem 1.5rem' }}>
+        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
+          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 56 }}>
+            <div className={styles.pillDark} style={{ marginBottom: 20 }}>Vaidix Intelligence</div>
+            <h2 style={{ fontSize: 'clamp(40px, 5vw, 56px)', fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: 20 }}>
+              Purpose-trained AI.<br /><span className={`${dmSerif.className} ${styles.gDark}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Not a bolted-on chatbot.</span>
+            </h2>
+            <p style={{ color: '#6b7494', fontSize: 18, maxWidth: '44rem', margin: '0 auto', lineHeight: 1.6 }}>
+              Every capability — Forge tools, engagement scoring, journal coach, case dialogue — is powered by AI trained specifically for medical education, not adapted from a generic assistant.
+            </p>
+          </div>
+
+          <div className="grid md:grid-cols-3" style={{ gap: 20 }}>
             {[
-              { title: 'Clinical AI Tutor', sub: 'Vaidix Core', color: '#5dd4ca', bg: 'rgba(30,155,142,.15)', desc: 'Trained on medical literature, guides residents through case discussions with speciality-specific precision.', chips: ['Case dialogue', 'Gap detection'], svg: <><circle cx="12" cy="2.5" r="1.5"/><circle cx="19.5" cy="19.5" r="1.5"/><circle cx="4.5" cy="14.5" r="1.5"/><path d="M16 22s-1-1.5-2-2.5C13 18.5 11 17 9 17a4 4 0 0 1-4-4c0-2 2-4 4-4 1 0 3 .5 4 1.5l1 1"/><path d="m12 4 4 4M16 4l-4 4"/></> },
-              { title: 'Content Intelligence', sub: 'Reasoning Engine', color: '#93a3f8', bg: 'rgba(91,111,219,.15)', desc: 'Deep clinical reasoning for content quality — reviews case accuracy, structures decks, scores assessments.', chips: ['Content review', 'Deck design'], svg: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/> },
-              { title: 'Language Engine', sub: 'Multimodal & Multilingual', color: '#6ee7b7', bg: 'rgba(74,176,116,.12)', desc: 'Clinical illustrations, Indic language support, and intelligent document classification for content ingestion.', chips: ['Image generation', 'Indic language'], svg: <><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></> },
+              { title: 'Clinical AI Tutor', sub: 'Vaidix Core', color: '#5dd4ca', bg: 'rgba(30,155,142,.15)', desc: 'Trained on medical literature. Guides students through case discussions with speciality-specific precision — ophthalmology first.', chips: ['Case dialogue', 'Gap detection'], svg: <><circle cx="12" cy="2.5" r="1.5"/><circle cx="19.5" cy="19.5" r="1.5"/><circle cx="4.5" cy="14.5" r="1.5"/><path d="M16 22s-1-1.5-2-2.5C13 18.5 11 17 9 17a4 4 0 0 1-4-4c0-2 2-4 4-4 1 0 3 .5 4 1.5l1 1"/></> },
+              { title: 'Content Intelligence', sub: 'Reasoning Engine', color: '#93a3f8', bg: 'rgba(91,111,219,.15)', desc: 'Deep clinical reasoning for content quality — reviews case accuracy, structures decks, scores assessments, drives the Forge tools.', chips: ['Deck design', 'Case review'], svg: <path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z"/> },
+              { title: 'Language Engine', sub: 'Multimodal & Multilingual', color: '#6ee7b7', bg: 'rgba(74,176,116,.12)', desc: 'Clinical illustration generation, English + Indic captioning, and intelligent document classification for content ingestion.', chips: ['Image gen', 'Indic captions'], svg: <><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></> },
             ].map((p, i) => (
-              <div key={i} className={`${styles.cardDark} ${styles.reveal}`} style={{ padding: 28, transitionDelay: `${i * 0.15}s` }}>
+              <div key={i} className={`${styles.cardDark} ${styles.reveal}`} style={{ padding: 28, transitionDelay: `${i * 0.12}s` }}>
                 <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: p.bg }}>
                   <svg className={styles.icoLg} viewBox="0 0 24 24" stroke={p.color}>{p.svg}</svg>
                 </div>
@@ -460,47 +805,25 @@ export function Landing() {
               </div>
             ))}
           </div>
+        </div>
+      </section>
 
-          {/* Engagement Intelligence */}
-          <div className={`${styles.cardDark} ${styles.reveal}`} style={{ padding: 36 }}>
-            <div className="grid md:grid-cols-2" style={{ gap: 40, alignItems: 'center' }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 20, color: '#fff', marginBottom: 12 }}>Engagement Intelligence</div>
-                <p style={{ color: '#6b7494', fontSize: 14, lineHeight: 1.65, marginBottom: 20 }}>Vaidix tracks attention, participation, and interaction patterns — delivering real-time alerts to the presenter so no resident gets lost silently.</p>
-                <ul style={{ padding: 0, margin: 0, listStyle: 'none' }}>
-                  {['Attention drop detection — immediate presenter alert', 'Silent participant identification', 'Interaction scoring across polls, chat, Q&A, reactions', 'Post-session Kirkpatrick 1–4 evaluation'].map((t, i) => (
-                    <li key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: 13, color: '#c9cedc', marginBottom: 10 }}>
-                      <span style={{ color: '#2db3aa', fontWeight: 700, marginTop: 2 }}>→</span>{t}
-                    </li>
-                  ))}
-                </ul>
+
+      {/* ══════════════════════════ TESTIMONIAL ══════════════════════════ */}
+      <section className={styles.sectionWhite} style={{ padding: '6rem 1.5rem', borderTop: '1px solid #e4e7ef', borderBottom: '1px solid #e4e7ef' }}>
+        <div className={styles.reveal} style={{ maxWidth: '48rem', margin: '0 auto' }}>
+          <div className={styles.cardWhite} style={{ position: 'relative', padding: 'clamp(36px, 6vw, 56px)', borderRadius: 24 }}>
+            <span className={styles.quoteMark}>&ldquo;</span>
+            <p style={{ fontSize: 'clamp(22px, 2.8vw, 28px)', fontWeight: 500, color: '#1a1f33', lineHeight: 1.4, position: 'relative', zIndex: 1 }}>
+              Vaidix consolidated four separate tools we used for our training programme. The teacher time saved is measurable. The student engagement is undeniable.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 32 }}>
+              <div style={{ width: 48, height: 48, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #1e9b8e, #2db3aa)' }}>
+                <svg className={styles.ico} viewBox="0 0 24 24" stroke="white"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div style={{ padding: 16, borderRadius: 16, background: 'rgba(74,176,116,.07)', border: '1px solid rgba(74,176,116,.2)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#6ee7b7' }}>Session Engagement</span>
-                    <span style={{ fontSize: 13, fontWeight: 900, color: '#6ee7b7' }}>87%</span>
-                  </div>
-                  <div style={{ height: 8, borderRadius: 999, background: 'rgba(255,255,255,.1)' }}>
-                    <div className={styles.growBar} style={{ '--w': '87%', height: 8, borderRadius: 999, background: 'linear-gradient(90deg,#1e9b8e,#4AB074)' } as React.CSSProperties} />
-                  </div>
-                </div>
-                <div style={{ padding: 16, borderRadius: 16, background: 'rgba(30,155,142,.07)', border: '1px solid rgba(30,155,142,.2)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: '50%', background: '#2db3aa' }} />
-                    <span style={{ fontSize: 13, fontWeight: 700, color: '#5dd4ca' }}>Presenter Alert</span>
-                  </div>
-                  <p style={{ fontSize: 12, color: '#6b7494' }}>3 participants silent for 8 min — consider launching a poll now</p>
-                </div>
-                <div style={{ padding: 16, borderRadius: 16, background: 'rgba(91,111,219,.07)', border: '1px solid rgba(91,111,219,.2)' }}>
-                  <div style={{ fontSize: 10, color: '#6b7494', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 10 }}>AI Post-Session Summary</div>
-                  {[['Clinical accuracy', '94/100'], ['Avg engagement', 'High'], ['Objectives covered', '5 of 6']].map(([k, v]) => (
-                    <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 8 }}>
-                      <span style={{ color: '#6b7494' }}>{k}</span>
-                      <span style={{ fontWeight: 700, color: '#93a3f8' }}>{v}</span>
-                    </div>
-                  ))}
-                </div>
+              <div>
+                <div style={{ fontWeight: 700, color: '#0d1224' }}>HOD</div>
+                <div style={{ fontSize: 13, color: '#4a5370' }}>Tertiary eye care institute · South India</div>
               </div>
             </div>
           </div>
@@ -508,172 +831,21 @@ export function Landing() {
       </section>
 
 
-      {/* ══════════════════════════ FACULTY ══════════════════════════ */}
-      <section id="faculty" className={styles.sectionLight} style={{ padding: '7rem 1.5rem' }}>
-        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
-          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 64 }}>
-            <div className={styles.pill} style={{ marginBottom: 20 }}>Faculty Enablement</div>
-            <h2 style={{ fontSize: 'clamp(44px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
-              Built to Give Faculty<br /><span className={styles.gTeal}>Their Time Back</span>
-            </h2>
-            <p style={{ color: '#343c57', fontSize: 18, maxWidth: '36rem', margin: '0 auto' }}>Automate the repetitive. Surface the important. Give clinicians superpowers, not more screens.</p>
-          </div>
-
-          <div className="grid md:grid-cols-2" style={{ gap: 24, marginBottom: 24 }}>
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32 }}>
-              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(30,155,142,.10)' }}>
-                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#1e9b8e"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>
-              </div>
-              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>Smart Session Scheduling</div>
-              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>Schedule, invite, set approval flows, add recurrence, sync to iCal — with conflict detection and host overlap warnings.</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span className={styles.chip}>iCal sync</span><span className={styles.chip}>Approval flow</span><span className={styles.chip}>Recurrence</span>
-              </div>
+      {/* ══════════════════════════ QUIET TRUST STRIP ══════════════════════════ */}
+      <section style={{ background: '#f9f9fb', padding: '2rem 1.5rem', borderBottom: '1px solid #e4e7ef' }}>
+        <div style={{ maxWidth: '72rem', margin: '0 auto', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'center', gap: '12px 28px', fontSize: 12, color: '#4a5370' }}>
+          {[
+            { key: 'dpdpa', svg: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></>, text: 'DPDPA aligned' },
+            { key: 'phi',   svg: <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>, text: 'PHI scanning' },
+            { key: 'cloud', svg: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></>, text: 'Indian cloud region' },
+            { key: 'audit', svg: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></>, text: 'Full audit trail' },
+            { key: 'indic', svg: <><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></>, text: 'Indic language support' },
+          ].map((t) => (
+            <div key={t.key} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <svg className={styles.icoSm} viewBox="0 0 24 24" stroke="#1e9b8e">{t.svg}</svg>
+              <span>{t.text}</span>
             </div>
-            <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 32, transitionDelay: '0.1s' }}>
-              <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: 'rgba(30,155,142,.10)' }}>
-                <svg className={styles.icoLg} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="m22 8-6 4 6 4V8Z"/><rect x="2" y="6" width="14" height="12" rx="2"/></svg>
-              </div>
-              <div style={{ fontWeight: 900, color: '#0d1224', fontSize: 18, marginBottom: 8 }}>Recording + AI Transcription</div>
-              <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 16 }}>Every session auto-recorded, transcoded, transcribed in English + Indic, and streamed via CDN with expiry-controlled share links.</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <span className={styles.chip}>HLS streaming</span><span className={styles.chip}>Multi-language</span><span className={styles.chip}>Share tokens</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Journal Coach */}
-          <div className={`${styles.gradBorder} ${styles.reveal}`} style={{ background: '#fff' }}>
-            <div style={{ padding: 40 }}>
-              <div className="grid md:grid-cols-5" style={{ gap: 32, alignItems: 'center' }}>
-                <div className="md:col-span-3">
-                  <div style={{ fontSize: 11, color: '#177d73', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, marginBottom: 12 }}>Reflective Learning</div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-                    <div className={styles.iconWrap} style={{ background: 'rgba(30,155,142,.10)' }}>
-                      <svg className={styles.ico} viewBox="0 0 24 24" stroke="#1e9b8e"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
-                    </div>
-                    <div style={{ fontSize: 28, fontWeight: 900, color: '#0d1224', lineHeight: 1.15 }}>Journal + AI Coach</div>
-                  </div>
-                  <p style={{ color: '#343c57', fontSize: 14, lineHeight: 1.65, marginBottom: 20 }}>Residents log clinical reflections. The AI coach reads each entry, identifies gaps, and offers a Socratic prompt — not an answer.</p>
-                  <ul className={styles.checkList} style={{ padding: 0, margin: 0 }}>
-                    <li>Structured reflection with Gibbs/Johns framework</li>
-                    <li>AI coaching prompts — guides thinking, not spoon-feeds</li>
-                    <li>Faculty can review and comment on entries</li>
-                    <li>Longitudinal insights across rotations</li>
-                  </ul>
-                </div>
-                <div className="md:col-span-2" style={{ padding: 20, borderRadius: 16, background: '#edfaf8', border: '1px solid rgba(30,155,142,.15)' }}>
-                  <div style={{ fontSize: 10, color: '#9aa3bc', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, marginBottom: 12 }}>Today&apos;s Reflection</div>
-                  <p style={{ fontSize: 13, color: '#252b43', fontStyle: 'italic', lineHeight: 1.6, marginBottom: 12 }}>&ldquo;I struggled to differentiate OCT patterns between NTG and POAG during rounds today...&rdquo;</p>
-                  <div style={{ padding: 14, borderRadius: 12, background: '#fff', border: '1px solid rgba(30,155,142,.18)', fontSize: 12 }}>
-                    <span style={{ fontWeight: 700, color: '#177d73' }}>Vaidix Coach: </span>
-                    <span style={{ color: '#343c57' }}>What structural differences were you expecting, and what did you actually observe?</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ══════════════════════════ ASSESSMENT ══════════════════════════ */}
-      <section id="assessment" className={styles.sectionWhite} style={{ padding: '7rem 1.5rem' }}>
-        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
-          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 64 }}>
-            <div className={styles.pill} style={{ marginBottom: 20 }}>Competency Assessment</div>
-            <h2 style={{ fontSize: 'clamp(44px, 5vw, 56px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 20 }}>
-              Assessment That <span className={styles.gTeal}>Proves Competence</span>
-            </h2>
-            <p style={{ color: '#343c57', fontSize: 18, maxWidth: '36rem', margin: '0 auto' }}>DOPS, Mini-CEX, and EPA tracking embedded in your clinical workflow — digitally, traceably, accreditation-ready.</p>
-          </div>
-
-          <div className="grid md:grid-cols-3" style={{ gap: 20, marginBottom: 24 }}>
-            {[
-              { title: 'DOPS', sub: 'Direct Observation of Procedural Skills', color: '#1e9b8e', bg: 'rgba(30,155,142,.10)', text: 'Faculty complete structured forms digitally while observing procedures. AI pre-fills criteria based on case context.', svg: <><path d="M6 18h8M3 22h18M14 22a7 7 0 1 0 0-14h-1"/><path d="M9 14h2"/><path d="M9 12 7 4l4-1 2 7"/></> },
-              { title: 'Mini-CEX', sub: 'Mini Clinical Evaluation Exercise', color: '#5B6FDB', bg: 'rgba(91,111,219,.10)', text: 'Evaluate history-taking, examination, reasoning, and communication in real encounters — mobile-first, under 5 minutes.', svg: <><path d="M11 2v4a4 4 0 0 1-8 0V2"/><path d="M3 2h8M11 14a4 4 0 0 0 8 0v-4"/><circle cx="19" cy="6" r="3"/><path d="M7 6v2a4 4 0 0 0 4 4v0a4 4 0 0 0 4-4"/></> },
-              { title: 'EPA Tracking', sub: 'Entrustable Professional Activities', color: '#4AB074', bg: 'rgba(74,176,116,.10)', text: 'Track progression through 5 entrustment levels — from observation only to supervising others. Visual milestone dashboard.', svg: <><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></> },
-            ].map((a, i) => (
-              <div key={i} className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 28, transitionDelay: `${i * 0.1}s` }}>
-                <div className={styles.iconWrapLg} style={{ marginBottom: 20, background: a.bg }}>
-                  <svg className={styles.icoLg} viewBox="0 0 24 24" stroke={a.color}>{a.svg}</svg>
-                </div>
-                <div style={{ fontWeight: 900, fontSize: 18, color: a.color, marginBottom: 4 }}>{a.title}</div>
-                <div style={{ fontSize: 10, color: '#9aa3bc', textTransform: 'uppercase', letterSpacing: '0.12em', fontWeight: 700, marginBottom: 12 }}>{a.sub}</div>
-                <p style={{ fontSize: 13, color: '#343c57', lineHeight: 1.65 }}>{a.text}</p>
-              </div>
-            ))}
-          </div>
-
-          <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 36 }}>
-            <div className="grid md:grid-cols-2" style={{ gap: 40 }}>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 24, color: '#0d1224', marginBottom: 12 }}>Kirkpatrick 4-Level Evaluation</div>
-                <p style={{ fontSize: 14, color: '#343c57', marginBottom: 24, lineHeight: 1.65 }}>Every session evaluated across all four Kirkpatrick levels.</p>
-                {[
-                  { l: 'L1', label: 'Reaction',  desc: 'Did residents find it valuable?',     bg: '#2db3aa' },
-                  { l: 'L2', label: 'Learning',  desc: 'Did knowledge and skills improve?',  bg: '#1e9b8e' },
-                  { l: 'L3', label: 'Behaviour', desc: 'Did clinical practice change?',      bg: '#177d73' },
-                  { l: 'L4', label: 'Results',   desc: 'Did patient outcomes improve?',      bg: '#13635b' },
-                ].map((k) => (
-                  <div key={k.l} style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 14 }}>
-                    <div style={{ width: 40, height: 40, borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 900, color: '#fff', flexShrink: 0, background: k.bg }}>{k.l}</div>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: '#1a1f33' }}>{k.label}</div>
-                      <div style={{ fontSize: 12, color: '#4a5370' }}>{k.desc}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 24, color: '#0d1224', marginBottom: 12 }}>Resident Portfolio</div>
-                {[
-                  { k: 'DOPS Completed',   v: '12 / 20',     color: '#177d73' },
-                  { k: 'Mini-CEX Logged',  v: '8 / 12',      color: '#177d73' },
-                  { k: 'EPA Level (Phaco)', v: 'Level 3 → 4', color: '#5B6FDB' },
-                  { k: 'Cases Completed',  v: '34',          color: '#177d73' },
-                ].map((p) => (
-                  <div key={p.k} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 12, background: '#f9f9fb', border: '1px solid #e4e7ef', marginBottom: 10 }}>
-                    <span style={{ fontSize: 13, color: '#252b43' }}>{p.k}</span>
-                    <span style={{ fontWeight: 900, color: p.color }}>{p.v}</span>
-                  </div>
-                ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderRadius: 16, border: '2px solid rgba(45,179,170,.5)', background: '#edfaf8' }}>
-                  <span style={{ fontSize: 14, fontWeight: 900, color: '#115450' }}>Overall 3H Score</span>
-                  <span style={{ fontWeight: 900, color: '#0d1224', fontSize: 20 }}>82<span style={{ fontSize: 16, color: '#4a5370' }}>/100</span></span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-
-      {/* ══════════════════════════ TRUST ══════════════════════════ */}
-      <section className={styles.statsDark} style={{ padding: '5rem 1.5rem' }}>
-        <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
-          <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 40 }}>
-            <div className={styles.pillDark} style={{ marginBottom: 16 }}>Trust &amp; Compliance</div>
-            <h2 style={{ fontSize: 'clamp(28px, 4vw, 36px)', fontWeight: 900, color: '#fff', marginBottom: 12 }}>
-              Built for India&apos;s <span className={`${dmSerif.className} ${styles.gDark}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Clinical Standards</span>
-            </h2>
-          </div>
-          <div className="grid sm:grid-cols-2 md:grid-cols-4" style={{ gap: 16 }}>
-            {[
-              { title: 'DPDPA Compliant', text: 'Access, erasure, and export requests built into the platform', svg: <><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></> },
-              { title: 'PHI Protection',  text: 'Patient data scanning and consent management before any AI processing', svg: <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></> },
-              { title: 'Full Audit Trail', text: 'Every action logged with PII-safe hashing for accreditation review', svg: <><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></> },
-              { title: 'India-First',     text: 'Indian cloud region, Indic captions, NMC-aligned competency framework', svg: <><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></> },
-            ].map((t, i) => (
-              <div key={i} className={`${styles.cardDark} ${styles.reveal}`} style={{ padding: 24, transitionDelay: `${i * 0.1}s` }}>
-                <div className={styles.iconWrap} style={{ marginBottom: 16, background: 'rgba(45,179,170,.12)' }}>
-                  <svg className={styles.ico} viewBox="0 0 24 24" stroke="#5dd4ca">{t.svg}</svg>
-                </div>
-                <div style={{ fontWeight: 900, color: '#fff', marginBottom: 8 }}>{t.title}</div>
-                <p style={{ fontSize: 12, color: '#6b7494' }}>{t.text}</p>
-              </div>
-            ))}
-          </div>
+          ))}
         </div>
       </section>
 
@@ -683,20 +855,20 @@ export function Landing() {
         <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
           <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 48 }}>
             <div className={styles.pill} style={{ marginBottom: 20 }}>Common Questions</div>
-            <h2 style={{ fontSize: 'clamp(40px, 5vw, 52px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 16 }}>
-              Questions <span className={`${dmSerif.className} ${styles.gTeal}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Worth Asking</span>
+            <h2 style={{ fontSize: 'clamp(36px, 4.6vw, 52px)', fontWeight: 900, color: '#0d1224', lineHeight: 1.1, marginBottom: 16 }}>
+              Questions <span className={`${dmSerif.className} ${styles.gTeal}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>worth asking</span>
             </h2>
-            <p style={{ color: '#343c57' }}>Direct answers to what Program Directors actually want to know.</p>
+            <p style={{ color: '#343c57' }}>Direct answers to what HODs actually ask.</p>
           </div>
 
           <div className={`${styles.cardWhite} ${styles.reveal}`} style={{ padding: 16 }}>
             {[
-              ['How long does implementation take?', 'Typical rollout is 2–4 weeks for a single residency programme. Week 1 covers setup, programme structure import, and faculty onboarding. Week 2 handles resident provisioning and your first live sessions. Weeks 3–4 enable assessment workflows and AI features at your pace.'],
-              ['Is patient data safe? What about PHI?', 'Yes. Vaidix is DPDPA-compliant with PHI scanning at upload, tiered classification, and consent management before any AI processing. All data resides in an Indian cloud region. Every action is logged with PII-safe hashing for accreditation audits.'],
-              ['Can it integrate with our existing systems (HMS / LMS / SSO)?', 'Yes — Vaidix supports SSO via institutional identity providers, calendar sync via iCal, and structured export for legacy LMS or HMS integration. Custom integrations are available for enterprise tiers.'],
-              ['Which specialties is Vaidix built for?', 'Ophthalmology is the deepest specialty today, with curriculum, case templates, and AI tuning purpose-built for it. The platform architecture is specialty-agnostic — additional specialties (paediatrics, internal medicine, surgery) are progressively onboarded with their respective faculty partners.'],
-              ['Will it work in low-bandwidth hospitals?', 'Yes. Live video adapts to available bandwidth, recordings are available for low-latency offline playback, and WhatsApp microlearning works on any phone signal. Mobile-first design throughout — residents can complete assessments from their phones in clinic.'],
-              ['How does pricing work?', 'Per-programme annual licensing, scaled by resident count, with no per-feature gates — every institution gets the full platform. Pilot pricing is available for first-year partners. Request a demo for a tailored quote.'],
+              ['How long does implementation take?', 'Typical rollout is 2–4 weeks for a single training programme. Week 1 covers setup, programme structure import, and teacher onboarding. Week 2 handles student provisioning and your first live sessions. Weeks 3–4 enable assessment workflows and AI features at your pace.'],
+              ['What does the cognitive gymnasium look like in a real week?', 'Teacher uses Pre-Conference (Blueprint + Deck Forge + Case Forge) to prepare in under an hour. Live Conference runs the grand round with engagement scoring. Post-Conference closes the loop — students journal, complete cases, teacher record DOPS, and Pearls land on WhatsApp through the week.'],
+              ['Can it integrate with existing systems (HMS / LMS / SSO)?', 'Yes — SSO via institutional identity providers, iCal calendar sync, and structured export for legacy LMS or HMS integration. Custom integrations are available for enterprise tiers.'],
+              ['Which specialties is Vaidix built for?', 'Ophthalmology is the deepest specialty today, with curriculum, case templates, and AI tuning purpose-built for it — co-designed with LV Prasad Eye Institute teacher. The platform is specialty-agnostic; paediatrics, internal medicine, and surgery are progressively onboarded with their respective teacher partners.'],
+              ['Will it work in low-bandwidth hospitals?', 'Yes. Live video adapts to available bandwidth, recordings support low-latency offline playback, and WhatsApp microlearning works on any phone signal. Mobile-first design throughout — students can complete assessments from their phones in clinic.'],
+              ['How does pricing work?', 'Per-programme annual licensing, scaled by student count, with no per-feature gates — every institution gets the full platform. Pilot pricing is available for first-year partners. Request a demo for a tailored quote.'],
             ].map(([q, a], i) => (
               <details key={i} className={styles.faqItem} style={{ paddingLeft: 20, paddingRight: 20 }}>
                 <summary>{q}</summary>
@@ -712,11 +884,11 @@ export function Landing() {
       <section id="demo" className={styles.ctaBg} style={{ padding: '7rem 1.5rem' }}>
         <div style={{ maxWidth: '48rem', margin: '0 auto' }}>
           <div className={styles.reveal} style={{ textAlign: 'center', marginBottom: 48 }}>
-            <h2 style={{ fontSize: 'clamp(42px, 5vw, 54px)', fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: 16 }}>
-              Ready to Transform<br />Your <span className={`${dmSerif.className} ${styles.gDark}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>Residency Program</span>?
+            <h2 style={{ fontSize: 'clamp(38px, 5vw, 54px)', fontWeight: 900, color: '#fff', lineHeight: 1.1, marginBottom: 16 }}>
+              Ready to build your<br /><span className={`${dmSerif.className} ${styles.gDark}`} style={{ fontStyle: 'italic', fontWeight: 400 }}>cognitive gymnasium?</span>
             </h2>
             <p style={{ color: '#5dd4ca', fontSize: 18 }}>
-              Request a personalised demo and see how Vaidix fits your specialty.
+              Request a personalised demo. We&apos;ll show how Vaidix fits your specialty.
             </p>
           </div>
 
@@ -729,8 +901,8 @@ export function Landing() {
                     <label className={styles.flabel}>Role</label>
                     <select className={styles.finput} required defaultValue="" style={{ appearance: 'none' }}>
                       <option value="" disabled>Select role</option>
-                      <option>Program Director</option>
-                      <option>Faculty / Senior Resident</option>
+                      <option>HOD</option>
+                      <option>Teacher / Senior Student</option>
                       <option>Hospital Administrator</option>
                       <option>Other</option>
                     </select>
@@ -764,33 +936,33 @@ export function Landing() {
       <footer style={{ background: '#060913', padding: '4rem 1.5rem' }}>
         <div style={{ maxWidth: '72rem', margin: '0 auto' }}>
           <div className="flex flex-col md:flex-row" style={{ justifyContent: 'space-between', gap: 48, marginBottom: 48 }}>
-            <div style={{ maxWidth: '20rem' }}>
+            <div style={{ maxWidth: '22rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                <div style={{ background: '#fff', borderRadius: 8, padding: 4, lineHeight: 0 }}>
-                  <Image src="/vaidix-logo.png" alt="Vaidix" width={32} height={32} style={{ height: 32, width: 'auto' }} />
-                </div>
-                <span style={{ fontSize: 18, fontWeight: 900, color: '#fff' }}>Vaidix</span>
+                <span style={{ fontSize: 22, fontWeight: 900, color: '#fff', letterSpacing: '-0.015em' }}>
+                  Vai<span style={{ color: '#5dd4ca' }}>dix</span>
+                </span>
                 <span className={styles.pillDark} style={{ fontSize: '0.6rem', padding: '3px 9px' }}>LXS</span>
               </div>
-              <p style={{ fontSize: 13, color: '#6b7494', lineHeight: 1.6 }}>The Learning Xperience System for medical residency. Built by clinicians, for clinicians.</p>
+              <p style={{ fontSize: 13, color: '#6b7494', lineHeight: 1.6, marginBottom: 10 }}>The cognitive gymnasium for medical training. Built by clinicians, for clinicians.</p>
+              <p style={{ fontSize: 12, color: '#4a5370', lineHeight: 1.6 }}>In partnership with LV Prasad Eye Institute.</p>
             </div>
             <div className="grid grid-cols-3" style={{ gap: 40, fontSize: 13 }}>
               <div>
-                <div style={{ color: '#fff', fontWeight: 700, marginBottom: 12 }}>Platform</div>
+                <div style={{ color: '#fff', fontWeight: 700, marginBottom: 12 }}>Lifecycle</div>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  <li style={{ marginBottom: 8 }}><a href="#features" style={{ color: '#6b7494' }}>Live Classroom</a></li>
-                  <li style={{ marginBottom: 8 }}><a href="#features" style={{ color: '#6b7494' }}>Case Learning</a></li>
-                  <li style={{ marginBottom: 8 }}><a href="#features" style={{ color: '#6b7494' }}>Deck Forge</a></li>
-                  <li style={{ marginBottom: 8 }}><a href="#assessment" style={{ color: '#6b7494' }}>Assessment</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#pre" style={{ color: '#6b7494' }}>Pre-Conference</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#live" style={{ color: '#6b7494' }}>Live Conference</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#post" style={{ color: '#6b7494' }}>Post-Conference</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#ai" style={{ color: '#6b7494' }}>AI Core</a></li>
                 </ul>
               </div>
               <div>
-                <div style={{ color: '#fff', fontWeight: 700, marginBottom: 12 }}>For Faculty</div>
+                <div style={{ color: '#fff', fontWeight: 700, marginBottom: 12 }}>Modules</div>
                 <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                  <li style={{ marginBottom: 8 }}><a href="#faculty" style={{ color: '#6b7494' }}>Session Tools</a></li>
-                  <li style={{ marginBottom: 8 }}><a href="#faculty" style={{ color: '#6b7494' }}>Blueprint AI</a></li>
-                  <li style={{ marginBottom: 8 }}><a href="#faculty" style={{ color: '#6b7494' }}>Pearl Library</a></li>
-                  <li style={{ marginBottom: 8 }}><a href="#faculty" style={{ color: '#6b7494' }}>Journal Coach</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#pre" style={{ color: '#6b7494' }}>Deck Forge</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#pre" style={{ color: '#6b7494' }}>Case Forge</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#post" style={{ color: '#6b7494' }}>Journal Coach</a></li>
+                  <li style={{ marginBottom: 8 }}><a href="#post" style={{ color: '#6b7494' }}>Pearl Library</a></li>
                 </ul>
               </div>
               <div>
@@ -808,7 +980,7 @@ export function Landing() {
             <div>© 2026 Vaidix. All rights reserved. Built for clinical excellence.</div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#2db3aa' }} />
-              <span>Indian Cloud Region · DPDPA Compliant</span>
+              <span>Indian Cloud Region · DPDPA aligned</span>
             </div>
           </div>
         </div>
