@@ -7,7 +7,7 @@
 | **Owner** | Symbiosys Technologies |
 | **Audience** | Codex review → engineering implementation |
 | **Severity** | **P0 — every authenticated user lands on the resident view regardless of their actual `Role`** |
-| **Pilot impact** | LVPEI go-live blocker. Faculty/PDs cannot reach `/admin/users`, `/program/*`, faculty cohort tools through the UI shell. |
+| **Pilot impact** | LVPEI go-live blocker. Faculty/PDs cannot reach `/admin/users`, `/hod/*`, faculty cohort tools through the UI shell. |
 
 ---
 
@@ -140,7 +140,7 @@ The plan is **one PR**. Splitting it would leave the tree in a broken intermedia
 12. Delete `src/components/layout/app-sidebar.tsx.bak`.
 13. `src/app/(platform)/classroom/page.tsx`:
     - Add the conditional CTA to `Empty` component for `PROGRAM_DIRECTOR | ADMIN`: link to `/calendar/new`.
-    - Keep the existing copy for residents/faculty/external learners.
+    - Keep the existing copy for residents/teacher/external learners.
 
 ### Phase 5 — Demo data
 14. `prisma/seed.demo.ts` (new):

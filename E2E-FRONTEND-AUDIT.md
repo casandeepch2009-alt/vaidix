@@ -55,11 +55,11 @@ Login as `FACULTY` → 9-item sidebar (Dashboard, Learners, Assess, Cases, AI Au
 | Click path | Status | Notes |
 |---|---|---|
 | **Dashboard** → `FacultyDashboard` | ✅ | Real session-driven name. Mock stats W8 scope. |
-| **Learners** → `/faculty/learners` | ✅ **(new in this round)** | Real DB list + cohort filter + sessions joined + cases completed. URL search `?q=` persists. |
-| **Assess → DOPS** → `/faculty/assess/dops` | ⚠️ | Form-only stub. W8 ships full DOPS write path. |
-| **Cases** → `/faculty/cases` | ✅ | Faculty-authored case management. |
-| **AI Audit** → `/faculty/ai-audit` | ✅ | LLM moderation review queue. |
-| **Cohort Analytics** → `/faculty/cohort` | ✅ **(new in this round)** | Real counts (residents, cohorts, sessions 90d, avg attendance). Scoring section banner W8. |
+| **Learners** → `/teacher/learners` | ✅ **(new in this round)** | Real DB list + cohort filter + sessions joined + cases completed. URL search `?q=` persists. |
+| **Assess → DOPS** → `/teacher/assess/dops` | ⚠️ | Form-only stub. W8 ships full DOPS write path. |
+| **Cases** → `/teacher/cases` | ✅ | Faculty-authored case management. |
+| **AI Audit** → `/teacher/ai-audit` | ✅ | LLM moderation review queue. |
+| **Cohort Analytics** → `/teacher/cohort` | ✅ **(new in this round)** | Real counts (residents, cohorts, sessions 90d, avg attendance). Scoring section banner W8. |
 | **Classroom → schedule** | ✅ | "Schedule a session" CTA visible (faculty=host). |
 | **Classroom → live session faculty controls** | ✅ | Mute all, disable chat, stop recording, breakout management. |
 | **Recording → mark Q&A as Answered** | ✅ **(new in this round)** | Faculty sees "Mark answered" button on every question. Composer accepts up to 8000 chars. Audited. |
@@ -80,11 +80,11 @@ Login as `PROGRAM_DIRECTOR` → 8-item sidebar (Dashboard, Competency Map, Miles
 | Click path | Status | Notes |
 |---|---|---|
 | **Dashboard** → `ProgramDirectorDashboard` | ✅ | Real session-driven name. EPA/heatmap mock. |
-| **Competency Map** → `/program/competency-map` | ⚠️ **(updated)** | Clear "Week 8" banner. Real EPA list + entrustment scale rendered. Heatmap populates from real DOPS/EPA records when W8 ships. |
-| **Milestones** → `/program/milestones` | ⚠️ | Mock. W8 scope. |
-| **Accreditation** → `/program/accreditation` | ⚠️ | Mock. W8 scope. |
-| **Learners** → `/faculty/learners` | ✅ | Same DB-backed page faculty uses. |
-| **Cohort Analytics** → `/faculty/cohort` | ✅ | Real counts. |
+| **Competency Map** → `/hod/competency-map` | ⚠️ **(updated)** | Clear "Week 8" banner. Real EPA list + entrustment scale rendered. Heatmap populates from real DOPS/EPA records when W8 ships. |
+| **Milestones** → `/hod/milestones` | ⚠️ | Mock. W8 scope. |
+| **Accreditation** → `/hod/accreditation` | ⚠️ | Mock. W8 scope. |
+| **Learners** → `/teacher/learners` | ✅ | Same DB-backed page faculty uses. |
+| **Cohort Analytics** → `/teacher/cohort` | ✅ | Real counts. |
 | **Calendar → New session** | ✅ | PD can propose for any faculty (PD→Faculty approval flow per W3). |
 | **Cohorts** → `/admin/cohorts` | ✅ | Read access; create flow is admin-only at API level. |
 | **Recording → mark Q&A as Answered** | ✅ | PD has same authority as faculty. |
@@ -135,7 +135,7 @@ Login as `EXTERNAL_LEARNER` → 6-item sidebar (Dashboard, Cases, Pearls, Atlas,
 | **Live video conferencing** (W2) | ✅ | LiveKit-backed. Tokens, screen share, hand raise, chat, faculty controls, admissions/waiting room, share-link. |
 | **Recording → MinIO HLS playback** (W4) | ✅ | Vidstack player. Multi-language captions. |
 | **Live captions** (W4) | ✅ | LiveKit Agent ingest. |
-| **Document upload + AI classify** (W4) | ✅ | At `/faculty/documents`. PHI scanner gates session-tagging. |
+| **Document upload + AI classify** (W4) | ✅ | At `/teacher/documents`. PHI scanner gates session-tagging. |
 | **WhatsApp pearl delivery** (W4) | ✅ | Worker scheduled. |
 | **Live leaderboards** (W4) | ✅ | In-session sidebar. |
 | **Coach + Reflection bots** (W4) | ✅ | Gemini-backed. |
@@ -179,7 +179,7 @@ Acceptable per build plan (W7-W11 wiring), but should be flagged:
 | `/atlas` | content from JSON; DB has same IDs seeded | content overlap, no fix needed |
 | `/topics/[id]/learn` | content scaffolding | W7 |
 | `/topics/[id]/review` | content scaffolding | W7 |
-| `/faculty/assess/dops` | form-only | W8 |
+| `/teacher/assess/dops` | form-only | W8 |
 
 These are **content** mocks, not user-data mocks — they don't fabricate user activity. Distinct from the bugs we already fixed (`/admin/users` showing fake "Dr. Pathengay" rows alongside the real DB).
 
@@ -191,7 +191,7 @@ If you want to clear the last 404s and make every sidebar entry resolve:
 
 1. **Remove or build `/admin/roles` and `/admin/image-library`** — 2-line edit to `SIDEBAR_NAV.admin` to remove, or a 60-line stub for each.
 2. **Clean up `Date.now()` in `/classroom/page.tsx`** — purity lint, cosmetic.
-3. **Wire faculty `/faculty/assess/dops` to write a real `DopsAssessment` row** — pre-empts W8.
+3. **Wire faculty `/teacher/assess/dops` to write a real `DopsAssessment` row** — pre-empts W8.
 4. **Add `/profile/bookmarks` to the resident dashboard** as a "Recently saved" widget.
 
 ---
