@@ -31,6 +31,11 @@ export const s3 =
       secretAccessKey: env.S3_SECRET_KEY,
     },
     forcePathStyle: true,          // required for MinIO
+    // Insurance against AWS SDK ≥3.729 default flip — sends x-amz-checksum-*
+    // headers some S3-compatible servers reject. Diagnostic ruled it out as
+    // root cause here (PutObject works either way), but cheap to pin.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 
 // Browser-facing client — signs presigned URLs against the PUBLIC endpoint
@@ -47,6 +52,8 @@ export const s3public =
       secretAccessKey: env.S3_SECRET_KEY,
     },
     forcePathStyle: true,
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 
 if (process.env.NODE_ENV !== 'production') {
@@ -56,27 +63,37 @@ if (process.env.NODE_ENV !== 'production') {
 
 export const BUCKET = env.S3_BUCKET;
 
+// Process-lifetime guard. MinIO does not implement PutBucketCors and returns
+// 501 NotImplemented; calling it per-upload threw before the file ever
+// transferred. One-shot + try/catch makes the upload path resilient.
+let bucketEnsured = false;
+
 export async function ensureBucket(): Promise<void> {
+  if (bucketEnsured) return;
   try {
     await s3.send(new HeadBucketCommand({ Bucket: BUCKET }));
   } catch {
     await s3.send(new CreateBucketCommand({ Bucket: BUCKET }));
   }
-  // Allow browsers to PUT via presigned URLs from any origin.
-  // Without this, MinIO/S3 blocks the CORS preflight and the chat
-  // attachment upload fails with "Failed to fetch".
-  await s3.send(new PutBucketCorsCommand({
-    Bucket: BUCKET,
-    CORSConfiguration: {
-      CORSRules: [{
-        AllowedHeaders: ['*'],
-        AllowedMethods: ['PUT', 'GET', 'HEAD'],
-        AllowedOrigins: ['*'],
-        ExposeHeaders: ['ETag'],
-        MaxAgeSeconds: 3600,
-      }],
-    },
-  }));
+  try {
+    await s3.send(new PutBucketCorsCommand({
+      Bucket: BUCKET,
+      CORSConfiguration: {
+        CORSRules: [{
+          AllowedHeaders: ['*'],
+          AllowedMethods: ['PUT', 'GET', 'HEAD'],
+          AllowedOrigins: ['*'],
+          ExposeHeaders: ['ETag'],
+          MaxAgeSeconds: 3600,
+        }],
+      },
+    }));
+  } catch (err) {
+    // CORS-setting can 501 on some S3-compatible servers — don't block uploads.
+    // Presigned-URL CORS for browser uploads is configured at infra level.
+    console.warn('[storage] PutBucketCors skipped:', (err as Error).message);
+  }
+  bucketEnsured = true;
 }
 
 export async function presignUpload(
