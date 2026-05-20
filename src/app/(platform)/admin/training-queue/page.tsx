@@ -156,7 +156,7 @@ export default function TrainingQueuePage() {
               <h3 className="text-sm font-bold text-foreground">How this becomes ML training data</h3>
             </div>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              When a learner answers a question, the rule-based scorer makes a best-effort guess at the axis scores. If the engine flags any uncertainty (unusual length, low rubric match, paraphrasing suspected, or an outlier score for the difficulty), the answer is captured here for faculty review. Faculty can then provide ground-truth scoring, add new keywords or rubric entries, or flag the item itself for revision. The exported JSONL file is the labelled dataset for fine-tuning Claude or training a custom model in Phase B.
+              When a learner answers a question, the rule-based scorer makes a best-effort guess at the axis scores. If the engine flags any uncertainty (unusual length, low rubric match, paraphrasing suspected, or an outlier score for the difficulty), the answer is captured here for teacher review. Teachers can then provide ground-truth scoring, add new keywords or rubric entries, or flag the item itself for revision. The exported JSONL file is the labelled dataset for fine-tuning Claude or training a custom model in Phase B.
             </p>
           </CardContent>
         </Card>
@@ -281,10 +281,10 @@ export default function TrainingQueuePage() {
                     <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50/40 p-2.5 dark:border-amber-500/30 dark:bg-amber-950/20">
                       <div className="flex items-center gap-2">
                         <AlertCircle className="size-4 text-amber-600" />
-                        <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Awaiting faculty review</p>
+                        <p className="text-xs font-medium text-amber-700 dark:text-amber-400">Awaiting teacher review</p>
                       </div>
                       <p className="mt-1 text-[10px] text-muted-foreground">
-                        Faculty review form is Phase B. For now, captured entries are exportable as JSONL for offline scoring.
+                        Teacher review form is Phase B. For now, captured entries are exportable as JSONL for offline scoring.
                       </p>
                     </div>
                   ) : (

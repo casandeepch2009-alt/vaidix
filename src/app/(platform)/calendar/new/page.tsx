@@ -71,8 +71,8 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
             <h1 className="text-2xl font-bold tracking-tight text-foreground">Schedule Session</h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               {isResident
-                ? 'Host it yourself for a peer-led session, or pick a faculty member to host — they’ll get an approval request first.'
-                : 'Pick a faculty host — they get an approval request, then it appears on attendee calendars.'}
+                ? 'Host it yourself for a peer-led session, or pick a teacher to host — they’ll get an approval request first.'
+                : 'Pick a teacher to host — they get an approval request, then it appears on attendee calendars.'}
             </p>
           </div>
         </div>
@@ -104,7 +104,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
               </h3>
               <ol className="space-y-3">
                 {[
-                  { label: 'Faculty gets notified', desc: 'An email + in-app approval request is sent immediately.' },
+                  { label: 'Teacher gets notified', desc: 'An email + in-app approval request is sent immediately.' },
                   { label: 'Host approves', desc: 'One click — session moves to Published.' },
                   { label: 'Calendars update', desc: 'Attendees see it on their Calendar.' },
                   { label: 'Reminders go out', desc: '24 h and 1 h before the session starts.' },
@@ -130,7 +130,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
               </h3>
               <ul className="space-y-2">
                 {[
-                  'Add a description with learning objectives so residents can prep.',
+                  'Add a description with learning objectives so students can prep.',
                   'Use recurrence for weekly Grand Rounds — one setup, 8+ sessions.',
                   'Invite-only is perfect for small group case discussions.',
                   'Generate a share link to include external guests.',
@@ -161,7 +161,7 @@ export default async function NewSessionPage({ searchParams }: PageProps) {
             <div className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-sm">
               <Users className="size-8 text-teal-500/60" />
               <div>
-                <p className="text-sm font-bold text-foreground">{faculty.length} faculty available</p>
+                <p className="text-sm font-bold text-foreground">{faculty.length} teacher{faculty.length === 1 ? '' : 's'} available</p>
                 <p className="text-xs text-muted-foreground">{cohorts.length} active cohort{cohorts.length !== 1 ? 's' : ''} to target</p>
               </div>
             </div>

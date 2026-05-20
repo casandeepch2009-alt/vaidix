@@ -9,7 +9,7 @@
 //      faculty intent and authors the slide JSON, ALSO flags initial
 //      enhancement suggestions in the same call.
 //
-// The wizard at /faculty/decks/new is the only caller. The legacy single-
+// The wizard at /teacher/decks/new is the only caller. The legacy single-
 // source forge (/api/decks/forge) keeps using forgeDeck() unchanged — the
 // two flows coexist per the "two parallel intakes, one shared studio"
 // architectural choice.

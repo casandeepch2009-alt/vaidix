@@ -673,7 +673,7 @@ function ReviewPanel({ topic, topicId }: { topic: any; topicId: string }) {
                 <p className="mt-0.5 text-muted-foreground">Tests empathy + plain language. Drop jargon.</p>
               </div>
               <div className="rounded-md bg-card p-2 text-[10px] leading-relaxed">
-                <span className="font-bold text-blue-600">B. To a peer resident</span>
+                <span className="font-bold text-blue-600">B. To a peer student</span>
                 <p className="mt-0.5 text-muted-foreground">Tests knowledge + reasoning. Show mechanism.</p>
               </div>
               <div className="rounded-md bg-card p-2 text-[10px] leading-relaxed">

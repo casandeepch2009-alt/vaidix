@@ -4,7 +4,7 @@
 // Pre-Conference Prep Block — shared surface for SCHEDULED + PENDING sessions
 // ════════════════════════════════════════════════════════════════════════════
 // Renders the 3-tab Pre-Conference panel (Study Pack curator + Readiness +
-// Teaser video) above the LiveSession pre-join screen for host/faculty/PD/admin.
+// Teaser video) above the LiveSession pre-join screen for host/teacher/PD/admin.
 // Same component re-used inside pending-session-manager via PreConferencePanels
 // — extracted here so the SCHEDULED page can render without duplicating code.
 

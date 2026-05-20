@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 // POST /api/decks/wizard/forge — multi-input forge with intent + briefing
 // ════════════════════════════════════════════════════════════════════════════
-// Wired to the new wizard at /faculty/decks/new. Distinct from the legacy
+// Wired to the new wizard at /teacher/decks/new. Distinct from the legacy
 // single-source /api/decks/forge — that route stays alive for the
 // document-detail "Forge presentation" quick-start (no briefing, no intent
 // gate). Both routes write into the same DeckForgeJob table.

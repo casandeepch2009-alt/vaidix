@@ -173,7 +173,7 @@ export function PollsVoter({ sessionId }: { sessionId: string }) {
                   </button>
                 ))}
                 <div className="flex items-center justify-between gap-3 pt-2">
-                  <p className="text-[10px] text-muted-foreground">One vote per resident. You can’t change it after submitting.</p>
+                  <p className="text-[10px] text-muted-foreground">One vote per student. You can’t change it after submitting.</p>
                   <button
                     data-testid={`polls-submit-${p.id}`}
                     onClick={() => selected && void vote(p.id, selected)}
@@ -232,7 +232,7 @@ function ResultsView({ poll, results }: { poll: PollHook; results?: PollResults 
           </div>
         )
       })}
-      <p className="text-[10px] text-muted-foreground">{total} {total === 1 ? 'resident has' : 'residents have'} answered.</p>
+      <p className="text-[10px] text-muted-foreground">{total} {total === 1 ? 'student has' : 'students have'} answered.</p>
     </div>
   )
 }

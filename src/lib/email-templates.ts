@@ -111,7 +111,7 @@ export function renderInvitationEmail(v: InvitationEmailVars): { subject: string
     <div style="font-size:24px;font-weight:800;color:#0F172A;margin-bottom:8px;">Welcome to Vaidix, ${escapeHtml(v.invitedName.split(' ')[0])} 🎉</div>
     <div style="font-size:15px;color:#475569;margin-bottom:28px;line-height:1.65;">
       <strong>${escapeHtml(v.inviterName)}</strong> has invited you to join <strong>${BRAND.appName}</strong> —
-      the ophthalmology training platform used by LVPEI residents, faculty, and program leadership.
+      the ophthalmology training platform used by LVPEI students, teachers, and program leadership.
     </div>
     <div style="background:#F0FDFA;border-left:4px solid #0D9488;padding:16px 20px;border-radius:10px;margin-bottom:24px;">
       <div style="font-size:12px;text-transform:uppercase;letter-spacing:0.08em;color:#0F766E;font-weight:700;margin-bottom:8px;">Your Invitation</div>

@@ -792,7 +792,7 @@ function StepScheduleAndAudience({
       {/* ── Host ── */}
       <div className="space-y-2">
         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-          {isResident ? 'Host' : 'Faculty host'}
+          {isResident ? 'Host' : 'Teacher host'}
         </p>
         {isFaculty ? (
           <div className="flex items-center gap-3 rounded-2xl border-2 border-primary/30 bg-primary/5 px-4 py-3">
@@ -815,7 +815,7 @@ function StepScheduleAndAudience({
                 >
                   {hostIsSelf
                     ? isResident
-                      ? '✓ You\'re hosting a peer-led session — schedules immediately, no faculty approval needed.'
+                      ? '✓ You\'re hosting a peer-led session — schedules immediately, no teacher approval needed.'
                       : '✓ You\'re hosting — schedules immediately, no approval needed.'
                     : `${selectedHost.name} will receive an approval request before publishing.`}
                 </motion.p>
@@ -1129,7 +1129,7 @@ function StepScheduleAndAudience({
             </motion.div>
           )}
         </AnimatePresence>
-        <p className="text-xs text-muted-foreground">Links to the topic library — residents find this session alongside related cases and atlas images.</p>
+        <p className="text-xs text-muted-foreground">Links to the topic library — students find this session alongside related cases and atlas images.</p>
       </div>
     </div>
   )
@@ -1198,7 +1198,7 @@ function StepDetails({
       <div className="space-y-2">
         <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Description</p>
         <Textarea value={description} onChange={(e) => setDesc(e.target.value)} rows={3} maxLength={2000}
-          placeholder="Optional — prep notes, agenda, anything residents should know…"
+          placeholder="Optional — prep notes, agenda, anything students should know…"
           className="rounded-xl border-2 px-3.5 py-2.5" />
       </div>
 
@@ -1276,7 +1276,7 @@ function FacultySearch({ faculty, value, onChange, currentUserId }: {
             {selected.id === currentUserId && <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-bold text-primary">YOU</span>}
           </>
         ) : (
-          <span className="flex-1 text-muted-foreground">Select a faculty host</span>
+          <span className="flex-1 text-muted-foreground">Select a teacher to host</span>
         )}
         <ChevronDown className={cn('size-4 shrink-0 text-muted-foreground transition-transform', open && 'rotate-180')} />
       </button>

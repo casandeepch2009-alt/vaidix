@@ -532,7 +532,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                 <Field label="Subspecialty" icon={GraduationCap}>
                   <Input value={subspecialty} onChange={(e) => setSubspecialty(e.target.value)} placeholder="e.g. Vitreoretinal Surgery" />
                 </Field>
-                <Field label="Year of residency" icon={GraduationCap} hint="1–10 (PGY level). Leave blank for non-residents.">
+                <Field label="Year of training" icon={GraduationCap} hint="1–10 (PGY level). Leave blank for non-students.">
                   <Input
                     type="number"
                     min={1}
@@ -641,7 +641,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                   <>
                     <div>
                       <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                        <ShieldCheck className="size-3" /> Faculty mentor
+                        <ShieldCheck className="size-3" /> Teacher mentor
                       </p>
                       {mentorPick.length > 0 ? (
                         <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
@@ -656,7 +656,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                             type="button"
                             onClick={() => setMentorPick([])}
                             className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                            aria-label="Clear faculty mentor"
+                            aria-label="Clear teacher mentor"
                           >
                             <UserMinus className="size-4" />
                           </button>
@@ -668,11 +668,11 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                           excludeIds={[user.id]}
                           selected={mentorPick}
                           onChange={setMentorPick}
-                          placeholder="Search faculty…"
+                          placeholder="Search teachers…"
                         />
                       )}
                       <p className="mt-1.5 text-[11px] text-muted-foreground">
-                        Optional. Direct mentor for this resident, independent of cohort.
+                        Optional. Direct mentor for this student, independent of cohort.
                       </p>
                     </div>
 
@@ -693,7 +693,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                         ))}
                       </select>
                       <p className="mt-1.5 text-[11px] text-muted-foreground">
-                        Replaces existing cohort membership when saved. Use the cohort drawer for multi-cohort residents.
+                        Replaces existing cohort membership when saved. Use the cohort drawer for multi-cohort students.
                       </p>
                     </div>
                   </>
@@ -702,7 +702,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                 {newRole === Role.FACULTY && (
                   <div>
                     <p className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-                      <ShieldCheck className="size-3" /> Reports to (Program Director)
+                      <ShieldCheck className="size-3" /> Reports to (HOD)
                     </p>
                     {pdPick.length > 0 ? (
                       <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2">
@@ -717,7 +717,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                           type="button"
                           onClick={() => setPdPick([])}
                           className="rounded-md p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive"
-                          aria-label="Clear program director"
+                          aria-label="Clear HOD"
                         >
                           <UserMinus className="size-4" />
                         </button>
@@ -729,7 +729,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                         excludeIds={[user.id]}
                         selected={pdPick}
                         onChange={setPdPick}
-                        placeholder="Search program directors…"
+                        placeholder="Search HODs…"
                       />
                     )}
                     <p className="mt-1.5 text-[11px] text-muted-foreground">
@@ -744,7 +744,7 @@ export function EditUserModal({ user, currentUserId, onClose, onSaved }: Props) 
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     rows={2}
-                    placeholder="e.g. promoted to faculty after fellowship completion"
+                    placeholder="e.g. promoted to teacher after fellowship completion"
                   />
                 </div>
               </div>

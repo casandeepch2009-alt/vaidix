@@ -179,7 +179,7 @@ export function AcceptInvitationClient({
         </>
       }
       heroSubtitle="Set your password and join the clinical learning journey."
-      heroDescription="Your Vaidix account is waiting for you. Residents, faculty, and program leadership at LVPEI use Vaidix to preserve every case, every conversation, every learning moment."
+      heroDescription="Your Vaidix account is waiting for you. Students, teachers, and program leadership at LVPEI use Vaidix to preserve every case, every conversation, every learning moment."
     >
       {loadingInit ? (
         <div className="flex min-h-50 items-center justify-center text-slate-400">

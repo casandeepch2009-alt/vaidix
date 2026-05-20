@@ -33,7 +33,7 @@ export const MODULES: readonly ModuleDef[] = [
   {
     key: 'pearls',
     label: 'Pearls Library',
-    description: 'Faculty-curated clinical wisdom and teaching pearls',
+    description: 'Teacher-curated clinical wisdom and teaching pearls',
     category: 'learning',
     defaultRoles: ['RESIDENT', 'FACULTY', 'PROGRAM_DIRECTOR', 'ADMIN', 'EXTERNAL_LEARNER'],
     icon: 'Gem',
@@ -134,7 +134,7 @@ export const MODULES: readonly ModuleDef[] = [
   {
     key: 'dops',
     label: 'DOPS (take)',
-    description: 'Direct Observation of Procedural Skills — resident view',
+    description: 'Direct Observation of Procedural Skills — student view',
     category: 'assessment',
     defaultRoles: ['RESIDENT'],
     icon: 'ClipboardCheck',
@@ -143,40 +143,40 @@ export const MODULES: readonly ModuleDef[] = [
   {
     key: 'mini-cex',
     label: 'Mini-CEX (take)',
-    description: 'Mini Clinical Evaluation Exercise — resident view',
+    description: 'Mini Clinical Evaluation Exercise — student view',
     category: 'assessment',
     defaultRoles: ['RESIDENT'],
     icon: 'FileCheck',
     href: '/mini-cex',
   },
 
-  // ─── FACULTY ─────────────────────────────────────────────────────────────
+  // ─── TEACHER ─────────────────────────────────────────────────────────────
   {
     key: 'faculty.cohort',
     label: 'Cohort Management',
-    description: 'View and manage resident cohort progress',
+    description: 'View and manage student cohort progress',
     category: 'faculty',
     defaultRoles: ['FACULTY', 'PROGRAM_DIRECTOR'],
     icon: 'Users',
-    href: '/faculty/cohort',
+    href: '/teacher/cohort',
   },
   {
     key: 'faculty.learners',
     label: 'Learners Dashboard',
-    description: 'Per-resident deep dive (scores, cases, recommendations)',
+    description: 'Per-student deep dive (scores, cases, recommendations)',
     category: 'faculty',
     defaultRoles: ['FACULTY', 'PROGRAM_DIRECTOR'],
     icon: 'UserCheck',
-    href: '/faculty/learners',
+    href: '/teacher/learners',
   },
   {
     key: 'faculty.assess',
-    label: 'Faculty Assessments',
-    description: 'Complete DOPS and Mini-CEX on residents',
+    label: 'Teacher Assessments',
+    description: 'Complete DOPS and Mini-CEX on students',
     category: 'faculty',
     defaultRoles: ['FACULTY', 'PROGRAM_DIRECTOR'],
     icon: 'Edit',
-    href: '/faculty/assess',
+    href: '/teacher/assess',
   },
   {
     key: 'faculty.documents',
@@ -185,7 +185,7 @@ export const MODULES: readonly ModuleDef[] = [
     category: 'faculty',
     defaultRoles: ['FACULTY', 'PROGRAM_DIRECTOR', 'ADMIN'],
     icon: 'FolderOpen',
-    href: '/faculty/documents',
+    href: '/teacher/documents',
   },
   {
     key: 'faculty.deck-forge',
@@ -194,7 +194,7 @@ export const MODULES: readonly ModuleDef[] = [
     category: 'faculty',
     defaultRoles: ['FACULTY', 'PROGRAM_DIRECTOR'],
     icon: 'Presentation',
-    href: '/faculty/deck-forge',
+    href: '/teacher/deck-forge',
   },
   {
     key: 'faculty.host-session',
@@ -203,10 +203,10 @@ export const MODULES: readonly ModuleDef[] = [
     category: 'faculty',
     defaultRoles: ['FACULTY', 'PROGRAM_DIRECTOR', 'ADMIN'],
     icon: 'VideoIcon',
-    href: '/faculty/sessions',
+    href: '/teacher/sessions',
   },
 
-  // ─── PROGRAM ─────────────────────────────────────────────────────────────
+  // ─── HOD ─────────────────────────────────────────────────────────────────
   {
     key: 'program.milestones',
     label: 'Milestones',
@@ -214,7 +214,7 @@ export const MODULES: readonly ModuleDef[] = [
     category: 'program',
     defaultRoles: ['PROGRAM_DIRECTOR'],
     icon: 'Flag',
-    href: '/program/milestones',
+    href: '/hod/milestones',
   },
   {
     key: 'program.competency-map',
@@ -223,7 +223,7 @@ export const MODULES: readonly ModuleDef[] = [
     category: 'program',
     defaultRoles: ['PROGRAM_DIRECTOR'],
     icon: 'Map',
-    href: '/program/competency-map',
+    href: '/hod/competency-map',
   },
   {
     key: 'program.accreditation',
@@ -232,7 +232,7 @@ export const MODULES: readonly ModuleDef[] = [
     category: 'program',
     defaultRoles: ['PROGRAM_DIRECTOR'],
     icon: 'Award',
-    href: '/program/accreditation',
+    href: '/hod/accreditation',
   },
 
   // ─── ADMIN ────────────────────────────────────────────────────────────────
@@ -319,8 +319,8 @@ export const getModule = (key: string): ModuleDef | undefined => moduleByKey.get
 export const CATEGORY_LABELS: Record<ModuleCategory, string> = {
   learning: 'Learning Modules',
   assessment: 'Assessment Modules',
-  faculty: 'Faculty Modules',
-  program: 'Program Director Modules',
+  faculty: 'Teacher Modules',
+  program: 'HOD Modules',
   admin: 'Admin Modules',
 };
 

@@ -85,7 +85,7 @@ export default async function ClassroomSessionPage({ params, searchParams }: Pag
         <GuestPrejoin
           sessionId={gate.id}
           title={gate.title}
-          hostName={host?.name ?? 'Vaidix faculty'}
+          hostName={host?.name ?? 'Vaidix teacher'}
           hostAvatarUrl={host?.avatarUrl ?? null}
           scheduledStart={effectiveStart.toISOString()}
           scheduledEnd={effectiveEnd.toISOString()}

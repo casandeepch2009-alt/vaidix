@@ -726,7 +726,7 @@ function FacultyBlock({ host }: { host: SessionPreview['host'] }) {
   return (
     <div>
       <p className="mb-2.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
-        Faculty Host
+        Teacher Host
       </p>
       {host ? (
         <div className="flex items-center gap-3">

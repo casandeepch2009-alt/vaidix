@@ -73,9 +73,9 @@ const ROLE_OPTIONS: Array<{
   description: string;
   icon: typeof UserCircle;
 }> = [
-  { value: Role.RESIDENT,         label: 'Resident',        description: 'Ophthalmology resident in training', icon: GraduationCap },
-  { value: Role.FACULTY,          label: 'Faculty',          description: 'Consultant / teaching faculty',      icon: Stethoscope },
-  { value: Role.PROGRAM_DIRECTOR, label: 'Program Director', description: 'Residency program leadership',       icon: BookOpen },
+  { value: Role.RESIDENT,         label: 'Student',          description: 'Ophthalmology student in training',  icon: GraduationCap },
+  { value: Role.FACULTY,          label: 'Teacher',          description: 'Consultant / teaching staff',        icon: Stethoscope },
+  { value: Role.PROGRAM_DIRECTOR, label: 'HOD',              description: 'Head of Department / program lead',  icon: BookOpen },
   { value: Role.ADMIN,            label: 'Admin',            description: 'Platform administrator',             icon: Settings },
   { value: Role.EXTERNAL_LEARNER, label: 'External Learner', description: 'Non-LVPEI invited learner',          icon: Users },
 ];
@@ -911,7 +911,7 @@ function Step2({
       {role === Role.FACULTY && (
         <div>
           <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-            <Network className="size-3" /> Reports to (Program Director)
+            <Network className="size-3" /> Reports to (HOD)
           </p>
           {pdPick.length > 0 ? (
             <PickedChip
@@ -925,7 +925,7 @@ function Step2({
               role={Role.PROGRAM_DIRECTOR}
               selected={pdPick}
               onChange={onPdChange}
-              placeholder="Search program directors…"
+              placeholder="Search HODs…"
             />
           )}
           <p className="mt-1.5 text-[11px] text-muted-foreground">
@@ -938,7 +938,7 @@ function Step2({
         <div className="space-y-5">
           <div>
             <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-widest text-muted-foreground">
-              <Network className="size-3" /> Faculty mentor
+              <Network className="size-3" /> Teacher mentor
             </p>
             {mentorPick.length > 0 ? (
               <PickedChip
@@ -952,7 +952,7 @@ function Step2({
                 role={Role.FACULTY}
                 selected={mentorPick}
                 onChange={onMentorChange}
-                placeholder="Search faculty…"
+                placeholder="Search teachers…"
               />
             )}
             <p className="mt-1.5 text-[11px] text-muted-foreground">

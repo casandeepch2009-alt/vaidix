@@ -165,7 +165,7 @@ export function RecordingViewer({
       if (!json.ok || !json.data) {
         throw new Error(json.error?.message ?? `Forge failed (${res.status})`)
       }
-      router.push(`/faculty/decks/${json.data.jobId}`)
+      router.push(`/teacher/decks/${json.data.jobId}`)
     } catch (err) {
       setForgeError((err as Error).message)
     } finally {

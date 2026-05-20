@@ -749,7 +749,7 @@
     "patientGender": "F",
     "difficulty": "intermediate",
     "estimatedMinutes": 25,
-    "description": "68F farmer from Khammam, presents POD 3 after phaco at a peripheral camp with severe pain, hand-movements vision, hypopyon 2.5mm with fibrin, no fundal glow, and dense vitritis on B-scan. Diabetic with HbA1c 9.2. Resident must work through EVS protocol decision-making, justify vitreous over AC tap, and consent the patient honestly.",
+    "description": "68F farmer from Khammam, presents POD 3 after phaco at a peripheral camp with severe pain, hand-movements vision, hypopyon 2.5mm with fibrin, no fundal glow, and dense vitritis on B-scan. Diabetic with HbA1c 9.2. Student must work through EVS protocol decision-making, justify vitreous over AC tap, and consent the patient honestly.",
     "tags": [
       "endophthalmitis",
       "EVS protocol",
@@ -782,7 +782,7 @@
     "patientGender": "M",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "52M bus conductor from Vijayawada, diabetic, presents with OS hypopyon and dense vitritis after a week of high fever and 3 days in a peripheral nursing home. RUQ tenderness on exam. Critically, the resident notices early bilateral chorioretinal foci on the OD fundus suggesting hematogenous seeding from a hepatic source. Indian endemic Klebsiella K1/K2 invasive syndrome.",
+    "description": "52M bus conductor from Vijayawada, diabetic, presents with OS hypopyon and dense vitritis after a week of high fever and 3 days in a peripheral nursing home. RUQ tenderness on exam. Critically, the student notices early bilateral chorioretinal foci on the OD fundus suggesting hematogenous seeding from a hepatic source. Indian endemic Klebsiella K1/K2 invasive syndrome.",
     "tags": [
       "endophthalmitis",
       "endogenous",
@@ -815,7 +815,7 @@
     "patientGender": "F",
     "difficulty": "intermediate",
     "estimatedMinutes": 25,
-    "description": "72F retired teacher with bilateral wet AMD on monthly anti-VEGF for 18 months. Returns 2 days after her latest OS injection with progressive blurring, mild AC reaction, vitritis 2+ but no obvious hypopyon. The mild presentation belies the typical streptococcal organism profile (oropharyngeal flora). Resident must navigate honest disclosure, treat appropriately, and counsel about continued treatment of the fellow eye.",
+    "description": "72F retired teacher with bilateral wet AMD on monthly anti-VEGF for 18 months. Returns 2 days after her latest OS injection with progressive blurring, mild AC reaction, vitritis 2+ but no obvious hypopyon. The mild presentation belies the typical streptococcal organism profile (oropharyngeal flora). Student must navigate honest disclosure, treat appropriately, and counsel about continued treatment of the fellow eye.",
     "tags": [
       "endophthalmitis",
       "post-injection",
@@ -847,7 +847,7 @@
     "patientGender": "M",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "65M with milky-white bleb and OD light perception 5 years after trabeculectomy with MMC. Hypopyon 2mm, dense vitritis, no Seidel leak. Streptococcus and H. influenzae predominate in BRE — much more virulent than typical post-op endophthalmitis. Resident must recognise that EVS protocol does not directly apply and justify earlier, more aggressive intervention.",
+    "description": "65M with milky-white bleb and OD light perception 5 years after trabeculectomy with MMC. Hypopyon 2mm, dense vitritis, no Seidel leak. Streptococcus and H. influenzae predominate in BRE — much more virulent than typical post-op endophthalmitis. Student must recognise that EVS protocol does not directly apply and justify earlier, more aggressive intervention.",
     "tags": [
       "endophthalmitis",
       "bleb-related",
@@ -879,7 +879,7 @@
     "patientGender": "F",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "32F school teacher, immunocompetent, history of childhood varicella. Presents with 5-day evolution of OD floaters, curtain, mild pain. Confluent peripheral retinal whitening 270 degrees with arteritis and posterior progression. Resident must distinguish VZV from HSV ARN, justify IV over oral antiviral, and anticipate junctional PVR.",
+    "description": "32F school teacher, immunocompetent, history of childhood varicella. Presents with 5-day evolution of OD floaters, curtain, mild pain. Confluent peripheral retinal whitening 270 degrees with arteritis and posterior progression. Student must distinguish VZV from HSV ARN, justify IV over oral antiviral, and anticipate junctional PVR.",
     "tags": [
       "ARN",
       "VZV",
@@ -912,7 +912,7 @@
     "patientGender": "F",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "38F tailor from Vijayawada with month-long OS floaters, blurring, evening fever and unintended weight loss. Multifocal yellowish placoid choroidal lesions at margins of older healed scars, granulomatous KPs, and ICGA hypocyanescent spots. Mantoux 18mm and old apical scar on CXR. Resident must understand presumptive diagnosis, ATT regimen, steroid sequencing, and the rifampicin-isoniazid-steroid interaction.",
+    "description": "38F tailor from Vijayawada with month-long OS floaters, blurring, evening fever and unintended weight loss. Multifocal yellowish placoid choroidal lesions at margins of older healed scars, granulomatous KPs, and ICGA hypocyanescent spots. Mantoux 18mm and old apical scar on CXR. Student must understand presumptive diagnosis, ATT regimen, steroid sequencing, and the rifampicin-isoniazid-steroid interaction.",
     "tags": [
       "TB uveitis",
       "serpiginous",
@@ -946,7 +946,7 @@
     "patientGender": "M",
     "difficulty": "intermediate",
     "estimatedMinutes": 25,
-    "description": "58M with HTN, T2DM, OSA, snorer, occasional sildenafil use. Wakes up with painless inferior altitudinal field defect OD. Disc swollen with segmental hyperaemia and 'disc at risk' fellow eye (CDR 0.1). Painless onset, nocturnal hypotension hypothesis. Resident must rule out arteritic AION, send ESR/CRP, accept that no proven treatment exists, and shift focus to fellow-eye protection.",
+    "description": "58M with HTN, T2DM, OSA, snorer, occasional sildenafil use. Wakes up with painless inferior altitudinal field defect OD. Disc swollen with segmental hyperaemia and 'disc at risk' fellow eye (CDR 0.1). Painless onset, nocturnal hypotension hypothesis. Student must rule out arteritic AION, send ESR/CRP, accept that no proven treatment exists, and shift focus to fellow-eye protection.",
     "tags": [
       "NAION",
       "optic neuropathy",
@@ -979,7 +979,7 @@
     "patientGender": "M",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "62M auto-rickshaw driver from Visakhapatnam, T2DM 18 yrs, CKD3, partial PRP OS 2 years ago lost to follow-up. Sudden OS floaters and curtain while driving. Dense vitreous haemorrhage with B-scan suggesting tongue-like membrane and possible posterior pole traction. Resident must navigate the limits of B-scan, decide on pre-op anti-VEGF timing, and acknowledge the socioeconomic context that drove the original loss-to-follow-up.",
+    "description": "62M auto-rickshaw driver from Visakhapatnam, T2DM 18 yrs, CKD3, partial PRP OS 2 years ago lost to follow-up. Sudden OS floaters and curtain while driving. Dense vitreous haemorrhage with B-scan suggesting tongue-like membrane and possible posterior pole traction. Student must navigate the limits of B-scan, decide on pre-op anti-VEGF timing, and acknowledge the socioeconomic context that drove the original loss-to-follow-up.",
     "tags": [
       "PDR",
       "vitreous hemorrhage",
@@ -1012,7 +1012,7 @@
     "patientGender": "M",
     "difficulty": "advanced",
     "estimatedMinutes": 25,
-    "description": "68M with HTN and dyslipidemia, sudden painless OD vision loss to hand movements 2 hours ago. Cherry red spot, retinal whitening, and severe RAPD. The resident must rule out arteritic CRAO from GCA, activate the stroke pathway (carotid Doppler, ECG, neurology consult), consider whether they are still inside the rescue window, and counsel the patient honestly about prognosis.",
+    "description": "68M with HTN and dyslipidemia, sudden painless OD vision loss to hand movements 2 hours ago. Cherry red spot, retinal whitening, and severe RAPD. The student must rule out arteritic CRAO from GCA, activate the stroke pathway (carotid Doppler, ECG, neurology consult), consider whether they are still inside the rescue window, and counsel the patient honestly about prognosis.",
     "tags": [
       "CRAO",
       "cherry red spot",
@@ -1044,7 +1044,7 @@
     "patientGender": "M",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "58M, high myope, presents 24 hours after lifting a heavy gas cylinder with photopsiae and a progressive curtain. OD vision 6/60, bullous superotemporal RD with macula off, single horseshoe tear at 11 o'clock. The resident must explain the macula-off urgency, decide between scleral buckle, vitrectomy, or combined approach, and counsel honestly about visual recovery limits when the macula has been off.",
+    "description": "58M, high myope, presents 24 hours after lifting a heavy gas cylinder with photopsiae and a progressive curtain. OD vision 6/60, bullous superotemporal RD with macula off, single horseshoe tear at 11 o'clock. The student must explain the macula-off urgency, decide between scleral buckle, vitrectomy, or combined approach, and counsel honestly about visual recovery limits when the macula has been off.",
     "tags": [
       "retinal detachment",
       "macula off",
@@ -1076,7 +1076,7 @@
     "patientGender": "F",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "70F with known wet AMD on monthly anti-VEGF, last injection 6 weeks ago. On aspirin for IHD. Sudden vision drop to HM. Fundus shows thick subretinal hemorrhage covering the macula and extending into the temporal arcades. The resident must weigh pneumatic displacement (intravitreal tPA + gas + anti-VEGF) versus pars plana vitrectomy with subretinal tPA, address the aspirin question, and act inside the photoreceptor rescue window.",
+    "description": "70F with known wet AMD on monthly anti-VEGF, last injection 6 weeks ago. On aspirin for IHD. Sudden vision drop to HM. Fundus shows thick subretinal hemorrhage covering the macula and extending into the temporal arcades. The student must weigh pneumatic displacement (intravitreal tPA + gas + anti-VEGF) versus pars plana vitrectomy with subretinal tPA, address the aspirin question, and act inside the photoreceptor rescue window.",
     "tags": [
       "submacular hemorrhage",
       "AMD",
@@ -1109,7 +1109,7 @@
     "patientGender": "M",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "Ex-28-week preterm, BW 1100g, post-menstrual age 36 weeks. Bilateral stage 3+ ROP zone II with plus disease. The resident must consent terrified parents (in plain Telugu/Hindi-influenced English), explain the rationale for anti-VEGF over laser in zone II disease, anticipate the recurrence and reactivation risk requiring weeks of follow-up, and coordinate care with the NICU team.",
+    "description": "Ex-28-week preterm, BW 1100g, post-menstrual age 36 weeks. Bilateral stage 3+ ROP zone II with plus disease. The student must consent terrified parents (in plain Telugu/Hindi-influenced English), explain the rationale for anti-VEGF over laser in zone II disease, anticipate the recurrence and reactivation risk requiring weeks of follow-up, and coordinate care with the NICU team.",
     "tags": [
       "ROP",
       "plus disease",
@@ -1142,7 +1142,7 @@
     "patientGender": "F",
     "difficulty": "advanced",
     "estimatedMinutes": 30,
-    "description": "14-month-old infant brought by anxious mother who noticed leukocoria in flash photographs. Examination under anaesthesia confirms a large endophytic mass occupying inferior 2/3 OD with vitreous seeds, IIRC group D. Fellow eye normal, no family history. The resident must communicate the diagnosis with honesty and care, explain the treatment hierarchy (life > eye > vision), and coordinate with the ocular oncology team.",
+    "description": "14-month-old infant brought by anxious mother who noticed leukocoria in flash photographs. Examination under anaesthesia confirms a large endophytic mass occupying inferior 2/3 OD with vitreous seeds, IIRC group D. Fellow eye normal, no family history. The student must communicate the diagnosis with honesty and care, explain the treatment hierarchy (life > eye > vision), and coordinate with the ocular oncology team.",
     "tags": [
       "retinoblastoma",
       "leukocoria",

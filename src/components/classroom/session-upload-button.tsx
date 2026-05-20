@@ -3,7 +3,7 @@
 // ════════════════════════════════════════════════════════════════════════════
 // SessionUploadButton — in-place "Upload material" for the Pre-Conf curator
 // ════════════════════════════════════════════════════════════════════════════
-// One click, four server roundtrips, no navigating to /faculty/documents:
+// One click, four server roundtrips, no navigating to /teacher/documents:
 //   1. POST /api/documents              → draft Document + presigned URL
 //   2. PUT to presigned URL             → file lands in MinIO
 //   3. POST /api/documents/[id]/tag-session  → links doc to this session
@@ -231,7 +231,7 @@ export function SessionUploadButton({ sessionId, onUploaded }: Props) {
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
                     rows={2}
-                    placeholder="What residents should know before opening this"
+                    placeholder="What students should know before opening this"
                     disabled={phase !== 'idle'}
                     className="mt-1"
                     maxLength={500}

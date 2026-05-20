@@ -22,7 +22,7 @@ export default async function ApprovalsInboxPage() {
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Approval Inbox</h1>
         <p className="text-sm text-muted-foreground">
-          Sessions a Program Director has proposed you host. Review and accept or decline.
+          Sessions an HOD has proposed you host. Review and accept or decline.
         </p>
       </div>
       <ApprovalsInbox

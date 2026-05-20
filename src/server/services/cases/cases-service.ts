@@ -78,7 +78,7 @@ export interface ListTemplatesOptions {
 export async function listCaseTemplates(opts: ListTemplatesOptions): Promise<CaseTemplateView[]> {
   // Resident-facing list only sees PUBLISHED templates. DRAFT (in-progress
   // forges) and ARCHIVED (faculty-removed) are hidden — those surface in
-  // /faculty/cases for the case owner only.
+  // /teacher/cases for the case owner only.
   const where: Prisma.CaseTemplateWhereInput = {
     programId: opts.programId,
     status: 'PUBLISHED',

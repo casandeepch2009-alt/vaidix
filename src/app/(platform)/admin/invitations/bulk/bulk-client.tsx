@@ -447,7 +447,7 @@ export function BulkInviteClient() {
               // data into the Residents sheet by mistake. Cheaper than a
               // full content-based heuristic and surfaces the right fix.
               errors.push(
-                'yearOfResidency is required on the Residents sheet (1–5). If this person isn’t a resident, move the row to the Faculty / Program Directors / Admins / External Learners sheet instead.',
+                'yearOfResidency is required on the Residents sheet (1–5). If this person isn’t a student, move the row to the Faculty / Program Directors / Admins / External Learners sheet instead.',
               );
             }
           }

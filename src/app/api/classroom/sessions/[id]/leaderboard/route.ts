@@ -83,7 +83,7 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
     rows.sort((a, b) => b.points - a.points);
     if (showAnonymous) {
       rows.forEach((r, idx) => {
-        if (r.name === null) r.name = `Resident #${idx + 1}`;
+        if (r.name === null) r.name = `Student #${idx + 1}`;
       });
     }
 

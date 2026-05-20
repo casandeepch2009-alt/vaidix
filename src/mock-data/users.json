@@ -50,7 +50,7 @@
     "email": "ananya.sharma@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Junior Resident",
+    "designation": "Junior Student",
     "department": "Vitreoretinal Surgery",
     "yearOfTraining": "PGY-1"
   },
@@ -60,7 +60,7 @@
     "email": "vikram.reddy@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Junior Resident",
+    "designation": "Junior Student",
     "department": "Cornea & Anterior Segment",
     "yearOfTraining": "PGY-1"
   },
@@ -70,7 +70,7 @@
     "email": "sneha.kulkarni@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Junior Resident",
+    "designation": "Junior Student",
     "department": "Glaucoma",
     "yearOfTraining": "PGY-1"
   },
@@ -80,7 +80,7 @@
     "email": "rohan.mehta@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Senior Resident",
+    "designation": "Senior Student",
     "department": "Vitreoretinal Surgery",
     "yearOfTraining": "PGY-2"
   },
@@ -90,7 +90,7 @@
     "email": "deepika.nair@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Senior Resident",
+    "designation": "Senior Student",
     "department": "Neuro-ophthalmology",
     "yearOfTraining": "PGY-2"
   },
@@ -100,7 +100,7 @@
     "email": "arjun.krishnamurthy@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Senior Resident",
+    "designation": "Senior Student",
     "department": "Pediatric Ophthalmology",
     "yearOfTraining": "PGY-2"
   },
@@ -110,7 +110,7 @@
     "email": "kavya.desai@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Chief Resident",
+    "designation": "Chief Student",
     "department": "Cornea & Anterior Segment",
     "yearOfTraining": "PGY-3"
   },
@@ -120,7 +120,7 @@
     "email": "siddharth.joshi@lvpei.org",
     "role": "resident",
     "specialization": "Ophthalmology",
-    "designation": "Chief Resident",
+    "designation": "Chief Student",
     "department": "Oculoplastics",
     "yearOfTraining": "PGY-3"
   },

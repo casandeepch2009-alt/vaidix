@@ -1247,7 +1247,7 @@ function FacultyPrepPanel({ sessionId, sessionTitle, questionCount }: { sessionI
 
                 {/* Action cards — always visible */}
                 <div className="grid grid-cols-2 gap-2.5">
-                  <Link href={`/faculty/documents?session=${sessionId}`}
+                  <Link href={`/teacher/documents?session=${sessionId}`}
                     className="group flex items-center gap-2.5 rounded-xl border border-teal-200/50 bg-teal-50/60 px-3 py-2.5 transition-all hover:border-teal-300/70 hover:bg-teal-50 hover:shadow-sm dark:border-teal-800/30 dark:bg-teal-900/10">
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-teal-500/15">
                       <Layers className="size-4 text-teal-600 dark:text-teal-400" />
@@ -1257,7 +1257,7 @@ function FacultyPrepPanel({ sessionId, sessionTitle, questionCount }: { sessionI
                       <p className="text-[10px] text-teal-600/70 dark:text-teal-400/60">Browse &amp; attach existing docs</p>
                     </div>
                   </Link>
-                  <Link href="/faculty/decks/new"
+                  <Link href="/teacher/decks/new"
                     className="group flex items-center gap-2.5 rounded-xl border border-violet-200/50 bg-violet-50/60 px-3 py-2.5 transition-all hover:border-violet-300/70 hover:bg-violet-50 hover:shadow-sm dark:border-violet-800/30 dark:bg-violet-900/10">
                     <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
                       <Sparkles className="size-4 text-violet-600 dark:text-violet-400" />
@@ -1516,7 +1516,7 @@ function FacultyPrepPanel({ sessionId, sessionTitle, questionCount }: { sessionI
                 ) : (
                   <div className="rounded-xl border border-dashed border-border/60 py-6 text-center">
                     <p className="text-sm font-medium text-muted-foreground">No objectives yet</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground/70">Add objectives above — residents see these after the session.</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/70">Add objectives above — students see these after the session.</p>
                   </div>
                 )}
               </div>
@@ -1611,7 +1611,7 @@ function FacultyPrepPanel({ sessionId, sessionTitle, questionCount }: { sessionI
                 ) : (
                   <div className="rounded-xl border border-dashed border-border/60 py-6 text-center">
                     <p className="text-sm font-medium text-muted-foreground">No prerequisites set</p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground/70">Add what residents should know or complete before this session.</p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground/70">Add what students should know or complete before this session.</p>
                   </div>
                 )}
               </div>

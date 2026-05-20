@@ -178,7 +178,7 @@ export function CohortDetailDrawer({
       });
       const body = await res.json();
       if (!body.ok) {
-        setError(body.error?.message ?? 'Failed to update faculty mentor');
+        setError(body.error?.message ?? 'Failed to update teacher mentor');
         return;
       }
       const c = body.data.cohort;
@@ -351,7 +351,7 @@ export function CohortDetailDrawer({
                         onChange={(e) => setEditName(e.target.value)}
                         maxLength={100}
                         className="w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground focus:border-primary focus:outline-none"
-                        placeholder="e.g. PGY-1 Residents 2026"
+                        placeholder="e.g. PGY-1 Students 2026"
                       />
                     </div>
                     <div>
@@ -430,7 +430,7 @@ export function CohortDetailDrawer({
               {!editing && !confirmDelete && data && (
                 <section className="mb-6">
                   <h3 className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-widest text-muted-foreground">
-                    <GraduationCap className="size-3" /> Faculty mentor
+                    <GraduationCap className="size-3" /> Teacher mentor
                   </h3>
                   {data.faculty ? (
                     <div className="flex items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5">
@@ -446,7 +446,7 @@ export function CohortDetailDrawer({
                         onClick={() => void saveFaculty(null)}
                         disabled={savingFaculty}
                         className="rounded-lg p-1.5 text-muted-foreground transition hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-                        title="Clear faculty mentor"
+                        title="Clear teacher mentor"
                       >
                         {savingFaculty ? <Loader2 className="size-4 animate-spin" /> : <UserMinus className="size-4" />}
                       </button>
@@ -461,10 +461,10 @@ export function CohortDetailDrawer({
                           setFacultyPick(next);
                           if (next.length > 0) void saveFaculty(next[0].id);
                         }}
-                        placeholder="Search faculty…"
+                        placeholder="Search teachers…"
                       />
                       <p className="mt-1.5 text-xs text-muted-foreground">
-                        Optional. Pick one faculty member who mentors this cohort.
+                        Optional. Pick one teacher who mentors this cohort.
                       </p>
                     </>
                   )}
@@ -481,7 +481,7 @@ export function CohortDetailDrawer({
                     selected={picker}
                     onChange={setPicker}
                     excludeIds={existingIds}
-                    placeholder="Search residents, faculty, or anyone…"
+                    placeholder="Search students, teachers, or anyone…"
                   />
                   {picker.length > 0 && (
                     <button

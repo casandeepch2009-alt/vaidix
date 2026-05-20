@@ -265,7 +265,7 @@ enum DeckForgeStatus {
 }
 
 enum DeckForgeSource {
-  DOCUMENT // PDF / PPT / DOC / notes uploaded to /faculty/documents
+  DOCUMENT // PDF / PPT / DOC / notes uploaded to /teacher/documents
   TRANSCRIPT // Forged from a recording's transcript
   HYBRID // Both a document and a transcript (slides cite both)
 }

@@ -191,7 +191,7 @@ export function StyleProfileClient({ initialProfile, memoryOptIn }: Props) {
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
               When you forge a new deck, the AI reads these rules — distilled from your past edits — to
-              match your teaching style. Style memory is yours alone; no other faculty&apos;s
+              match your teaching style. Style memory is yours alone; no other teacher&apos;s
               preferences ever influence your decks.
             </p>
             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">

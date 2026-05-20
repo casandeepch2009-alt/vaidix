@@ -151,16 +151,16 @@ export function CohortsClient({ initial }: { initial: CohortRow[] }) {
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm font-medium">Faculty mentor</label>
+            <label className="text-sm font-medium">Teacher mentor</label>
             <p className="text-xs text-muted-foreground">
-              Optional — one faculty member who mentors this cohort. Can be set or changed later.
+              Optional — one teacher who mentors this cohort. Can be set or changed later.
             </p>
             <UserPicker
               single
               role={Role.FACULTY}
               selected={initialFaculty}
               onChange={setInitialFaculty}
-              placeholder="Search faculty…"
+              placeholder="Search teachers…"
             />
           </div>
 

@@ -52,7 +52,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ jobId: string 
     const rendered = await renderDeckPptxBuffer({ jobId, authorName: auth.user.name });
     if (!rendered) return jsonError('EMPTY_DECK', 'No slides to export', 422);
 
-    // Refresh the library copy so the .pptx in /faculty/documents matches the
+    // Refresh the library copy so the .pptx in /teacher/documents matches the
     // version the user just downloaded. Best-effort: a failure here must not
     // block the download response.
     await persistDeckAsDocument({ jobId });

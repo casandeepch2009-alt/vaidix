@@ -250,7 +250,7 @@ function ResidentDashboard() {
       <StaggerItem>
         <WelcomeBanner
           firstName={firstName}
-          subtitle={`${currentUser.yearOfTraining ?? 'Resident'} · ${currentUser.department ?? 'Ophthalmology'}`}
+          subtitle={`${currentUser.yearOfTraining ?? 'Student'} · ${currentUser.department ?? 'Ophthalmology'}`}
         />
       </StaggerItem>
 
@@ -258,7 +258,7 @@ function ResidentDashboard() {
       <StaggerItem>
         <QuickActionStrip
           actions={[
-            { label: 'Pearls',      hint: 'Faculty wisdom',     icon: Sparkles, href: '/pearls',     gradient: 'from-amber-500 via-orange-500 to-yellow-500', shadow: 'shadow-amber-500/30',  glow: 'bg-amber-400/20' },
+            { label: 'Pearls',      hint: 'Teacher wisdom',     icon: Sparkles, href: '/pearls',     gradient: 'from-amber-500 via-orange-500 to-yellow-500', shadow: 'shadow-amber-500/30',  glow: 'bg-amber-400/20' },
             { label: 'Sign Atlas',  hint: 'Image reference',    icon: Eye,      href: '/atlas',      gradient: 'from-blue-500 via-cyan-500 to-sky-500',       shadow: 'shadow-blue-500/30',   glow: 'bg-blue-400/20' },
             { label: 'Journal',     hint: 'Reflect on cases',   icon: BookOpen, href: '/journal',    gradient: 'from-violet-500 via-purple-500 to-fuchsia-500', shadow: 'shadow-violet-500/30', glow: 'bg-violet-400/20' },
             { label: 'Challenges',  hint: 'Test your skills',   icon: Target,   href: '/challenges', gradient: 'from-rose-500 via-pink-500 to-red-500',       shadow: 'shadow-rose-500/30',   glow: 'bg-rose-400/20' },
@@ -781,9 +781,9 @@ function ResidentRadar({
       <CardHeader className="flex flex-row items-center justify-between pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
           <Users className="size-4 text-primary" />
-          Resident radar
+          Student radar
         </CardTitle>
-        <Link href="/faculty/cohort" className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline dark:text-teal-300">
+        <Link href="/teacher/cohort" className="flex items-center gap-1 text-xs font-medium text-teal-700 hover:underline dark:text-teal-300">
           Full view <ArrowRight className="size-3" />
         </Link>
       </CardHeader>
@@ -796,8 +796,8 @@ function ResidentRadar({
         {!loading && learners.length === 0 && (
           <div className="rounded-2xl border border-dashed border-border py-8 text-center">
             <Users className="mx-auto size-6 text-muted-foreground/40" />
-            <p className="mt-2 text-sm font-medium text-foreground">No residents assigned yet</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Add residents to your cohort to track progress</p>
+            <p className="mt-2 text-sm font-medium text-foreground">No students assigned yet</p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Add students to your cohort to track progress</p>
           </div>
         )}
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
@@ -1304,8 +1304,8 @@ function FacultyDashboard() {
       <StaggerItem>
         <QuickActionStrip
           actions={[
-            { label: 'Record DOPS',     hint: 'Direct observation',    icon: Stethoscope, href: '/faculty/assess/dops', gradient: 'from-teal-500 via-emerald-500 to-cyan-500',   shadow: 'shadow-teal-500/30',   glow: 'bg-teal-400/20' },
-            { label: 'Forge a Deck',    hint: 'AI-built presentation', icon: Sparkles,    href: '/faculty/decks/new',   gradient: 'from-amber-500 via-orange-500 to-rose-500',   shadow: 'shadow-amber-500/30', glow: 'bg-amber-400/20' },
+            { label: 'Record DOPS',     hint: 'Direct observation',    icon: Stethoscope, href: '/teacher/assess/dops', gradient: 'from-teal-500 via-emerald-500 to-cyan-500',   shadow: 'shadow-teal-500/30',   glow: 'bg-teal-400/20' },
+            { label: 'Forge a Deck',    hint: 'AI-built presentation', icon: Sparkles,    href: '/teacher/decks/new',   gradient: 'from-amber-500 via-orange-500 to-rose-500',   shadow: 'shadow-amber-500/30', glow: 'bg-amber-400/20' },
             { label: 'Schedule Session',hint: 'Teaching & rounds',     icon: Calendar,    href: '/calendar/new',         gradient: 'from-violet-500 via-fuchsia-500 to-pink-500', shadow: 'shadow-violet-500/30',glow: 'bg-violet-400/20' },
           ]}
         />
@@ -1418,7 +1418,7 @@ function ProgramDirectorDashboard() {
       <StaggerItem>
         <GreetingBanner name={currentUser.name.split(' ').slice(1).join(' ')} subtitle={pdSubtitle} quote={
           pdStats && pdStats.totalResidents > 0
-            ? `${pdStats.totalResidents} residents · ${pdStats.onTrack} on track${pdStats.attention > 0 ? ` · ${pdStats.attention} need attention` : ''}`
+            ? `${pdStats.totalResidents} students · ${pdStats.onTrack} on track${pdStats.attention > 0 ? ` · ${pdStats.attention} need attention` : ''}`
             : undefined
         } />
       </StaggerItem>
@@ -1427,7 +1427,7 @@ function ProgramDirectorDashboard() {
       <StaggerItem>
         <QuickActionStrip
           actions={[
-            { label: 'Cohort Analytics',hint: 'Drill into EPAs',       icon: BarChart3,   href: '/faculty/cohort',     gradient: 'from-teal-500 via-emerald-500 to-cyan-500',   shadow: 'shadow-teal-500/30',   glow: 'bg-teal-400/20' },
+            { label: 'Cohort Analytics',hint: 'Drill into EPAs',       icon: BarChart3,   href: '/teacher/cohort',     gradient: 'from-teal-500 via-emerald-500 to-cyan-500',   shadow: 'shadow-teal-500/30',   glow: 'bg-teal-400/20' },
             { label: 'Approvals',       hint: 'Pending workflow',      icon: ClipboardCheck, href: '/inbox/approvals', gradient: 'from-amber-500 via-orange-500 to-rose-500',   shadow: 'shadow-amber-500/30',  glow: 'bg-amber-400/20' },
             { label: 'Schedule Session',hint: 'Teaching & rounds',     icon: Calendar,    href: '/calendar/new',         gradient: 'from-violet-500 via-fuchsia-500 to-pink-500', shadow: 'shadow-violet-500/30', glow: 'bg-violet-400/20' },
           ]}
@@ -1437,7 +1437,7 @@ function ProgramDirectorDashboard() {
       <StaggerItem>
         <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
           {([
-            { title: 'Total Residents', value: pdStats?.totalResidents ?? 0, icon: Users,         tone: 'teal'    as StatTone },
+            { title: 'Total Students',  value: pdStats?.totalResidents ?? 0, icon: Users,         tone: 'teal'    as StatTone },
             { title: 'On Track',        value: pdStats?.onTrack        ?? 0, icon: Star,          tone: 'emerald' as StatTone },
             { title: 'Needs Attention', value: pdStats?.attention      ?? 0, icon: AlertTriangle, tone: 'amber'   as StatTone },
             { title: 'Milestones Due',  value: pdStats?.milestonesDue  ?? 0, icon: Milestone,     tone: 'purple'  as StatTone },
@@ -1466,7 +1466,7 @@ function ProgramDirectorDashboard() {
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr>
-                      <th className="pb-3 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Resident</th>
+                      <th className="pb-3 pr-4 text-left text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Student</th>
                       {epaMatrix.epaLabels.map((l) => (<th key={l.code} className="pb-3 text-center text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{l.label}</th>))}
                     </tr>
                   </thead>
@@ -1541,7 +1541,7 @@ function ProgramDirectorDashboard() {
                 <div className="rounded-2xl border border-dashed border-border p-6 text-center">
                   <Shield className="mx-auto size-6 text-muted-foreground/40" />
                   <p className="mt-2 text-sm font-medium text-foreground">Accreditation tracking not yet configured</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Documentation, EPA, and faculty-evaluation rates will populate once the accreditation module ships.</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Documentation, EPA, and teacher-evaluation rates will populate once the accreditation module ships.</p>
                 </div>
               ) : (
                 <>
@@ -1555,7 +1555,7 @@ function ProgramDirectorDashboard() {
                   <div className="grid grid-cols-3 gap-2">
                     {[
                       { label: 'EPA',          value: accreditation.epaPct,         good: accreditation.epaPct         >= 80 },
-                      { label: 'Faculty Eval', value: accreditation.facultyEvalPct, good: accreditation.facultyEvalPct >= 80 },
+                      { label: 'Teacher Eval', value: accreditation.facultyEvalPct, good: accreditation.facultyEvalPct >= 80 },
                       { label: 'Case Logs',    value: accreditation.caseLogsPct,    good: accreditation.caseLogsPct    >= 80 },
                     ].map((item) => (
                       <div key={item.label} className="rounded-xl border border-border/50 bg-muted/30 p-3 text-center">
@@ -1686,7 +1686,7 @@ function ExternalLearnerDashboard() {
         <QuickActionStrip
           actions={[
             { label: 'Browse Cases',  hint: 'Clinical scenarios',  icon: BookOpen,  href: '/cases',     gradient: 'from-teal-500 via-emerald-500 to-cyan-500',   shadow: 'shadow-teal-500/30',   glow: 'bg-teal-400/20' },
-            { label: 'Pearls',        hint: 'Faculty wisdom',      icon: Sparkles,  href: '/pearls',    gradient: 'from-amber-500 via-orange-500 to-yellow-500', shadow: 'shadow-amber-500/30',  glow: 'bg-amber-400/20' },
+            { label: 'Pearls',        hint: 'Teacher wisdom',      icon: Sparkles,  href: '/pearls',    gradient: 'from-amber-500 via-orange-500 to-yellow-500', shadow: 'shadow-amber-500/30',  glow: 'bg-amber-400/20' },
             { label: 'Signs Atlas',   hint: 'Image library',       icon: Eye,       href: '/atlas',     gradient: 'from-violet-500 via-purple-500 to-fuchsia-500', shadow: 'shadow-violet-500/30', glow: 'bg-violet-400/20' },
             { label: 'Live Sessions', hint: 'Grand rounds',        icon: Video,     href: '/classroom', gradient: 'from-rose-500 via-pink-500 to-red-500',       shadow: 'shadow-rose-500/30',   glow: 'bg-rose-400/20' },
           ]}

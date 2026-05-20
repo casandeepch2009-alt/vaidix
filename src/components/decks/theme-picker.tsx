@@ -3,8 +3,8 @@
 // ════════════════════════════════════════════════════════════════════════════
 // ThemePicker — shared dropdown for selecting a deck theme
 // ════════════════════════════════════════════════════════════════════════════
-// Used by both the legacy editor (/faculty/decks/[jobId]) and the presentation
-// studio (/faculty/decks/[jobId]/studio). Theme is persisted via PATCH
+// Used by both the legacy editor (/teacher/decks/[jobId]) and the presentation
+// studio (/teacher/decks/[jobId]/studio). Theme is persisted via PATCH
 // /api/decks/[jobId] with { template: id } — the caller wires the callback.
 
 import { useEffect, useRef, useState } from 'react';

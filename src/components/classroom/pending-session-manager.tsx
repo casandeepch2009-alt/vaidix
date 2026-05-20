@@ -257,7 +257,7 @@ export function PendingSessionManager({ session, proposer, currentUser }: Pendin
             <div className="rounded-xl border border-border bg-muted/30 px-4 py-3">
               {isHost ? (
                 <p className="text-sm text-foreground">
-                  <strong>{proposer?.name ?? 'A program director'}</strong> proposed you host this session.
+                  <strong>{proposer?.name ?? 'An HOD'}</strong> proposed you host this session.
                   Approve to publish it on attendee calendars, or decline if it doesn&apos;t work for you.
                 </p>
               ) : isProposer ? (
@@ -267,7 +267,7 @@ export function PendingSessionManager({ session, proposer, currentUser }: Pendin
                 </p>
               ) : isAdminOrPD ? (
                 <p className="text-sm text-foreground">
-                  This session is awaiting <strong>{session.host.name}</strong>&apos;s approval. As {currentUser.role === 'ADMIN' ? 'an admin' : 'a program director'}, you can edit or cancel it.
+                  This session is awaiting <strong>{session.host.name}</strong>&apos;s approval. As {currentUser.role === 'ADMIN' ? 'an admin' : 'an HOD'}, you can edit or cancel it.
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">

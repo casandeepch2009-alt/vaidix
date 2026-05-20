@@ -260,7 +260,7 @@ export function PollsManager({ sessionId }: { sessionId: string }) {
       <div className="flex items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-bold uppercase tracking-widest text-muted-foreground">Pre-session polls</p>
-          <p className="text-[12px] text-muted-foreground/80">Vote-counted multi-choice questions residents answer before the session. The same row can be re-fired live in-session.</p>
+          <p className="text-[12px] text-muted-foreground/80">Vote-counted multi-choice questions students answer before the session. The same row can be re-fired live in-session.</p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
@@ -403,7 +403,7 @@ export function PollsManager({ sessionId }: { sessionId: string }) {
                         <button
                           onClick={() => void unpublish(h.id)}
                           className="inline-flex items-center gap-1 rounded-lg border border-amber-200 bg-white px-2 py-1 text-[10px] font-bold text-amber-700 transition hover:bg-amber-50 dark:border-amber-700/40 dark:bg-card"
-                          title="Hide from residents (keeps responses)"
+                          title="Hide from students (keeps responses)"
                         >
                           <EyeOff className="size-3" /> Hide
                         </button>

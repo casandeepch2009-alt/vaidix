@@ -128,16 +128,16 @@ async function main() {
     );
   }
 
-  // ─── 2. UI — does /faculty/documents render for each privileged role? ─
-  step('UI — /faculty/documents direct URL for each role');
-  const facLib = await htmlGet(jars.faculty, '/faculty/documents');
-  expect(facLib.status === 200, `Faculty GET /faculty/documents → ${facLib.status}`);
-  const pdLib = await htmlGet(jars.pd, '/faculty/documents');
+  // ─── 2. UI — does /teacher/documents render for each privileged role? ─
+  step('UI — /teacher/documents direct URL for each role');
+  const facLib = await htmlGet(jars.faculty, '/teacher/documents');
+  expect(facLib.status === 200, `Faculty GET /teacher/documents → ${facLib.status}`);
+  const pdLib = await htmlGet(jars.pd, '/teacher/documents');
   expect(pdLib.status === 200 || pdLib.status === 403 || pdLib.status === 307,
-    `PD GET /faculty/documents → ${pdLib.status} (any of 200/403/307 documents the gate behaviour)`);
-  const resLib = await htmlGet(jars.resident, '/faculty/documents');
+    `PD GET /teacher/documents → ${pdLib.status} (any of 200/403/307 documents the gate behaviour)`);
+  const resLib = await htmlGet(jars.resident, '/teacher/documents');
   expect(resLib.status === 403 || resLib.status === 307 || resLib.status === 404,
-    `Resident GET /faculty/documents → ${resLib.status} (should be blocked)`);
+    `Resident GET /teacher/documents → ${resLib.status} (should be blocked)`);
 
   // ─── 3. API — POST /api/documents (upload draft) for every role ─────────
   step('API — POST /api/documents (with all required fields per real schema)');

@@ -130,7 +130,7 @@ const ALL_ITEMS = reviewItemsData as ReviewItem[]
 
 const AUDIENCE_CONFIG = {
   patient_family: { icon: User, label: 'Patient / Family', tone: 'Drop jargon. Use analogy.', color: 'text-rose-600', bg: 'bg-rose-500/10', border: 'border-rose-500/30' },
-  peer: { icon: Users, label: 'Peer Resident', tone: 'Show mechanism. Be precise.', color: 'text-blue-600', bg: 'bg-blue-500/10', border: 'border-blue-500/30' },
+  peer: { icon: Users, label: 'Peer Student', tone: 'Show mechanism. Be precise.', color: 'text-blue-600', bg: 'bg-blue-500/10', border: 'border-blue-500/30' },
   senior: { icon: UserCheck, label: 'Senior Consultant', tone: '30 seconds. Compress. Surface red flags.', color: 'text-emerald-600', bg: 'bg-emerald-500/10', border: 'border-emerald-500/30' },
 }
 
